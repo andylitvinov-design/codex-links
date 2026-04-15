@@ -1,0 +1,12 @@
+{
+  "name": "codex-links",
+  "compatibility_date": "2026-04-14",
+  "pages_build_output_dir": "public",
+  "kv_namespaces": [
+    {
+      "binding": "LINKS_STORE",
+      "id": "0691e3bf26bd46199b829252d92b88ef",
+      "preview_id": "0691e3bf26bd46199b829252d92b88ef"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex Links</title>
+    <link rel="stylesheet" href="/styles.css?v=20260415-0100" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="chat-shell">
+        <header class="chat-header">
+          <h1>Ссылки</h1>
+          <div class="header-actions">
+            <a class="button button-secondary header-link-button" href="https://brain-management.pages.dev" target="_blank" rel="noreferrer">Ссылка</a>
+            <button class="button button-secondary refresh-button" id="refresh-button" type="button">Обновить</button>
+          </div>
+        </header>
+
+        <section class="command-wrap">
+          <form id="command-form" class="command-form">
+            <div class="thread-select-row">
+              <label class="thread-select-field">
+                <span class="field-label">Беседа Codex</span>
+                <select id="command-thread-select" name="thread"></select>
+              </label>
+              <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
+            </div>
+            <div class="thread-settings-bar">
+              <span id="thread-settings-summary" class="form-status">Показываются все чаты.</span>
+            </div>
+            <section id="thread-settings-panel" class="thread-settings-panel" hidden>
+              <label>
+                <span class="field-label">Поиск по чатам</span>
+                <input id="thread-settings-search" type="search" placeholder="Название категории или чата" />
+              </label>
+              <div class="thread-settings-actions">
+                <button class="button button-secondary" id="thread-settings-select-all" type="button">Выбрать все</button>
+                <button class="button button-secondary" id="thread-settings-clear" type="button">Снять всё</button>
+                <button class="button button-secondary" id="thread-settings-save" type="button">Сохранить выбор</button>
+              </div>
+              <div id="thread-settings-list" class="thread-settings-list" aria-live="polite"></div>
+            </section>
+            <label>
+              <span class="field-label">Фото</span>
+              <input id="command-photo-input" name="photo" type="file" accept="image/*" />
+            </label>
+            <p id="command-photo-status" class="form-status command-photo-status">Фото не выбрано.</p>
+            <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex"></textarea>
+            <div class="command-actions">
+              <span id="command-status" class="form-status" aria-live="polite"></span>
+              <button class="button button-secondary" type="submit">Отправить в Codex</button>
+            </div>
+          </form>
+          <div id="command-timeline" class="command-timeline" aria-live="polite"></div>
+        </section>
+
+      </section>
+    </main>
+
+    <script type="module" src="/app.js?v=20260415-0100"></script>
+  </body>
+</html>
