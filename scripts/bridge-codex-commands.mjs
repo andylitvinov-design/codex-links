@@ -32,7 +32,29 @@ function getFileExtension(contentType) {
   if (contentType === "image/png") return "png";
   if (contentType === "image/webp") return "webp";
   if (contentType === "image/gif") return "gif";
+  if (contentType === "image/heic") return "heic";
+  if (contentType === "image/heif") return "heif";
   return "jpg";
+}
+
+function canPassImageDirectly(contentType) {
+  return contentType === "image/jpeg"
+    || contentType === "image/png"
+    || contentType === "image/webp"
+    || contentType === "image/gif";
+}
+
+function execFileAsync(file, args) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(String(stderr || error.message || `Failed to run ${file}`)));
+        return;
+      }
+
+      resolve({ stdout, stderr });
+    });
+  });
 }
 
 function isRealThreadId(value) {
@@ -70,11 +92,23 @@ async function materializePhoto(command) {
   const base64 = match[2];
   const ext = getFileExtension(contentType);
   const dir = join(tmpdir(), "codex-links-bridge");
-  const path = join(dir, `${command.id}.${ext}`);
+  const sourcePath = join(dir, `${command.id}.${ext}`);
 
   await mkdir(dir, { recursive: true });
-  await writeFile(path, Buffer.from(base64, "base64"));
-  return path;
+  await writeFile(sourcePath, Buffer.from(base64, "base64"));
+
+  if (canPassImageDirectly(contentType)) {
+    return sourcePath;
+  }
+
+  const convertedPath = join(dir, `${command.id}.jpg`);
+
+  try {
+    await execFileAsync("sips", ["-s", "format", "jpeg", sourcePath, "--out", convertedPath]);
+    return convertedPath;
+  } catch (error) {
+    throw new Error(`Unsupported photo format ${contentType}: ${error.message}`);
+  }
 }
 
 function buildInput(command, photoPath) {

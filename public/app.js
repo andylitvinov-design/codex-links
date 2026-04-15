@@ -408,19 +408,26 @@ function renderPhotoStatus() {
 }
 
 async function readFileAsDataUrl(file) {
-  try {
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
 
-    for (let index = 0; index < bytes.length; index += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-    }
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
 
-    return `data:${file.type || "image/jpeg"};base64,${window.btoa(binary)}`;
-  } catch {
-    throw new Error("Не удалось прочитать фото.");
-  }
+      if (!result.startsWith("data:image/")) {
+        reject(new Error("Не удалось прочитать фото."));
+        return;
+      }
+
+      resolve(result);
+    };
+
+    reader.onerror = () => {
+      reject(new Error("Не удалось прочитать фото."));
+    };
+
+    reader.readAsDataURL(file);
+  });
 }
 
 function renderCommands() {

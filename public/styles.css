@@ -305,6 +305,10 @@ textarea {
   padding: 0;
 }
 
+.thread-settings-item-toggle {
+  justify-content: flex-start;
+}
+
 .command-timeline {
   display: grid;
   gap: 6px;
