@@ -136,8 +136,24 @@ export async function insertCommand(env, input) {
   }
 
   const current = await readCommands(env);
-  current.push(normalized.value);
-  await writeCommands(env, current);
+  const supersededAt = new Date().toISOString();
+  const next = current.map((command) => {
+    if (
+      command?.status === "pending" &&
+      String(command?.clientId || "").trim() === normalized.value.clientId &&
+      String(command?.threadId || "").trim() === normalized.value.threadId
+    ) {
+      return {
+        ...command,
+        status: "superseded",
+        supersededAt
+      };
+    }
+
+    return command;
+  });
+  next.push(normalized.value);
+  await writeCommands(env, next);
 
   return normalized;
 }

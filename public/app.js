@@ -350,6 +350,7 @@ function renderCommandThreads() {
 function formatCommandStage(status) {
   if (status === "acked") return "Появилось в Codex";
   if (status === "pending") return "Ждёт отправки в Codex";
+  if (status === "superseded") return "Заменено более новым сообщением";
   return status || "Неизвестно";
 }
 
