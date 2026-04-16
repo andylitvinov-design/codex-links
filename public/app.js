@@ -20,7 +20,7 @@ const state = {
   }
 };
 
-const BUILD_VERSION = "20260415-2110";
+const BUILD_VERSION = "20260416-0115";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -644,7 +644,14 @@ function buildTimelineSignature(items, context = {}) {
       commandError: entry.command?.errorMessage || "",
       commandPrUrl: entry.command?.prUrl || "",
       commandBranch: entry.command?.branchName || "",
-      linkedCommandId: entry.linkedCommand?.id || entry.message?.commandId || ""
+      linkedCommandId: entry.linkedCommand?.id || entry.message?.commandId || "",
+      replies: (entry.replies || []).map((reply) => ({
+        id: reply.id,
+        createdAt: reply.createdAt,
+        threadId: reply.threadId,
+        textLength: String(reply.text || "").length,
+        linkedCommandId: reply.linkedCommand?.id || reply.message?.commandId || ""
+      }))
     })),
     openAnswers: Object.keys(state.answerOpenUntil)
       .filter((id) => state.answerOpenUntil[id] > Date.now())
@@ -723,6 +730,84 @@ function isSystemConversationEntry(entry) {
   );
 }
 
+function renderAssistantReplyMarkup(replyEntry) {
+  const message = replyEntry?.message || null;
+  const linkedCommand = replyEntry?.linkedCommand || null;
+  const detailsId = String(message?.id || "").trim();
+  const commandMeta = linkedCommand?.branchName
+    ? `<p>Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
+    : "";
+  const prMeta = linkedCommand?.prUrl
+    ? `<p><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
+    : "";
+
+  return `
+    <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
+      <summary>Ответ Codex</summary>
+      <p>${escapeHtml(replyEntry?.text || "")}</p>
+      ${prMeta}
+      ${commandMeta}
+      <div class="command-answer-actions">
+        <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
+          Ответить
+        </button>
+      </div>
+    </details>
+  `;
+}
+
+function bindAssistantReplyInteractions(container, replies) {
+  const normalizedReplies = Array.isArray(replies) ? replies : [];
+
+  container.querySelectorAll(".command-answer").forEach((details) => {
+    const detailsId = String(details.dataset.entryId || "").trim();
+
+    if (detailsId && state.answerOpenUntil[detailsId] && state.answerOpenUntil[detailsId] > Date.now()) {
+      details.open = true;
+    }
+
+    details.addEventListener("toggle", () => {
+      if (!detailsId) {
+        return;
+      }
+
+      if (details.open) {
+        state.answerOpenUntil[detailsId] = Date.now() + 2 * 60 * 1000;
+      } else {
+        delete state.answerOpenUntil[detailsId];
+      }
+
+      scheduleAnswerAutoClose();
+    });
+  });
+
+  container.querySelectorAll(".command-reply-link").forEach((replyLink) => {
+    replyLink.addEventListener("click", () => {
+      const threadId = String(replyLink.dataset.threadId || "").trim();
+      const reply = normalizedReplies.find((entry) => String(entry?.threadId || "").trim() === threadId) || normalizedReplies[0];
+      const message = reply?.message || null;
+      const didActivate = activateReplyThread(threadId);
+
+      if (!didActivate || !message) {
+        setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
+        return;
+      }
+
+      applyReplyToCommandInput(message, {
+        force: true,
+        threadId
+      });
+
+      commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => {
+        commandInput.focus();
+      }, 180);
+
+      setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, reply?.threadLabel || "")}`);
+    });
+  });
+}
+
 function renderCommands() {
   pruneExpiredAnswerState();
   const showAllMessages = storage.showAllMessages;
@@ -744,6 +829,32 @@ function renderCommands() {
       .map((message) => String(message.commandId || "").trim())
       .filter(Boolean)
   );
+  const assistantRepliesByCommandId = new Map();
+
+  visibleMessages
+    .filter((message) => message?.role === "assistant")
+    .forEach((message) => {
+      const commandId = String(message.commandId || "").trim();
+
+      if (!commandId) {
+        return;
+      }
+
+      const entry = {
+        id: `message:${message.id}`,
+        kind: "message",
+        role: "assistant",
+        text: message.text || "",
+        createdAt: message.createdAt,
+        threadId: message.threadId || "",
+        threadLabel: message.threadLabel || "",
+        message,
+        linkedCommand: commandsById.get(commandId) || null
+      };
+      const items = assistantRepliesByCommandId.get(commandId) || [];
+      items.push(entry);
+      assistantRepliesByCommandId.set(commandId, items);
+    });
 
   const timelineItems = [
     ...visibleCommands
@@ -756,11 +867,16 @@ function renderCommands() {
         createdAt: command.createdAt,
         threadId: command.threadId || "",
         threadLabel: command.threadLabel || "",
-        command
+        command,
+        replies: assistantRepliesByCommandId.get(String(command.id || "").trim()) || []
       })),
     ...visibleMessages
       .filter((message) => {
         const commandId = String(message.commandId || "").trim();
+        if (message.role === "assistant" && commandId) {
+          return false;
+        }
+
         return !(message.role === "user" && commandId && commandsById.has(commandId));
       })
       .map((message) => ({
@@ -772,7 +888,10 @@ function renderCommands() {
         threadId: message.threadId || "",
         threadLabel: message.threadLabel || "",
         message,
-        linkedCommand: commandsById.get(String(message.commandId || "").trim()) || null
+        linkedCommand: commandsById.get(String(message.commandId || "").trim()) || null,
+        replies: message.role === "user"
+          ? (assistantRepliesByCommandId.get(String(message.commandId || "").trim()) || [])
+          : []
       }))
   ].sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
 
@@ -811,6 +930,7 @@ function renderCommands() {
       const fallbackNote = getLocalBridgeFallbackMessage(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
+      const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
 
       element.innerHTML = `
         <div class="command-item-top">
@@ -820,49 +940,27 @@ function renderCommands() {
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
         ${fallbackNote ? `<div class="command-fallback-note">${escapeHtml(fallbackNote)}</div>` : ""}
+        ${repliesMarkup}
         <div class="command-item-top">
           <span>${formatCommandStage(command)}</span>
           ${threadMeta}
         </div>
       `;
 
+      bindAssistantReplyInteractions(element, entry.replies);
       fragment.appendChild(element);
       return;
     }
 
     const message = entry.message;
     const linkedCommand = entry.linkedCommand;
-    const detailsId = String(message?.id || "").trim();
     const isAssistant = entry.role === "assistant";
     const statusLabel = isAssistant
       ? (linkedCommand?.prUrl ? "PR готов" : "Ответ получен")
       : "Сообщение в истории";
-    const replyAction = isAssistant
-      ? `
-        <div class="command-answer-actions">
-          <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(entry.threadId || "")}">
-            Ответить
-          </button>
-        </div>
-      `
-      : "";
-    const prMeta = isAssistant && linkedCommand?.prUrl
-      ? `<p><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
-      : "";
-    const branchMeta = isAssistant && linkedCommand?.branchName
-      ? `<p>Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
-      : "";
     const body = isAssistant
-      ? `
-        <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
-          <summary>Ответ Codex</summary>
-          <p>${escapeHtml(entry.text)}</p>
-          ${prMeta}
-          ${branchMeta}
-          ${replyAction}
-        </details>
-      `
-      : `<p>${escapeHtml(entry.text)}</p>`;
+      ? renderAssistantReplyMarkup(entry)
+      : `<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
 
     element.innerHTML = `
       <div class="command-item-top">
@@ -876,61 +974,12 @@ function renderCommands() {
       </div>
     `;
 
-    if (isAssistant) {
-      const details = element.querySelector(".command-answer");
-
-      if (details) {
-        if (detailsId && state.answerOpenUntil[detailsId] && state.answerOpenUntil[detailsId] > Date.now()) {
-          details.open = true;
-        }
-
-        details.addEventListener("toggle", () => {
-          if (!detailsId) {
-            return;
-          }
-
-          if (details.open) {
-            state.answerOpenUntil[detailsId] = Date.now() + 2 * 60 * 1000;
-          } else {
-            delete state.answerOpenUntil[detailsId];
-          }
-
-          scheduleAnswerAutoClose();
-        });
-      }
-
-      element.querySelector(".command-reply-link")?.addEventListener("click", () => {
-        const threadId = String(entry.threadId || "").trim();
-        const didActivate = activateReplyThread(threadId);
-
-        if (!didActivate) {
-          setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
-          return;
-        }
-
-        applyReplyToCommandInput(message, {
-          force: true,
-          threadId
-        });
-        commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
-        window.setTimeout(() => {
-          commandInput.focus();
-        }, 180);
-
-        setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, entry.threadLabel || "")}`);
-      });
-    }
-
+    bindAssistantReplyInteractions(element, isAssistant ? [entry] : entry.replies);
     fragment.appendChild(element);
   });
 
   commandTimeline.appendChild(fragment);
-
-  if (timelineItems.length !== state.lastRenderedTimelineSize) {
-    commandTimeline.scrollTop = 0;
-    state.lastRenderedTimelineSize = timelineItems.length;
-  }
-
+  state.lastRenderedTimelineSize = timelineItems.length;
   scheduleAnswerAutoClose();
 }
 
