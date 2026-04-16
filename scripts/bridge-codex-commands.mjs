@@ -3,19 +3,34 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { withCodexAppServer } from "./codex-app-rpc.mjs";
 
 const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
-const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
+const EXEC_TIMEOUT_MS = 4 * 60 * 1000;
+const CLAIM_LEASE_MS = 5 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 15 * 1000;
+const BRIDGE_RUN_TIMEOUT_MS = 10 * 60 * 1000;
+const LEASE_EXTENSION_MS = 5 * 60 * 1000;
+const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
+const IDLE_DRAIN_WINDOW_MS = 20 * 1000;
+const IDLE_DRAIN_POLL_MS = 1500;
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
   process.exit(1);
 }
 
+const bridgeRunWatchdog = setTimeout(() => {
+  console.error(`Bridge run exceeded ${BRIDGE_RUN_TIMEOUT_MS}ms and was aborted.`);
+  process.exit(1);
+}, BRIDGE_RUN_TIMEOUT_MS);
+
+bridgeRunWatchdog.unref();
+
 function getPendingUrl() {
   const url = new URL("/api/commands", baseUrl);
-  url.searchParams.set("status", "pending");
+  url.searchParams.set("scope", "recent");
   url.searchParams.set("token", token);
   return url.toString();
 }
@@ -63,6 +78,13 @@ function isRealThreadId(value) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(resource, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  return fetch(resource, {
+    ...init,
+    signal: AbortSignal.timeout(timeoutMs)
+  });
 }
 
 async function getLegacyLinksThreadId() {
@@ -113,14 +135,12 @@ async function materializePhoto(command) {
 
 function buildInput(command, photoPath) {
   const items = [];
-  const text = String(command?.text || "").trim();
-  const createdAt = String(command?.createdAt || "").trim();
-  const prefix = createdAt ? `Site command (${createdAt})` : "Site command";
+  const text = sanitizeBridgeText(command?.text);
 
   if (text) {
     items.push({
       type: "text",
-      text: `${prefix}: ${text}`,
+      text,
       text_elements: []
     });
   }
@@ -135,38 +155,28 @@ function buildInput(command, photoPath) {
   return items;
 }
 
-async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = 10 * 60 * 1000) {
-  const startedAt = Date.now();
+function sanitizeBridgeText(rawText) {
+  const text = String(rawText || "").replace(/\r/g, "").trim();
 
-  while (Date.now() - startedAt < timeoutMs) {
-    const response = await request("thread/read", {
-      threadId,
-      includeTurns: true
-    });
-    const turns = Array.isArray(response?.thread?.turns) ? response.thread.turns : [];
-    const turn = turns.find((entry) => String(entry?.id || "").trim() === turnId);
-
-    if (turn) {
-      const status = String(turn.status || "").trim().toLowerCase();
-
-      if (status === "completed") {
-        return turn;
-      }
-
-      if (status === "interrupted" || status === "errored" || status === "failed") {
-        throw new Error(`Turn ${turnId} finished with status ${status}.`);
-      }
-    }
-
-    await sleep(1500);
+  if (!text) {
+    return "";
   }
 
-  throw new Error(`Timed out waiting for turn ${turnId} in thread ${threadId}.`);
+  if (/(^|\n)(Codex|Вы)\n\d{1,2}\s.+?\n/s.test(text) && /Ответ Codex/.test(text)) {
+    const parts = text.split(/\nВы\n\d{1,2}\s.+?\n/g).map((entry) => entry.trim()).filter(Boolean);
+
+    if (parts.length) {
+      return parts.at(-1) || "";
+    }
+  }
+
+  return text;
 }
 
 function runCodexResume(threadId, prompt, photoPath) {
+  const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
   return new Promise((resolve, reject) => {
-    const outputPath = join(tmpdir(), `codex-links-output-${crypto.randomUUID()}.txt`);
+    const outputPath = join(tmpdir(), `codex-links-output-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
     const args = [
       "exec",
       "resume",
@@ -186,7 +196,7 @@ function runCodexResume(threadId, prompt, photoPath) {
 
     execFile(codexBin, args, {
       cwd: process.cwd(),
-      timeout: 45 * 1000,
+      timeout: EXEC_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024
     }, async (error, stdout, stderr) => {
       const result = {
@@ -209,8 +219,43 @@ function runCodexResume(threadId, prompt, photoPath) {
   });
 }
 
-async function fetchPendingCommands() {
-  const response = await fetch(getPendingUrl(), {
+async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC_TIMEOUT_MS, options = {}) {
+  const startedAt = Date.now();
+  let lastHeartbeatAt = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (typeof options.onHeartbeat === "function" && Date.now() - lastHeartbeatAt >= TURN_PROGRESS_HEARTBEAT_MS) {
+      lastHeartbeatAt = Date.now();
+      await options.onHeartbeat();
+    }
+
+    const response = await request("thread/read", {
+      threadId,
+      includeTurns: true
+    });
+    const turns = Array.isArray(response?.thread?.turns) ? response.thread.turns : [];
+    const turn = turns.find((entry) => String(entry?.id || "").trim() === turnId);
+
+    if (turn) {
+      const status = String(turn?.status || "").trim().toLowerCase();
+
+      if (status === "completed" || status === "interrupted") {
+        return turn;
+      }
+
+      if (status === "errored" || status === "failed") {
+        throw new Error(`Turn ${turnId} finished with status ${status}.`);
+      }
+    }
+
+    await sleep(1200);
+  }
+
+  throw new Error(`Timed out waiting for turn ${turnId} in thread ${threadId}.`);
+}
+
+async function fetchRecentCommands() {
+  const response = await fetchWithTimeout(getPendingUrl(), {
     headers: {
       accept: "application/json"
     }
@@ -224,12 +269,62 @@ async function fetchPendingCommands() {
   return Array.isArray(data.commands) ? data.commands : [];
 }
 
+async function claimNextCommand() {
+  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-write-token": token
+    },
+    body: JSON.stringify({
+      action: "claim",
+      processorId: "launchd-bridge",
+      leaseMs: CLAIM_LEASE_MS
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to claim command: ${response.status} ${body}`);
+  }
+
+  const data = await response.json();
+  return data.command || null;
+}
+
+async function updateProgress(commandId, progressStage) {
+  if (!commandId || !progressStage) {
+    return;
+  }
+
+  const processingLeaseUntil = new Date(Date.now() + LEASE_EXTENSION_MS).toISOString();
+  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-write-token": token
+    },
+    body: JSON.stringify({
+      action: "progress",
+      id: commandId,
+      progressStage,
+      progressUpdatedAt: new Date().toISOString(),
+      processingLeaseUntil
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to update command progress: ${response.status} ${body}`);
+  }
+}
+
 async function acknowledge(ids) {
   if (!ids.length) {
     return;
   }
 
-  const response = await fetch(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -252,7 +347,7 @@ async function syncMessages(messages) {
     return;
   }
 
-  const response = await fetch(getMessagesUrl(), {
+  const response = await fetchWithTimeout(getMessagesUrl(), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -268,7 +363,7 @@ async function syncMessages(messages) {
 }
 
 async function publishBridgeStatus(status) {
-  const response = await fetch(getStatusUrl(), {
+  const response = await fetchWithTimeout(getStatusUrl(), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -306,6 +401,117 @@ function getImmediateAssistantText(result) {
   return stdout;
 }
 
+function extractTurnText(item) {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+
+  if (typeof item.text === "string" && item.text.trim()) {
+    return item.text.trim();
+  }
+
+  if (Array.isArray(item.content)) {
+    return item.content
+      .map((entry) => String(entry?.text || "").trim())
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  return "";
+}
+
+function findTurnForCommand(turns, command) {
+  const commandText = String(command?.text || "").trim();
+  const normalizedCommandText = commandText.replace(/\s+/g, " ").trim();
+
+  if (!normalizedCommandText) {
+    return null;
+  }
+
+  const reversed = [...turns].reverse();
+
+  return reversed.find((turn) => {
+    const items = Array.isArray(turn?.items) ? turn.items : [];
+
+    return items.some((item) => {
+      if (item?.type !== "userMessage") {
+        return false;
+      }
+
+      const turnText = extractTurnText(item).replace(/\s+/g, " ").trim();
+      return turnText === normalizedCommandText || turnText.includes(normalizedCommandText);
+    });
+  }) || null;
+}
+
+function getTurnAgentMessages(turn) {
+  const items = Array.isArray(turn?.items) ? turn.items : [];
+
+  return items
+    .filter((item) => item?.type === "agentMessage")
+    .map((item) => ({
+      text: String(item?.text || "").trim(),
+      phase: String(item?.phase || "").trim().toLowerCase()
+    }))
+    .filter((item) => item.text);
+}
+
+function getAssistantTextFromTurn(turn) {
+  const status = String(turn?.status || "").trim().toLowerCase();
+  const agentMessages = getTurnAgentMessages(turn);
+  const finalMessage = [...agentMessages].reverse().find((entry) => entry.phase !== "commentary")?.text || "";
+  const lastMessage = agentMessages.at(-1)?.text || "";
+
+  if (finalMessage) {
+    return finalMessage;
+  }
+
+  if (lastMessage) {
+    if (status === "interrupted") {
+      return `Codex начал выполнять задачу, но ответ был прерван до финального сообщения.\n\nПоследнее состояние:\n${lastMessage}`;
+    }
+
+    return lastMessage;
+  }
+
+  return "";
+}
+
+async function runTurnStart(threadId, input, options = {}) {
+  return withCodexAppServer(async ({ request }) => {
+    const started = await request("turn/start", {
+      threadId,
+      input
+    });
+    const turnId = String(started?.turn?.id || "").trim();
+
+    if (!turnId) {
+      throw new Error("turn/start did not return turn id.");
+    }
+
+    return waitForTurnCompletion(request, threadId, turnId, EXEC_TIMEOUT_MS, options);
+  });
+}
+
+async function getThreadFallbackAssistantText(command, threadId) {
+  return withCodexAppServer(async ({ request }) => {
+    const response = await request("thread/read", {
+      threadId,
+      includeTurns: true
+    });
+    const turns = Array.isArray(response?.thread?.turns) ? response.thread.turns : [];
+    const turn = findTurnForCommand(turns, command);
+
+    if (!turn) {
+      return "";
+    }
+
+    const status = String(turn?.status || "").trim().toLowerCase();
+    const text = getAssistantTextFromTurn(turn);
+    return text || (status === "interrupted" ? "" : "");
+  });
+}
+
 function createAssistantMessage(command, threadId, threadLabel, text, createdAt = new Date().toISOString()) {
   return {
     id: createMessageId(threadId, createdAt, text),
@@ -329,27 +535,62 @@ function getFailureAssistantText(error) {
   return `Не удалось получить ответ от Codex: ${message || "неизвестная ошибка"}`;
 }
 
-const pending = (await fetchPendingCommands())
-  .sort((left, right) => String(right?.createdAt || "").localeCompare(String(left?.createdAt || "")));
+const initialCommands = await fetchRecentCommands();
+const initialQueued = initialCommands
+  .filter((command) => command?.status === "queued")
+  .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));
+const initialProcessing = initialCommands
+  .filter((command) => command?.status === "processing")
+  .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));
 
 const completed = [];
 const failed = [];
 const syncedMessages = [];
 
+async function flushCompletedBatch(batchCompleted, batchMessages) {
+  if (!batchCompleted.length && !batchMessages.length) {
+    return;
+  }
+
+  if (batchCompleted.length) {
+    await acknowledge(batchCompleted.map((command) => command.id));
+  }
+
+  if (batchMessages.length) {
+    await syncMessages(batchMessages);
+  }
+}
+
 const legacyLinksThreadId = await getLegacyLinksThreadId();
+let idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
 
 await publishBridgeStatus({
   bridgeOnline: true,
   state: "running",
   lastRunAt: new Date().toISOString(),
-  pendingCount: pending.length,
-  oldestPendingAt: pending.length ? pending[pending.length - 1]?.createdAt || "" : "",
+  pendingCount: initialQueued.length + initialProcessing.length,
+  oldestPendingAt: initialQueued[0]?.createdAt || initialProcessing[0]?.createdAt || "",
   lastDeliveredCount: 0,
   lastError: ""
 });
 
-for (const command of pending) {
+while (true) {
+  const command = await claimNextCommand();
+
+  if (!command) {
+    if (Date.now() >= idleDrainUntil) {
+      break;
+    }
+
+    await sleep(IDLE_DRAIN_POLL_MS);
+    continue;
+  }
+
+  idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
+
   try {
+    await updateProgress(command.id, "claimed");
+
     let threadId = String(command?.threadId || "").trim();
     const threadLabel = String(command?.threadLabel || "").trim();
 
@@ -366,6 +607,7 @@ for (const command of pending) {
       throw new Error("Missing threadId.");
     }
 
+    await updateProgress(command.id, "preparing-input");
     const photoPath = await materializePhoto(command);
     const input = buildInput(command, photoPath);
 
@@ -383,32 +625,76 @@ for (const command of pending) {
       throw new Error(`Command ${command.id} has no CLI-deliverable content.`);
     }
 
-    const result = await runCodexResume(threadId, prompt || "See attached image and respond.", photoPath);
-    const ackedAt = new Date().toISOString();
-    const assistantText = getImmediateAssistantText(result);
+    await updateProgress(command.id, "sending-to-codex");
+    let assistantText = "";
 
-    completed.push({
+    try {
+      const turn = await runTurnStart(threadId, input, {
+        onHeartbeat: async () => {
+          await updateProgress(command.id, "waiting-for-codex");
+        }
+      });
+      assistantText = getAssistantTextFromTurn(turn);
+    } catch (appServerError) {
+      const result = await runCodexResume(threadId, prompt || "See attached image and respond.", photoPath);
+      assistantText = getImmediateAssistantText(result);
+    }
+
+    const ackedAt = new Date().toISOString();
+
+    if (!assistantText) {
+      await updateProgress(command.id, "reading-codex-reply");
+      assistantText = await getThreadFallbackAssistantText(command, threadId);
+    }
+
+    if (!assistantText) {
+      assistantText = "Codex принял команду, но не вернул текст ответа. Я остановил запрос, чтобы очередь не зависала. Повторите запрос ещё раз.";
+    }
+
+    await updateProgress(command.id, "saving-reply");
+
+    const completedEntry = {
       id: command.id,
       threadId,
       threadLabel: command.threadLabel || threadId,
       ackedAt
-    });
+    };
+    const syncedMessage = createAssistantMessage(command, threadId, command.threadLabel || threadId, assistantText, ackedAt);
 
-    if (assistantText) {
-      syncedMessages.push(createAssistantMessage(command, threadId, command.threadLabel || threadId, assistantText, ackedAt));
-    }
+    completed.push(completedEntry);
+    syncedMessages.push(syncedMessage);
+    await flushCompletedBatch([completedEntry], [syncedMessage]);
+    idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
   } catch (error) {
     const ackedAt = new Date().toISOString();
     const threadId = String(command?.threadId || "").trim() || legacyLinksThreadId || "";
     const threadLabel = String(command?.threadLabel || "").trim() || threadId;
+    let assistantText = "";
 
-    completed.push({
+    if (threadId) {
+      try {
+        assistantText = await getThreadFallbackAssistantText(command, threadId);
+      } catch {}
+    }
+
+    const completedEntry = {
       id: command.id,
       threadId,
       threadLabel,
       ackedAt
-    });
-    syncedMessages.push(createAssistantMessage(command, threadId, threadLabel, getFailureAssistantText(error), ackedAt));
+    };
+    const syncedMessage = createAssistantMessage(
+      command,
+      threadId,
+      threadLabel,
+      assistantText || getFailureAssistantText(error),
+      ackedAt
+    );
+
+    completed.push(completedEntry);
+    syncedMessages.push(syncedMessage);
+    await flushCompletedBatch([completedEntry], [syncedMessage]);
+    idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
     failed.push({
       id: command.id,
       error: error.message
@@ -416,22 +702,21 @@ for (const command of pending) {
   }
 }
 
-await acknowledge(completed.map((command) => command.id));
-await syncMessages(syncedMessages);
-
-const remainingPending = await fetchPendingCommands();
+const remainingCommands = await fetchRecentCommands();
+const remainingQueued = remainingCommands
+  .filter((command) => command?.status === "queued")
+  .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));
+const remainingProcessing = remainingCommands
+  .filter((command) => command?.status === "processing")
+  .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));
 
 await publishBridgeStatus({
   bridgeOnline: true,
   state: failed.length ? "degraded" : "idle",
   lastRunAt: new Date().toISOString(),
   lastSuccessAt: failed.length ? "" : new Date().toISOString(),
-  pendingCount: remainingPending.length,
-  oldestPendingAt: remainingPending.length
-    ? remainingPending
-        .slice()
-        .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")))[0]?.createdAt || ""
-    : "",
+  pendingCount: remainingQueued.length + remainingProcessing.length,
+  oldestPendingAt: remainingQueued[0]?.createdAt || remainingProcessing[0]?.createdAt || "",
   lastDeliveredCount: completed.length,
   lastError: failed[0]?.error || ""
 });
@@ -441,6 +726,8 @@ console.log(JSON.stringify({
   delivered: completed.length,
   failed
 }, null, 2));
+
+clearTimeout(bridgeRunWatchdog);
 
 if (failed.length) {
   process.exit(1);

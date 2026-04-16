@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Живые ссылки Codex</title>
+    <link rel="stylesheet" href="/styles.css?v=20260416-0038" />
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #f7f3eb;
+        --panel: #fffdf9;
+        --line: #ddd4c7;
+        --text: #1d2927;
+        --muted: #66716d;
+        --accent: #2e7b67;
+        --shadow: 0 12px 30px rgba(40, 33, 24, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+
+      .projects-main {
+        width: min(900px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 28px 0 40px;
+      }
+
+      .panel {
+        margin-bottom: 16px;
+        padding: 24px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      h1,
+      h2,
+      p,
+      ul {
+        margin: 0;
+      }
+
+      h1 {
+        margin-bottom: 14px;
+        font-size: clamp(2rem, 4vw, 3.4rem);
+        line-height: 0.95;
+        letter-spacing: -0.05em;
+      }
+
+      h2 {
+        margin-bottom: 12px;
+        font-size: 1.15rem;
+        letter-spacing: -0.02em;
+      }
+
+      p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .meta {
+        margin-top: 10px;
+        font-size: 0.92rem;
+      }
+
+      .back-link {
+        display: inline-block;
+        margin-top: 14px;
+        color: var(--accent);
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .back-link:hover,
+      .link-list a:hover {
+        text-decoration: underline;
+      }
+
+      .section-label {
+        display: inline-block;
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(46, 123, 103, 0.1);
+        color: var(--accent);
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .link-list {
+        list-style: none;
+        padding: 0;
+      }
+
+      .project-grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .project-card {
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .project-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 14px;
+      }
+
+      .project-copy {
+        min-width: 0;
+      }
+
+      .project-copy h2 {
+        margin-bottom: 8px;
+      }
+
+      .project-meta {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #f2ede3;
+        color: var(--muted);
+        font-size: 0.85rem;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .project-meta.is-empty {
+        background: rgba(170, 61, 35, 0.08);
+        color: #aa3d23;
+        border-color: rgba(170, 61, 35, 0.16);
+      }
+
+      .link-list li + li {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+      }
+
+      .link-list li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .link-main {
+        min-width: 0;
+      }
+
+      .link-list strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 1rem;
+      }
+
+      .link-list a {
+        color: var(--accent);
+        word-break: break-all;
+      }
+
+      .note {
+        font-size: 0.92rem;
+      }
+
+      .empty-state {
+        padding: 14px 16px;
+        border: 1px dashed var(--line);
+        border-radius: 16px;
+        background: rgba(242, 237, 227, 0.62);
+        color: var(--muted);
+        font-size: 0.94rem;
+      }
+
+      .analysis-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 84px;
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #f2ede3;
+        color: var(--muted);
+        font-size: 0.88rem;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .analysis-pill.is-loading {
+        color: var(--muted);
+      }
+
+      .analysis-pill.is-strong {
+        background: rgba(46, 123, 103, 0.14);
+        border-color: rgba(46, 123, 103, 0.2);
+        color: var(--accent);
+      }
+
+      .analysis-pill.is-workable {
+        background: rgba(151, 106, 22, 0.12);
+        border-color: rgba(151, 106, 22, 0.18);
+        color: #8a6115;
+      }
+
+      .analysis-pill.is-risk,
+      .analysis-pill.is-weak {
+        background: rgba(170, 61, 35, 0.12);
+        border-color: rgba(170, 61, 35, 0.18);
+        color: #aa3d23;
+      }
+
+      @media (max-width: 720px) {
+        .project-head {
+          flex-direction: column;
+        }
+
+        .link-list li {
+          grid-template-columns: 1fr;
+        }
+
+        .analysis-pill {
+          justify-self: start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="chat-shell subpage-shell">
+        <header class="chat-header">
+          <h1>Projects</h1>
+          <div class="header-actions">
+            <a class="button button-secondary header-link-button is-active" href="/projects.html">Projects</a>
+            <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
+            <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
+            <button class="button button-secondary refresh-button" type="button" onclick="window.location.reload()">Refresh</button>
+          </div>
+        </header>
+        <div class="subpage-body">
+    <main class="projects-main">
+      <section class="panel">
+        <h1>Живые ссылки Codex</h1>
+        <p>Простой перечень live URL и рабочих входов в проекты. Здесь собраны и публичные адреса, и прямые локальные entry points через project HTTP service, если отдельный production deploy ещё не поднят.</p>
+        <p class="meta">Проверено: 15 апреля 2026</p>
+        <p class="meta">Справа от каждого пункта выводится quick-scan балл анализа страницы по внутренней метрике `overall / 100`.</p>
+        <a class="back-link" href="https://codex-links.pages.dev" target="_blank" rel="noopener">Открыть проект codex-links</a>
+        <br />
+        <a class="back-link" href="https://brain-management.pages.dev/" target="_blank" rel="noopener">Открыть основной hub</a>
+      </section>
+
+      <section class="panel">
+        <div class="section-label">Ключевые проекты</div>
+        <div class="project-grid">
+          <article class="project-card">
+            <div class="project-head">
+              <div class="project-copy">
+                <h2>Advice</h2>
+                <p>Публичный advice-tool, на который уже ведёт кнопка из главной `codex-links`.</p>
+              </div>
+              <span class="project-meta">1 опубликованная страница</span>
+            </div>
+            <ul class="link-list">
+              <li>
+                <div class="link-main">
+                  <strong>Advice MVP</strong>
+                  <a href="https://advice-super10.vercel.app/" target="_blank" rel="noopener">https://advice-super10.vercel.app/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://advice-super10.vercel.app/" title="Считаю балл анализа">…</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="project-card">
+            <div class="project-head">
+              <div class="project-copy">
+                <h2>Brain Management</h2>
+                <p>Основной analytics hub и все живые dashboard-входы на `brain-management.pages.dev`.</p>
+              </div>
+              <span class="project-meta">5 опубликованных страниц</span>
+            </div>
+            <ul class="link-list">
+              <li>
+                <div class="link-main">
+                  <strong>Hub</strong>
+                  <a href="https://brain-management.pages.dev/" target="_blank" rel="noopener">https://brain-management.pages.dev/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://brain-management.pages.dev/" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>Agent 1</strong>
+                  <a href="https://brain-management.pages.dev/dashboard-thinking/" target="_blank" rel="noopener">https://brain-management.pages.dev/dashboard-thinking/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://brain-management.pages.dev/dashboard-thinking/" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>Agent 2</strong>
+                  <a href="https://brain-management.pages.dev/dashboard-execution-optimizer/" target="_blank" rel="noopener">https://brain-management.pages.dev/dashboard-execution-optimizer/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://brain-management.pages.dev/dashboard-execution-optimizer/" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>Daily Changes</strong>
+                  <a href="https://brain-management.pages.dev/dashboard-daily-changes/" target="_blank" rel="noopener">https://brain-management.pages.dev/dashboard-daily-changes/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://brain-management.pages.dev/dashboard-daily-changes/" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>Codex Efficiency</strong>
+                  <a href="https://brain-management.pages.dev/dashboard-codex-efficiency/" target="_blank" rel="noopener">https://brain-management.pages.dev/dashboard-codex-efficiency/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://brain-management.pages.dev/dashboard-codex-efficiency/" title="Считаю балл анализа">…</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="project-card">
+            <div class="project-head">
+              <div class="project-copy">
+                <h2>Ezohata Data</h2>
+                <p>Подтверждённый live storefront, который сейчас служит публичной точкой входа проекта.</p>
+              </div>
+              <span class="project-meta">1 опубликованная страница</span>
+            </div>
+            <ul class="link-list">
+              <li>
+                <div class="link-main">
+                  <strong>Ezohata</strong>
+                  <a href="https://ezohata.com/" target="_blank" rel="noopener">https://ezohata.com/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://ezohata.com/" data-analyze-mode="proxy-only" title="Считаю балл анализа">…</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="project-card">
+            <div class="project-head">
+              <div class="project-copy">
+                <h2>Artifacts</h2>
+                <p>Cloud-ready marketplace MVP с уже поднятым production deploy на Vercel.</p>
+              </div>
+              <span class="project-meta">1 опубликованная страница</span>
+            </div>
+            <ul class="link-list">
+              <li>
+                <div class="link-main">
+                  <strong>Artifacts MVP</strong>
+                  <a href="https://artefacts-eight.vercel.app/" target="_blank" rel="noopener">https://artefacts-eight.vercel.app/</a>
+                  <p class="note">Подтверждённый production URL из Vercel-связки проекта.</p>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://artefacts-eight.vercel.app/" title="Считаю балл анализа">…</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="project-card">
+            <div class="project-head">
+              <div class="project-copy">
+                <h2>Alchemist</h2>
+                <p>Отдельно опубликованный standalone-модуль по У-Син и stage checker.</p>
+              </div>
+              <span class="project-meta">1 опубликованная страница</span>
+            </div>
+            <ul class="link-list">
+              <li>
+                <div class="link-main">
+                  <strong>Мини-проверка ступени У-Син</strong>
+                  <a href="https://deploy-mini-usin-module4.vercel.app/" target="_blank" rel="noopener">https://deploy-mini-usin-module4.vercel.app/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://deploy-mini-usin-module4.vercel.app/" title="Считаю балл анализа">…</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="project-card">
+            <div class="project-head">
+              <div class="project-copy">
+                <h2>Sales PsiMaster</h2>
+                <p>Все подтверждённые публичные sales landings; для PsiMaster отдельный live deploy пока не найден.</p>
+              </div>
+              <span class="project-meta">4 опубликованные страницы</span>
+            </div>
+            <ul class="link-list">
+              <li>
+                <div class="link-main">
+                  <strong>PsiTrends</strong>
+                  <a href="https://psitrends.com/" target="_blank" rel="noopener">https://psitrends.com/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://psitrends.com/" data-analyze-mode="proxy-only" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>Sales BWA Photo</strong>
+                  <a href="https://sales-bwa-photo.pages.dev/" target="_blank" rel="noopener">https://sales-bwa-photo.pages.dev/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://sales-bwa-photo.pages.dev/" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>PsiTrends — Integrated Landing</strong>
+                  <a href="https://deploy-landing-services-integrated.vercel.app/" target="_blank" rel="noopener">https://deploy-landing-services-integrated.vercel.app/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://deploy-landing-services-integrated.vercel.app/" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>PsiTrends — Support Service</strong>
+                  <a href="https://deploy-landing-support-service.vercel.app/" target="_blank" rel="noopener">https://deploy-landing-support-service.vercel.app/</a>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://deploy-landing-support-service.vercel.app/" title="Считаю балл анализа">…</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="project-card">
+            <div class="project-head">
+              <div class="project-copy">
+                <h2>Books</h2>
+                <p>У проекта есть несколько готовых HTML-сайтов: сводная библиотека, отдельный даосский каталог и страница методичек «Алхимия души».</p>
+              </div>
+              <span class="project-meta">3 рабочих входа</span>
+            </div>
+            <ul class="link-list">
+              <li>
+                <div class="link-main">
+                  <strong>Электронная библиотека</strong>
+                  <a href="http://127.0.0.1:8877/books/alchemy_dao_library.html" target="_blank" rel="noopener">http://127.0.0.1:8877/books/alchemy_dao_library.html</a>
+                  <p class="note">Главная сводная библиотека по «Алхимии души» и даосской алхимии.</p>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="http://127.0.0.1:8877/books/alchemy_dao_library.html" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>Даосский static books site</strong>
+                  <a href="http://127.0.0.1:8877/books/dao-books-site/index.html" target="_blank" rel="noopener">http://127.0.0.1:8877/books/dao-books-site/index.html</a>
+                  <p class="note">Готовая HTML-сборка с карточками книг и отдельными тематическими страницами.</p>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="http://127.0.0.1:8877/books/dao-books-site/index.html" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>Методички «Алхимия души»</strong>
+                  <a href="http://127.0.0.1:8877/books/alchemy_soul_guides_links.html" target="_blank" rel="noopener">http://127.0.0.1:8877/books/alchemy_soul_guides_links.html</a>
+                  <p class="note">Отдельная входная страница со ссылками на методички проекта.</p>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="http://127.0.0.1:8877/books/alchemy_soul_guides_links.html" title="Считаю балл анализа">…</span>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <p class="note">Если найду ещё один подтверждённый live deploy в inventory или логах, он должен попадать в соответствующий проектный блок, а не в отдельный общий список.</p>
+      </section>
+    </main>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      const metricModel = [
+        { id: "clarity", label: "Clarity", weight: 22 },
+        { id: "cta", label: "CTA System", weight: 16 },
+        { id: "proof", label: "Proof", weight: 14 },
+        { id: "offer", label: "Offer Depth", weight: 14 },
+        { id: "hierarchy", label: "Scannability", weight: 12 },
+        { id: "focus", label: "Focus", weight: 10 },
+        { id: "technical", label: "Technical", weight: 12 }
+      ];
+
+      const GENERIC_CTA_RE = /\b(learn more|read more|more|submit|send|далее|подробнее|узнать больше)\b/i;
+      const ACTION_CTA_RE = /\b(start|get|book|request|talk|write|contact|apply|see|choose|начать|запис|напис|получ|выбрать|обсуд|остав)\b/i;
+      const PRICE_RE = /(?:€|\$|£|donation|\d+\s?(?:€|\$|£|eur|usd|руб|₽|мес))/i;
+      const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+      function statusClass(score) {
+        if (score >= 85) return "is-strong";
+        if (score >= 70) return "is-workable";
+        if (score >= 55) return "is-risk";
+        return "is-weak";
+      }
+
+      function stripTags(value) {
+        return value
+          .replace(/<script[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style[\s\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ");
+      }
+
+      function wordCount(value) {
+        return value.trim().split(/\s+/).filter(Boolean).length;
+      }
+
+      function quickIssue(category, severity, message) {
+        return { category, severity, message };
+      }
+
+      function extractQuickScanModel(raw, url, mode) {
+        const isHtml = /<html[\s>]/i.test(raw) || /<!doctype html/i.test(raw);
+        const text = isHtml ? stripTags(raw).replace(/\s+/g, " ").trim() : raw.replace(/\s+/g, " ").trim();
+
+        if (isHtml) {
+          const doc = new DOMParser().parseFromString(raw, "text/html");
+          const title = doc.title?.trim() || url;
+          const h1 = doc.querySelector("h1")?.textContent?.trim() || "";
+          const metaDescription = doc.querySelector('meta[name="description"]')?.getAttribute("content")?.trim() || "";
+          const heroText =
+            doc.querySelector(".hero")?.textContent?.replace(/\s+/g, " ").trim() ||
+            doc.querySelector("main section")?.textContent?.replace(/\s+/g, " ").trim() ||
+            "";
+          const allText = doc.body?.textContent?.replace(/\s+/g, " ").trim() || text;
+          const ctaTexts = Array.from(doc.querySelectorAll("a, button"))
+            .map((item) => item.textContent?.replace(/\s+/g, " ").trim() || "")
+            .filter(Boolean);
+          const headings = Array.from(doc.querySelectorAll("h2, h3"))
+            .map((item) => item.textContent?.replace(/\s+/g, " ").trim() || "")
+            .filter(Boolean);
+          const detailCount = doc.querySelectorAll("details").length;
+          const navCount = doc.querySelectorAll("header nav a, nav a").length;
+          const bullets = doc.querySelectorAll("li").length;
+
+          return { isHtml, mode, title, h1, metaDescription, heroText, allText, ctaTexts, headings, detailCount, navCount, bullets };
+        }
+
+        return {
+          isHtml,
+          mode,
+          title: url,
+          h1: "",
+          metaDescription: "",
+          heroText: text,
+          allText: text,
+          ctaTexts: [],
+          headings: [],
+          detailCount: 0,
+          navCount: 0,
+          bullets: 0
+        };
+      }
+
+      function evaluateQuickScan(model) {
+        const issues = [];
+
+        let clarity = 100;
+        if (!model.h1) {
+          clarity -= 28;
+          issues.push(quickIssue("Clarity", "high", "Не найден ясный H1 или главный заголовок."));
+        }
+        if (wordCount(model.h1) < 4 || wordCount(model.h1) > 22) {
+          clarity -= 12;
+        }
+        if (wordCount(model.heroText) < 20) {
+          clarity -= 12;
+        }
+
+        let cta = 100;
+        const distinctCtas = [...new Set(model.ctaTexts)];
+        const actionCtas = distinctCtas.filter((text) => ACTION_CTA_RE.test(text));
+        if (!actionCtas.length) {
+          cta -= 32;
+          issues.push(quickIssue("CTA System", "high", "Не найден явный CTA на действие."));
+        }
+        if (distinctCtas.some((text) => GENERIC_CTA_RE.test(text))) {
+          cta -= 14;
+        }
+        if (actionCtas.length > 3) {
+          cta -= 16;
+        }
+
+        let proof = 100;
+        const proofHits = (model.allText.match(/review|case|result|testimonial|client|years|опыт|кейсы|результат|отзыв|клиент|пример|почему мне доверяют/gi) || []).length;
+        if (proofHits < 2) {
+          proof -= 22;
+        }
+        if (!/\d/.test(model.allText)) {
+          proof -= 8;
+        }
+
+        let offer = 100;
+        const offerHits = (model.allText.match(/pricing|price|plan|package|faq|format|process|стоим|тариф|формат|как выбрать|вопрос/gi) || []).length;
+        if (offerHits < 3) {
+          offer -= 24;
+        }
+        if (!PRICE_RE.test(model.allText)) {
+          offer -= 10;
+        }
+        if (model.detailCount < 1) {
+          offer -= 8;
+        }
+
+        let hierarchy = 100;
+        if (model.headings.length < 3) {
+          hierarchy -= 18;
+        }
+        if (model.bullets < 4) {
+          hierarchy -= 10;
+        }
+
+        let focus = 100;
+        if (model.navCount > 5) {
+          focus -= 12;
+        }
+        if (distinctCtas.length > 4) {
+          focus -= 18;
+        }
+
+        let technical = 62;
+        if (model.mode === "direct-html") {
+          technical += 8;
+        }
+        if (model.isHtml) {
+          technical += 10;
+        }
+        technical -= Math.min(issues.length * 2, 12);
+
+        const scores = {
+          clarity: Math.max(0, clarity),
+          cta: Math.max(0, cta),
+          proof: Math.max(0, proof),
+          offer: Math.max(0, offer),
+          hierarchy: Math.max(0, hierarchy),
+          focus: Math.max(0, focus),
+          technical: Math.max(0, technical)
+        };
+
+        return Math.round(metricModel.reduce((sum, metric) => sum + (scores[metric.id] * metric.weight) / 100, 0));
+      }
+
+      async function fetchQuickScanSource(targetUrl, preferredMode = "auto") {
+        if (preferredMode !== "proxy-only") {
+          try {
+            const direct = await fetch(targetUrl, { mode: "cors" });
+            if (direct.ok) {
+              return { raw: await direct.text(), mode: "direct-html" };
+            }
+          } catch {}
+        }
+
+        const proxyUrl = `https://r.jina.ai/http://${targetUrl.replace(/^https?:\/\//i, "")}`;
+        const proxied = await fetch(proxyUrl);
+        if (!proxied.ok) {
+          throw new Error("scan failed");
+        }
+
+        return { raw: await proxied.text(), mode: "proxy-text" };
+      }
+
+      function getCacheKey(url) {
+        return `projects-analysis-score:${url}`;
+      }
+
+      function readCachedScore(url) {
+        try {
+          const raw = localStorage.getItem(getCacheKey(url));
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed.score !== "number" || typeof parsed.timestamp !== "number") return null;
+          if (Date.now() - parsed.timestamp > CACHE_TTL_MS) return null;
+          return parsed.score;
+        } catch {
+          return null;
+        }
+      }
+
+      function writeCachedScore(url, score) {
+        try {
+          localStorage.setItem(getCacheKey(url), JSON.stringify({ score, timestamp: Date.now() }));
+        } catch {}
+      }
+
+      function applyScore(element, score) {
+        element.textContent = `${score}/100`;
+        element.classList.remove("is-loading");
+        element.classList.add(statusClass(score));
+        element.title = `Балл quick-scan анализа: ${score}/100`;
+      }
+
+      function applyError(element) {
+        element.textContent = "—";
+        element.classList.remove("is-loading");
+        element.title = "Не удалось посчитать балл";
+      }
+
+      async function analyzeElement(element) {
+        const url = element.dataset.analyzeUrl;
+        if (!url) return;
+        const preferredMode = element.dataset.analyzeMode || "auto";
+
+        const cached = readCachedScore(url);
+        if (cached != null) {
+          applyScore(element, cached);
+          return;
+        }
+
+        try {
+          const source = await fetchQuickScanSource(url, preferredMode);
+          const model = extractQuickScanModel(source.raw, url, source.mode);
+          const score = evaluateQuickScan(model);
+          writeCachedScore(url, score);
+          applyScore(element, score);
+        } catch {
+          applyError(element);
+        }
+      }
+
+      async function bootstrapAnalysis() {
+        const elements = [...document.querySelectorAll("[data-analyze-url]")];
+        for (const element of elements) {
+          await analyzeElement(element);
+        }
+      }
+
+      bootstrapAnalysis();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+display_information:
+  name: Codex Links
+  description: Slack bridge for Codex Links cloud task dispatch.
+  background_color: "#0f766e"
+
+features:
+  bot_user:
+    display_name: Codex Links
+    always_online: false
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - app_mentions:read
+
+settings:
+  event_subscriptions:
+    request_url: https://codex-links.pages.dev/api/slack
+    bot_events:
+      - message.channels
+      - message.groups
+      - app_mention
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

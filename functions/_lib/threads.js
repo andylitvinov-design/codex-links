@@ -20,6 +20,16 @@ function normalizeThreadLabel(rawThreadLabel, threadId) {
   return label || threadId || "Untitled";
 }
 
+function normalizeThreadMessageCount(rawThreadMessageCount) {
+  const value = Number(rawThreadMessageCount);
+
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+
+  return Math.floor(value);
+}
+
 function normalizeDisplayLabel(rawDisplayLabel, label, category) {
   const displayLabel = String(rawDisplayLabel || "")
     .replace(/\s+/g, " ")
@@ -56,13 +66,14 @@ function normalizeThread(input) {
   const category = normalizeThreadCategory(input.category);
   const label = normalizeThreadLabel(input.label, id);
   const displayLabel = normalizeDisplayLabel(input.displayLabel, label, category);
+  const messageCount = normalizeThreadMessageCount(input.messageCount);
   const syncedAt = String(input.syncedAt || "").trim();
 
   if (!id) {
     return null;
   }
 
-  return { id, label, category, displayLabel, syncedAt };
+  return { id, label, category, displayLabel, messageCount, syncedAt };
 }
 
 export async function readThreads(env) {

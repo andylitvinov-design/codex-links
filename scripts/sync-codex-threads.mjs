@@ -1,5 +1,6 @@
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
 import path from "node:path";
+import fs from "node:fs";
 
 const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
@@ -68,6 +69,53 @@ function shouldIncludeThread(rawTitle) {
   return true;
 }
 
+function getThreadMessageCountFromSession(sessionPath) {
+  const filePath = String(sessionPath || "").trim();
+
+  if (!filePath) {
+    return 0;
+  }
+
+  try {
+    const lines = fs.readFileSync(filePath, "utf8").split("\n");
+    let count = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        continue;
+      }
+
+      let entry;
+
+      try {
+        entry = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+
+      if (entry?.type !== "response_item") {
+        continue;
+      }
+
+      const payload = entry?.payload || {};
+
+      if (payload?.type !== "message") {
+        continue;
+      }
+
+      if (payload?.role === "user" || payload?.role === "assistant") {
+        count += 1;
+      }
+    }
+
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
 const threads = await withCodexAppServer(async ({ request }) => {
   const items = [];
   const seen = new Set();
@@ -85,6 +133,7 @@ const threads = await withCodexAppServer(async ({ request }) => {
       const id = String(row?.id || "").trim();
       const rawLabel = String(row?.name || row?.preview || "").trim();
       const category = getCategoryFromCwd(row?.cwd);
+      const messageCount = getThreadMessageCountFromSession(row?.path);
 
       if (!shouldIncludeThread(rawLabel) || !id) {
         continue;
@@ -98,7 +147,7 @@ const threads = await withCodexAppServer(async ({ request }) => {
       }
 
       seen.add(id);
-      items.push({ id, label, category, displayLabel });
+      items.push({ id, label, category, displayLabel, messageCount });
     }
 
     if (!result?.nextCursor) {

@@ -1,5 +1,5 @@
 import { handleOptions, json } from "../_lib/http.js";
-import { readBridgeStatus, writeBridgeStatus } from "../_lib/status.js";
+import { deriveBridgeStatusFromCommands, readBridgeStatus, refreshBridgeStatusFromCommands, writeBridgeStatus } from "../_lib/status.js";
 import { isAuthorized } from "../_lib/security.js";
 
 export async function onRequest(context) {
@@ -11,7 +11,7 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
-    const status = await readBridgeStatus(env);
+    const status = await deriveBridgeStatusFromCommands(env);
     return json({ status });
   }
 
@@ -31,6 +31,10 @@ export async function onRequest(context) {
     return json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const status = await writeBridgeStatus(env, payload?.status);
+  const current = await readBridgeStatus(env);
+  const status = await writeBridgeStatus(env, {
+    ...current,
+    ...(payload?.status || {})
+  });
   return json({ ok: true, status }, { status: 201 });
 }

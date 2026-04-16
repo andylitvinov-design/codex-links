@@ -2,4 +2,4 @@
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
 - current task: удерживать API ссылок и команд в простом, стабильном виде без зависимости от локального Mac
-- next step: подключить или проверить GitHub-репозиторий и использовать deploy `codex-links.pages.dev` как основной browser entrypoint
+- next step: подключить или проверить GitHub-репозиторий, использовать deploy `codex-links.pages.dev` как основной browser entrypoint, и при необходимости вынести long-range export из текущего retention-окна в отдельный архивный слой

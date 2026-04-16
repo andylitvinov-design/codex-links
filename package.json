@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "wrangler pages dev public",
     "deploy": "wrangler pages deploy public --project-name codex-links",
-    "kv:seed": "node scripts/seed-demo.mjs"
+    "kv:seed": "node scripts/seed-demo.mjs",
+    "cloud:check": "node scripts/check-cloud-setup.mjs",
+    "cloud:install-secrets": "zsh scripts/install-pages-secrets.sh",
+    "cloud:save-config": "node scripts/save-cloud-config.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.82.2"

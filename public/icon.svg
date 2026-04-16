@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Codex Links icon">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e" />
+      <stop offset="55%" stop-color="#115e59" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#bg)" />
+  <circle cx="132" cy="132" r="34" fill="#ffffff" fill-opacity="0.18" />
+  <circle cx="388" cy="376" r="42" fill="#ffffff" fill-opacity="0.12" />
+  <path d="M158 164h77c-40 0-72 32-72 72v40c0 40 32 72 72 72h77v-42h-77c-17 0-30-13-30-30v-40c0-17 13-30 30-30h77v-42h-154z" fill="#fff7ed"/>
+  <path d="M354 164h-77v42h77c17 0 30 13 30 30v40c0 17-13 30-30 30h-77v42h77c40 0 72-32 72-72v-40c0-40-32-72-72-72z" fill="#ffffff"/>
+  <rect x="218" y="236" width="76" height="40" rx="20" fill="#fde68a" />
+</svg>

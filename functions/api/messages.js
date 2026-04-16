@@ -16,6 +16,15 @@ export async function onRequest(context) {
     const scope = url.searchParams.get("scope");
 
     if (scope === "recent") {
+      if (!isAuthorized(request, env)) {
+        return json({ error: "Unauthorized." }, { status: 401 });
+      }
+
+      const messages = await readMessages(env);
+      return json({ messages });
+    }
+
+    if (scope === "public") {
       const messages = await readMessages(env);
       return json({ messages });
     }

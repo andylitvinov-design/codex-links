@@ -3,7 +3,8 @@ import { JSON_HEADERS } from "./constants.js";
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "Content-Type, X-Write-Token"
+  "access-control-allow-headers": "Content-Type, X-Write-Token",
+  "cache-control": "no-store, no-cache, must-revalidate"
 };
 
 export function json(data, init = {}) {

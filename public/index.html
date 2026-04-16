@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Codex Links</title>
-    <link rel="stylesheet" href="/styles.css?v=20260415-0118" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Codex Links" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/styles.css?v=20260415-1710" />
   </head>
   <body>
     <main class="page">
@@ -12,10 +19,47 @@
         <header class="chat-header">
           <h1>Ссылки (test ok)</h1>
           <div class="header-actions">
-            <a class="button button-secondary header-link-button" href="https://brain-management.pages.dev" target="_blank" rel="noreferrer">Ссылка</a>
-            <button class="button button-secondary refresh-button" id="refresh-button" type="button">Обновить</button>
+            <a class="button button-secondary header-link-button" href="/projects.html">Projects</a>
+            <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
+            <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
+            <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
           </div>
         </header>
+        <section class="projects-entry">
+          <a class="button button-primary projects-entry-button" href="/projects.html">Открыть список проектов</a>
+        </section>
+        <section class="bridge-status-block">
+          <p id="bridge-status-text" class="bridge-status">Подключаю статус Codex Cloud…</p>
+          <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
+        </section>
+
+        <section class="export-panel">
+          <div class="export-panel-copy">
+            <span class="field-label">Excel выгрузка</span>
+            <p>Выбери период и тип данных. Файл скачивается как Excel-совместимый CSV.</p>
+          </div>
+          <div class="export-panel-controls">
+            <label class="export-field">
+              <span class="field-label">С</span>
+              <input id="export-date-from" type="date" />
+            </label>
+            <label class="export-field">
+              <span class="field-label">По</span>
+              <input id="export-date-to" type="date" />
+            </label>
+            <label class="export-field export-field-kind">
+              <span class="field-label">Данные</span>
+              <select id="export-dataset">
+                <option value="all">Все</option>
+                <option value="commands">Команды</option>
+                <option value="messages">Ответы</option>
+                <option value="links">Ссылки</option>
+              </select>
+            </label>
+            <button class="button button-primary export-button" id="export-button" type="button">Скачать CSV</button>
+          </div>
+          <p id="export-status" class="form-status export-status">Команды и ответы выгружаются в пределах доступной истории, ссылки — по всей базе.</p>
+        </section>
 
         <section class="command-wrap">
           <form id="command-form" class="command-form">
@@ -26,22 +70,29 @@
               </label>
               <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
             </div>
-            <div class="thread-settings-bar">
+            <div class="thread-settings-inline-row">
               <span id="thread-settings-summary" class="form-status">Показываются все чаты.</span>
-            </div>
-            <section id="thread-settings-panel" class="thread-settings-panel" hidden>
-              <label class="thread-settings-item thread-settings-item-toggle">
+              <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
                 <input id="thread-settings-show-all" type="checkbox" />
                 <span>Все</span>
               </label>
+            </div>
+            <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
                 <span class="field-label">Поиск по чатам</span>
                 <input id="thread-settings-search" type="search" placeholder="Название категории или чата" />
               </label>
+              <section class="thread-categories">
+                <div class="thread-categories-top">
+                  <span class="field-label">Категории</span>
+                  <span id="thread-categories-summary" class="form-status"></span>
+                </div>
+                <div id="thread-categories-list" class="thread-categories-list" aria-live="polite"></div>
+              </section>
               <div class="thread-settings-actions">
-                <button class="button button-secondary" id="thread-settings-select-all" type="button">Выбрать все</button>
-                <button class="button button-secondary" id="thread-settings-clear" type="button">Снять всё</button>
-                <button class="button button-secondary" id="thread-settings-save" type="button">Сохранить выбор</button>
+                <button class="button button-secondary" id="thread-settings-select-all" type="button">Показать все</button>
+                <button class="button button-secondary" id="thread-settings-clear" type="button">Сбросить фильтр</button>
+                <button class="button button-secondary" id="thread-settings-save" type="button">Закрыть</button>
               </div>
               <div id="thread-settings-list" class="thread-settings-list" aria-live="polite"></div>
             </section>
@@ -50,10 +101,23 @@
               <input id="command-photo-input" name="photo" type="file" accept="image/*" />
             </label>
             <p id="command-photo-status" class="form-status command-photo-status">Фото не выбрано.</p>
-            <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex"></textarea>
+            <div class="command-compose-row">
+              <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex"></textarea>
+              <button class="button button-send-icon" type="submit" aria-label="Отправить в Codex" title="Отправить в Codex">
+                <span aria-hidden="true">▶</span>
+              </button>
+            </div>
             <div class="command-actions">
               <span id="command-status" class="form-status" aria-live="polite"></span>
-              <button class="button button-secondary" type="submit">Отправить в Codex</button>
+              <div class="submit-progress-wrap">
+                <div id="submit-progress" class="submit-progress" aria-live="polite" aria-label="Стадия обработки запроса">
+                  <span class="submit-progress-dot"></span>
+                  <span class="submit-progress-dot"></span>
+                  <span class="submit-progress-dot"></span>
+                  <span class="submit-progress-dot"></span>
+                  <span class="submit-progress-dot"></span>
+                </div>
+              </div>
             </div>
           </form>
           <div id="command-timeline" class="command-timeline" aria-live="polite"></div>
@@ -62,6 +126,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260414-1456"></script>
+    <script type="module" src="/app.js?v=20260415-1710"></script>
   </body>
 </html>
