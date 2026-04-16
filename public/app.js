@@ -20,7 +20,7 @@ const state = {
   }
 };
 
-const BUILD_VERSION = "20260416-0038";
+const BUILD_VERSION = "20260415-2110";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -75,42 +75,43 @@ function readCookie(name) {
   return match ? decodeURIComponent(match.slice(prefix.length)) : "";
 }
 
-function writeCookie(name, value, maxAgeSeconds = 60 * 60 * 24 * 365) {
-  const parts = [
-    `${name}=${encodeURIComponent(String(value || ""))}`,
+function writeCookie(name, value) {
+  const encoded = encodeURIComponent(value);
+  const cookie = [
+    `${name}=${encoded}`,
     "Path=/",
-    `Max-Age=${maxAgeSeconds}`,
+    "Max-Age=31536000",
     "SameSite=Lax"
   ];
 
-  if (sharedCookieDomain) {
-    parts.push(`Domain=${sharedCookieDomain}`);
-  }
-
   if (window.location.protocol === "https:") {
-    parts.push("Secure");
+    cookie.push("Secure");
   }
 
-  document.cookie = parts.join("; ");
+  if (sharedCookieDomain) {
+    cookie.push(`Domain=${sharedCookieDomain}`);
+  }
+
+  document.cookie = cookie.join("; ");
 }
 
 function removeCookie(name) {
-  const parts = [
+  const cookie = [
     `${name}=`,
     "Path=/",
     "Max-Age=0",
     "SameSite=Lax"
   ];
 
-  if (sharedCookieDomain) {
-    parts.push(`Domain=${sharedCookieDomain}`);
-  }
-
   if (window.location.protocol === "https:") {
-    parts.push("Secure");
+    cookie.push("Secure");
   }
 
-  document.cookie = parts.join("; ");
+  if (sharedCookieDomain) {
+    cookie.push(`Domain=${sharedCookieDomain}`);
+  }
+
+  document.cookie = cookie.join("; ");
 }
 
 const storage = {
@@ -138,7 +139,7 @@ const storage = {
     }
 
     if (raw === null) {
-      return null;
+      return [];
     }
 
     try {
@@ -147,7 +148,7 @@ const storage = {
       writeCookie("codex-links-selected-thread-ids", JSON.stringify(value));
       return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
     } catch {
-      return null;
+      return [];
     }
   },
 
@@ -159,7 +160,7 @@ const storage = {
     }
 
     const normalized = Array.isArray(value)
-      ? value.map((item) => String(item || "").trim()).filter(Boolean)
+      ? [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))]
       : [];
 
     const serialized = JSON.stringify(normalized);
@@ -180,8 +181,6 @@ const storage = {
 };
 
 const refreshButton = document.querySelector("#refresh-button");
-const bridgeStatusText = document.querySelector("#bridge-status-text");
-const bridgeWatchdogText = document.querySelector("#bridge-watchdog-text");
 const commandForm = document.querySelector("#command-form");
 const commandThreadSelect = document.querySelector("#command-thread-select");
 const commandPhotoInput = document.querySelector("#command-photo-input");
@@ -201,106 +200,15 @@ const threadSettingsList = document.querySelector("#thread-settings-list");
 const threadSettingsSave = document.querySelector("#thread-settings-save");
 const threadSettingsSelectAll = document.querySelector("#thread-settings-select-all");
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
-const exportDateFrom = document.querySelector("#export-date-from");
-const exportDateTo = document.querySelector("#export-date-to");
-const exportDataset = document.querySelector("#export-dataset");
-const exportButton = document.querySelector("#export-button");
-const exportStatus = document.querySelector("#export-status");
-
-function isoDateOnly(value) {
-  return new Date(value).toISOString().slice(0, 10);
-}
-
-function getDefaultExportFromDate() {
-  const date = new Date();
-  date.setDate(date.getDate() - 6);
-  return isoDateOnly(date);
-}
-
-function getDefaultExportToDate() {
-  return isoDateOnly(new Date());
-}
-
-function setExportStatusMessage(message, tone = "") {
-  if (!exportStatus) {
-    return;
-  }
-
-  exportStatus.textContent = message;
-  exportStatus.dataset.tone = tone;
-}
-
-async function exportDataForPeriod() {
-  if (!exportDateFrom || !exportDateTo || !exportDataset || !exportButton) {
-    return;
-  }
-
-  const from = String(exportDateFrom.value || "").trim();
-  const to = String(exportDateTo.value || "").trim();
-  const dataset = String(exportDataset.value || "all").trim();
-
-  if (!from || !to) {
-    setExportStatusMessage("Выбери обе даты периода.", "error");
-    return;
-  }
-
-  if (from > to) {
-    setExportStatusMessage("Дата начала должна быть не позже даты конца.", "error");
-    return;
-  }
-
-  exportButton.disabled = true;
-  setExportStatusMessage("Готовлю выгрузку…", "processing");
-
-  try {
-    const url = new URL("/api/export", window.location.origin);
-    url.searchParams.set("dataset", dataset);
-    url.searchParams.set("from", from);
-    url.searchParams.set("to", to);
-    url.searchParams.set("clientId", storage.clientId);
-
-    const response = await fetch(url.toString(), {
-      cache: "no-store",
-      headers: {
-        accept: "text/csv"
-      }
-    });
-
-    if (!response.ok) {
-      const result = await parseJsonResponse(response);
-      const message = String(result?.error || "").trim();
-      throw new Error(message || `Не удалось выгрузить данные (HTTP ${response.status}).`);
-    }
-
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const disposition = response.headers.get("content-disposition") || "";
-    const match = disposition.match(/filename=\"([^\"]+)\"/i);
-    const filename = match?.[1] || `codex-links-export_${dataset}_${from}_${to}.csv`;
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    setExportStatusMessage("CSV выгружен. Файл можно открыть в Excel.", "success");
-  } catch (error) {
-    const message = String(error?.message || "").trim();
-    setExportStatusMessage(message || "Не удалось выгрузить данные.", "error");
-  } finally {
-    exportButton.disabled = false;
-  }
-}
 
 function formatDate(value) {
   try {
     return new Intl.DateTimeFormat("ru-RU", {
-      dateStyle: "medium",
+      dateStyle: "short",
       timeStyle: "short"
     }).format(new Date(value));
   } catch {
-    return value;
+    return value || "";
   }
 }
 
@@ -310,100 +218,6 @@ function escapeThreadLabel(thread) {
 
 function isCloudCodexCategory(category) {
   return CLOUD_CODEX_CATEGORIES.has(String(category || "").trim().toLowerCase());
-}
-
-function formatCategoryLabel(category) {
-  const value = String(category || "").trim();
-
-  if (!value) {
-    return "";
-  }
-
-  return isCloudCodexCategory(value) ? `${value} *` : value;
-}
-
-function toTitleStart(value) {
-  const text = String(value || "").trim();
-
-  if (!text) {
-    return "";
-  }
-
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function compactThreadLabel(rawLabel) {
-  let label = String(rawLabel || "").replace(/\s+/g, " ").trim();
-
-  if (!label) {
-    return "";
-  }
-
-  const leadingVerbPatterns = [
-    /^опубликовать\s+/i,
-    /^подсчитай\s+/i,
-    /^сделай\s+/i,
-    /^обнови\s+/i,
-    /^проверь\s+/i,
-    /^покажи\s+/i,
-    /^собери\s+/i,
-    /^создай\s+/i,
-    /^переделай\s+/i,
-    /^подготовь\s+/i
-  ];
-
-  leadingVerbPatterns.forEach((pattern) => {
-    label = label.replace(pattern, "");
-  });
-
-  label = label
-    .replace(/^страницу\s+/i, "страница ")
-    .replace(/^сценарии\s+/i, "сценарии ")
-    .replace(/^страница\s+ссылок$/i, "Страница ссылок")
-    .replace(/^сценарии\s+мышления$/i, "Сценарии мышления");
-
-  label = toTitleStart(label);
-
-  if (label.length <= 28) {
-    return label;
-  }
-
-  const shortened = label.slice(0, 28).replace(/\s+\S*$/, "").trim();
-  return `${shortened || label.slice(0, 28).trim()}…`;
-}
-
-function formatThreadOptionLabel(thread) {
-  const category = String(thread?.category || "").trim();
-  const label = escapeThreadLabel(thread?.label || "").trim();
-  const displayLabel = escapeThreadLabel(thread?.displayLabel || thread?.label || "").trim();
-  const compactLabel = compactThreadLabel(label);
-
-  if (category && compactLabel) {
-    return `${formatCategoryLabel(category)} / ${compactLabel}`;
-  }
-
-  return displayLabel;
-}
-
-function formatRelativeMinutes(value) {
-  const timestamp = Date.parse(String(value || "").trim());
-
-  if (Number.isNaN(timestamp)) {
-    return "";
-  }
-
-  const diffMs = Math.max(0, Date.now() - timestamp);
-  const diffMinutes = Math.floor(diffMs / 60000);
-
-  if (diffMinutes < 1) {
-    return "только что";
-  }
-
-  if (diffMinutes === 1) {
-    return "1 мин назад";
-  }
-
-  return `${diffMinutes} мин назад`;
 }
 
 function compareBuildVersions(left, right) {
@@ -454,6 +268,44 @@ async function ensureLatestClient() {
   }
 }
 
+function formatRelativeTime(value) {
+  const timestamp = Number(new Date(value));
+
+  if (Number.isNaN(timestamp)) {
+    return "";
+  }
+
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const diffMinutes = Math.floor(diffMs / 60000);
+
+  if (diffMinutes < 1) {
+    return "только что";
+  }
+
+  if (diffMinutes === 1) {
+    return "1 мин назад";
+  }
+
+  return `${diffMinutes} мин назад`;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatThreadOptionLabel(thread) {
+  const label = String(thread?.label || "").trim();
+  const category = String(thread?.category || "").trim();
+  const count = Math.max(0, Number(thread?.messageCount || 0));
+  const suffix = count ? ` · ${count}` : "";
+  return category ? `${category} / ${label}${suffix}` : `${label}${suffix}`;
+}
+
 function getAllThreadOptions() {
   return [...new Map(
     state.threads
@@ -468,35 +320,30 @@ function getAllThreadOptions() {
           return null;
         }
 
-        return [id, { id, label, displayLabel, category, messageCount }];
+        return [id, {
+          id,
+          label,
+          displayLabel,
+          category,
+          messageCount
+        }];
       })
       .filter(Boolean)
   ).values()].sort((left, right) => left.displayLabel.localeCompare(right.displayLabel, "ru"));
 }
 
-function getThreadOptions() {
-  const options = getAllThreadOptions();
-  const selectedThreadIds = storage.selectedThreadIds;
+function getActiveThreadId() {
+  return String(commandThreadSelect?.value || "").trim();
+}
 
-  if (selectedThreadIds === null) {
-    return options;
+function getSelectedThreadIds() {
+  const stored = storage.selectedThreadIds;
+
+  if (stored.length) {
+    return stored;
   }
 
-  const selectedIds = new Set(
-    (Array.isArray(selectedThreadIds) ? selectedThreadIds : [])
-      .map((id) => String(id || "").trim())
-      .filter(Boolean)
-  );
-
-  return options.filter((option) => selectedIds.has(option.id));
-}
-
-function getVisibleThreadIds() {
-  return new Set(getThreadOptions().map((option) => option.id).filter(Boolean));
-}
-
-function getActiveThreadId() {
-  return String(commandThreadSelect.value || "").trim();
+  return getAllThreadOptions().map((option) => option.id);
 }
 
 function clearCommandInputAutofill() {
@@ -505,6 +352,22 @@ function clearCommandInputAutofill() {
     threadId: "",
     replyId: ""
   };
+}
+
+function getLatestAssistantReplyForThread(threadId) {
+  const normalizedThreadId = String(threadId || "").trim();
+
+  if (!normalizedThreadId) {
+    return null;
+  }
+
+  return [...state.messages]
+    .filter((message) =>
+      message?.role === "assistant"
+      && String(message.threadId || "").trim() === normalizedThreadId
+      && String(message.text || "").trim()
+    )
+    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))[0] || null;
 }
 
 function applyReplyToCommandInput(reply, options = {}) {
@@ -539,6 +402,21 @@ function applyReplyToCommandInput(reply, options = {}) {
   return true;
 }
 
+function syncCommandInputWithSelectedThread(options = {}) {
+  const { force = false } = options;
+  const activeThreadId = getActiveThreadId();
+  const latestReply = getLatestAssistantReplyForThread(activeThreadId);
+
+  if (!latestReply) {
+    return false;
+  }
+
+  return applyReplyToCommandInput(latestReply, {
+    force,
+    threadId: activeThreadId
+  });
+}
+
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
   const normalizedId = String(threadId || "").trim();
 
@@ -558,208 +436,100 @@ function getAllCategories() {
   )].sort((left, right) => left.localeCompare(right, "ru"));
 }
 
-function renderCategoryList() {
+function renderThreadCategories() {
   if (!threadCategoriesList || !threadCategoriesSummary) {
     return;
   }
 
-  const categories = getAllCategories();
   threadCategoriesList.innerHTML = "";
+  const categories = getAllCategories();
 
-  if (!categories.length) {
-    threadCategoriesSummary.textContent = "Категории ещё не загружены.";
-    threadCategoriesList.innerHTML = '<div class="command-empty">Список категорий появится после загрузки чатов.</div>';
-    return;
-  }
-
-  const starredCount = categories.filter((category) => isCloudCodexCategory(category)).length;
-  const activeCategories = [...new Set(
-    (Array.isArray(state.activeThreadCategories) ? state.activeThreadCategories : [])
-      .map((category) => String(category || "").trim())
-      .filter(Boolean)
-  )];
-  threadCategoriesSummary.textContent = activeCategories.length
-    ? `Фильтр: ${activeCategories.map((category) => formatCategoryLabel(category)).join(", ")}`
-    : starredCount
-      ? `${categories.length} всего, ${starredCount} со звездочкой.`
-      : `${categories.length} всего.`;
+  threadCategoriesSummary.textContent = categories.length
+    ? `Показано категорий: ${categories.length}`
+    : "Категории не найдены.";
 
   categories.forEach((category) => {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = `thread-category-chip${isCloudCodexCategory(category) ? " thread-category-chip-starred" : ""}${activeCategories.includes(category) ? " thread-category-chip-active" : ""}`;
-    item.textContent = formatCategoryLabel(category);
-    item.addEventListener("click", () => {
-      const nextCategories = new Set(activeCategories);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "thread-category-chip";
+    button.textContent = category;
+    button.dataset.active = state.activeThreadCategories.includes(category) ? "1" : "0";
+    button.addEventListener("click", () => {
+      const next = new Set(state.activeThreadCategories);
 
-      if (nextCategories.has(category)) {
-        nextCategories.delete(category);
+      if (next.has(category)) {
+        next.delete(category);
       } else {
-        nextCategories.add(category);
+        next.add(category);
       }
 
-      state.activeThreadCategories = [...nextCategories];
-      renderCategoryList();
-      renderCommandThreads();
+      state.activeThreadCategories = [...next];
+      renderThreadCategories();
       renderThreadSettingsList();
-      renderThreadSettingsSummary();
     });
-    threadCategoriesList.appendChild(item);
+    threadCategoriesList.appendChild(button);
   });
-}
-
-function setThreadSettingsOpen(isOpen) {
-  threadSettingsToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
-
-  if (isOpen) {
-    threadSettingsPanel.removeAttribute("hidden");
-    renderCategoryList();
-    renderThreadSettingsList();
-    return;
-  }
-
-  threadSettingsPanel.setAttribute("hidden", "");
 }
 
 function renderThreadSettingsSummary() {
-  const allOptions = getAllThreadOptions();
-  const showAllMessages = storage.showAllMessages;
-  const activeCategories = [...new Set(
-    (Array.isArray(state.activeThreadCategories) ? state.activeThreadCategories : [])
-      .map((category) => String(category || "").trim())
-      .filter(Boolean)
-  )];
-  const selectedThreadIds = storage.selectedThreadIds;
-  const query = String(threadSettingsSearch?.value || "").trim();
-  const activeThreadLabel = getThreadDisplayLabel(getActiveThreadId(), "");
-
-  if (!allOptions.length) {
-    threadSettingsSummary.textContent = "Каталог чатов ещё не загружен.";
+  if (!threadSettingsSummary) {
     return;
   }
 
-  const filterParts = [];
-
-  if (activeCategories.length) {
-    filterParts.push(`категории: ${activeCategories.map((category) => formatCategoryLabel(category)).join(", ")}`);
-  }
-
-  if (query) {
-    filterParts.push(`поиск: ${query}`);
-  }
-
-  const filterText = filterParts.length ? `Фильтр: ${filterParts.join(", ")}.` : "Фильтр не ограничивает список чатов.";
-  const selectedThreadsText = selectedThreadIds === null
-    ? "В поле Беседа Codex: все чаты."
-    : `В поле Беседа Codex: ${selectedThreadIds.length} чатов.`;
-  const timelineText = showAllMessages ? "Лента: все диалоги." : "Лента: текущая беседа.";
-  const selectedText = activeThreadLabel ? `Выбран чат: ${activeThreadLabel}.` : "";
-
-  threadSettingsSummary.textContent = [timelineText, filterText, selectedThreadsText, selectedText].filter(Boolean).join(" ");
-}
-
-function renderShowAllMessagesToggle() {
-  if (!threadSettingsShowAll) {
+  if (storage.showAllMessages) {
+    threadSettingsSummary.textContent = "Показываются все чаты.";
     return;
   }
 
-  threadSettingsShowAll.checked = storage.showAllMessages;
-}
-
-function formatMessageCount(count) {
-  const value = Math.max(0, Number(count) || 0);
-  const mod10 = value % 10;
-  const mod100 = value % 100;
-
-  if (mod10 === 1 && mod100 !== 11) {
-    return `${value} сообщение`;
-  }
-
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return `${value} сообщения`;
-  }
-
-  return `${value} сообщений`;
-}
-
-function getThreadMessageCount(option) {
-  const threadId = String(option?.id || "").trim();
-  const staticCount = Number(state.threadMessageCounts?.[threadId]);
-
-  if (Number.isFinite(staticCount) && staticCount >= 0) {
-    return Math.floor(staticCount);
-  }
-
-  return Math.max(0, Number(option?.messageCount || 0));
+  const activeThreadId = getActiveThreadId();
+  const activeThread = state.threads.find((thread) => String(thread?.id || "").trim() === activeThreadId);
+  threadSettingsSummary.textContent = activeThread
+    ? `Показывается чат: ${formatThreadOptionLabel(activeThread)}.`
+    : "Показываются все чаты.";
 }
 
 function renderThreadSettingsList() {
-  const allOptions = getAllThreadOptions();
-  const query = String(threadSettingsSearch.value || "").trim().toLowerCase();
-  const activeCategories = new Set(
-    (Array.isArray(state.activeThreadCategories) ? state.activeThreadCategories : [])
-      .map((category) => String(category || "").trim().toLowerCase())
-      .filter(Boolean)
-  );
-  const selectedThreadIds = storage.selectedThreadIds;
-  const selectedIds = new Set(
-    (Array.isArray(selectedThreadIds) ? selectedThreadIds : [])
-      .map((id) => String(id || "").trim())
-      .filter(Boolean)
-  );
-  const useAllByDefault = selectedThreadIds === null;
-  const activeThreadId = getActiveThreadId();
-
-  threadSettingsList.innerHTML = "";
-
-  if (!allOptions.length) {
-    threadSettingsList.innerHTML = '<div class="command-empty">Каталог чатов ещё пуст.</div>';
+  if (!threadSettingsList) {
     return;
   }
 
-  const items = allOptions.filter((option) => {
-    const optionCategory = String(option.category || "").trim().toLowerCase();
+  const search = String(threadSettingsSearch?.value || "").trim().toLowerCase();
+  const activeCategories = new Set(state.activeThreadCategories);
+  const selectedThreadIds = new Set(getSelectedThreadIds());
+  const options = getAllThreadOptions().filter((option) => {
+    const haystack = `${option.displayLabel} ${option.category}`.toLowerCase();
 
-    if (activeCategories.size && !activeCategories.has(optionCategory)) {
+    if (search && !haystack.includes(search)) {
       return false;
     }
 
-    if (!query) {
+    if (!activeCategories.size) {
       return true;
     }
 
-    return option.displayLabel.toLowerCase().includes(query) || option.label.toLowerCase().includes(query);
+    return activeCategories.has(option.category);
   });
 
-  if (!items.length) {
-    threadSettingsList.innerHTML = '<div class="command-empty">Ничего не найдено.</div>';
-    return;
-  }
+  threadSettingsList.innerHTML = "";
 
-  items.forEach((option) => {
-    const messageCount = getThreadMessageCount(option);
+  options.forEach((option) => {
     const row = document.createElement("label");
-    row.className = `thread-settings-item thread-settings-choice${option.id === activeThreadId ? " thread-settings-choice-active" : ""}`;
-    row.innerHTML = `
-      <input type="checkbox" value="${option.id}" ${selectedIds.has(option.id) ? "checked" : ""} />
-      <span class="thread-settings-choice-copy">
-        <span class="thread-settings-choice-title">${option.displayLabel}</span>
-        <span class="thread-settings-choice-meta">${formatMessageCount(messageCount)}${option.id === activeThreadId ? " · выбран" : ""}</span>
-      </span>
-    `;
-    const checkbox = row.querySelector('input[type="checkbox"]');
-    checkbox?.addEventListener("change", () => {
-      const nextSelectedIds = new Set(useAllByDefault ? [] : selectedIds);
+    row.className = "thread-settings-item";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedThreadIds.has(option.id);
+    checkbox.addEventListener("change", () => {
+      const next = new Set(getSelectedThreadIds());
 
       if (checkbox.checked) {
-        nextSelectedIds.add(option.id);
+        next.add(option.id);
       } else {
-        nextSelectedIds.delete(option.id);
+        next.delete(option.id);
       }
 
-      storage.selectedThreadIds = [...nextSelectedIds];
+      storage.selectedThreadIds = [...next];
       renderCommandThreads();
-      renderThreadSettingsSummary();
       renderThreadSettingsList();
       renderCommands();
       setCommandStatusMessage(
@@ -768,6 +538,11 @@ function renderThreadSettingsList() {
           : `Чат убран из поля Беседа Codex: ${option.displayLabel}.`
       );
     });
+
+    const text = document.createElement("span");
+    text.textContent = option.displayLabel;
+
+    row.append(checkbox, text);
     threadSettingsList.appendChild(row);
   });
 }
@@ -812,261 +587,68 @@ function activateReplyThread(threadId) {
   return false;
 }
 
-function renderCommandThreads() {
-  const options = getThreadOptions();
-  const previousValue = commandThreadSelect.value;
-
-  commandThreadSelect.innerHTML = "";
-
-  if (!options.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Нет доступных чатов";
-    commandThreadSelect.appendChild(option);
-    commandThreadSelect.disabled = true;
-    renderThreadSettingsSummary();
-    return;
-  }
-
-  options.forEach((thread) => {
-    const option = document.createElement("option");
-    option.value = thread.id;
-    option.textContent = thread.displayLabel;
-    commandThreadSelect.appendChild(option);
-  });
-
-  commandThreadSelect.disabled = false;
-  commandThreadSelect.value = options.some((option) => option.id === previousValue)
-    ? previousValue
-    : options[0].id;
-  renderThreadSettingsSummary();
-  renderCommands();
-}
-
 function formatProgressStage(progressStage, status) {
-  const stage = String(progressStage || "").trim().toLowerCase();
-  const normalizedStatus = String(status || "").trim().toLowerCase();
-  const dispatchMode = String(state.bridgeWatchdog?.dispatchMode || "").trim().toLowerCase();
+  const stage = String(progressStage || "").trim();
 
-  if (stage === "queued") {
-    if (dispatchMode === "local-bridge") {
-      return "Ждет локальный bridge";
-    }
-
-    return "Стоит в очереди";
-  }
-  if (stage === "dispatched" || normalizedStatus === "dispatched") return "Отправлено в Codex Cloud";
-  if (stage === "claimed") return "Bridge забрал команду";
-  if (stage === "preparing-input") return "Подготавливаю сообщение";
-  if (stage === "sending-to-codex") return "Отправляю в Codex";
-  if (stage === "waiting-for-codex") return "Codex думает";
-  if (stage === "reading-codex-reply") return "Жду ответ Codex";
-  if (stage === "saving-reply") return "Сохраняю ответ";
-  if (stage === "processing" || normalizedStatus === "processing") {
-    if (dispatchMode === "local-bridge") {
-      return "Локальный bridge обрабатывает";
-    }
-
-    return "В обработке";
-  }
-  if (stage === "answered" || normalizedStatus === "answered") return "Ответ получен";
-  if (stage === "failed" || normalizedStatus === "failed") return "Ошибка";
-  if (stage === "acked") return "Появилось в Codex";
-  if (normalizedStatus === "processing") {
-    if (dispatchMode === "local-bridge") {
-      return "Локальный bridge обрабатывает";
-    }
-
-    return "В обработке";
-  }
-  return "";
-}
-
-function getProgressStep(progressStage, status) {
-  const stage = String(progressStage || "").trim().toLowerCase();
-  const normalizedStatus = String(status || "").trim().toLowerCase();
-
-  if (stage === "queued" || normalizedStatus === "queued" || normalizedStatus === "pending") return 1;
-  if (stage === "dispatched" || normalizedStatus === "dispatched" || stage === "claimed") return 2;
-  if (stage === "preparing-input" || stage === "sending-to-codex") return 3;
-  if (stage === "waiting-for-codex" || stage === "reading-codex-reply" || stage === "saving-reply" || normalizedStatus === "processing" || stage === "processing") return 4;
-  if (normalizedStatus === "answered" || normalizedStatus === "acked" || normalizedStatus === "failed" || stage === "answered" || stage === "failed") return 5;
-  return 0;
-}
-
-function hasEarlierActiveCommand(command) {
-  const threadId = String(command?.threadId || "").trim();
-  const createdAt = String(command?.createdAt || "").trim();
-
-  if (!threadId || !createdAt) {
-    return false;
+  if (stage) {
+    return stage.charAt(0).toUpperCase() + stage.slice(1);
   }
 
-  return state.commands.some((entry) => {
-    if (!entry || entry === command) {
-      return false;
-    }
+  if (status === "processing") {
+    return "Обрабатывается";
+  }
 
-    const status = String(entry.status || "").trim().toLowerCase();
+  if (status === "failed") {
+    return "Ошибка";
+  }
 
-    if (status !== "queued" && status !== "dispatched" && status !== "processing") {
-      return false;
-    }
+  if (status === "answered") {
+    return "Ответ получен";
+  }
 
-    return String(entry.threadId || "").trim() === threadId
-      && String(entry.createdAt || "").trim().localeCompare(createdAt) < 0;
-  });
+  return "В очереди";
 }
 
 function formatCommandStage(command) {
-  const progressLabel = formatProgressStage(command?.progressStage, command?.status);
-  const dispatchMode = String(command?.dispatchMode || state.bridgeWatchdog?.dispatchMode || "").trim().toLowerCase();
-
-  if (progressLabel) {
-    return progressLabel;
-  }
-
   const status = String(command?.status || "").trim().toLowerCase();
-
-  if (status === "failed") return command?.errorMessage || "Ошибка";
-  if (status === "answered" && command?.prUrl) return "PR готов";
-  if (status === "answered") return "Ответ получен";
-  if (status === "acked") return "Появилось в Codex";
-  if ((status === "queued" || status === "pending") && hasEarlierActiveCommand(command)) {
-    return "Жду предыдущий запрос в этой теме";
-  }
-  if (status === "dispatched") return "Отправлено в Codex Cloud";
-  if (status === "processing") {
-    return dispatchMode === "local-bridge" ? "Локальный bridge обрабатывает" : "В обработке";
-  }
-  if (status === "queued" || status === "pending") {
-    if (dispatchMode === "local-bridge") {
-      return "Ждет локальный bridge";
-    }
-
-    return "Стоит в очереди";
-  }
-  return status || "Неизвестно";
+  const label = formatProgressStage(command?.progressStage, status);
+  const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
+  return relative ? `${label} · ${relative}` : label;
 }
 
 function getLocalBridgeFallbackMessage(command) {
-  const dispatchMode = String(command?.dispatchMode || "").trim().toLowerCase();
-  const errorMessage = String(command?.errorMessage || "").trim();
-
-  if (dispatchMode !== "local-bridge" || !errorMessage) {
+  if (String(command?.dispatchMode || "").trim() !== "local-bridge") {
     return "";
   }
 
-  if (!/falling back to local bridge|переведена на локальный bridge|локальный bridge/i.test(errorMessage)) {
-    return "";
+  if (String(command?.status || "").trim() === "failed") {
+    return String(command?.errorMessage || "").trim() || "Локальная доставка не удалась.";
   }
 
-  return "Cloud недоступен. Команда автоматически переведена на local bridge.";
+  return "Используется локальный bridge.";
 }
 
-function getCommandStageTone(command) {
-  const status = String(command?.status || "").trim().toLowerCase();
-  const stage = String(command?.progressStage || "").trim().toLowerCase();
-
-  if (status === "failed" || stage === "failed") return "error";
-  if (status === "answered" || status === "acked" || stage === "answered") return "success";
-  if (
-    status === "processing"
-    || status === "dispatched"
-    || stage === "claimed"
-    || stage === "preparing-input"
-    || stage === "sending-to-codex"
-    || stage === "waiting-for-codex"
-    || stage === "reading-codex-reply"
-    || stage === "saving-reply"
-    || stage === "processing"
-  ) {
-    return "processing";
-  }
-
-  if (status === "queued" || status === "pending" || stage === "queued") {
-    return "queued";
-  }
-
-  return "neutral";
-}
-
-function setCommandStatusMessage(text, options = {}) {
-  if (!commandStatus) {
-    return;
-  }
-
-  const {
-    tone = "neutral",
-    source = "manual"
-  } = options;
-
-  const value = String(text || "").trim();
-  commandStatus.textContent = value;
-  commandStatus.dataset.source = source;
-  commandStatus.dataset.tone = value ? tone : "";
-  commandStatus.classList.toggle("form-status-chip", Boolean(value));
-}
-
-function clearAutoCommandStatusMessage() {
-  if (!commandStatus || commandStatus.dataset.source !== "auto") {
-    return;
-  }
-
-  setCommandStatusMessage("", { source: "auto" });
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function buildTimelineSignature(timelineItems, options = {}) {
-  const {
-    activeThreadId = "",
-    showAllMessages = false
-  } = options;
-
+function buildTimelineSignature(items, context = {}) {
   return JSON.stringify({
-    activeThreadId,
-    showAllMessages,
-    items: timelineItems.map((entry) => ({
+    activeThreadId: context.activeThreadId || "",
+    showAllMessages: Boolean(context.showAllMessages),
+    items: items.map((entry) => ({
       id: entry.id,
-      kind: entry.kind,
       role: entry.role,
+      text: entry.text,
       createdAt: entry.createdAt,
       threadId: entry.threadId,
       threadLabel: entry.threadLabel,
-      textLength: String(entry.text || "").length,
-      commandStatus: entry.command?.status || "",
-      commandStage: entry.command?.progressStage || "",
+      status: entry.status || "",
+      progressStage: entry.progressStage || "",
       commandError: entry.command?.errorMessage || "",
       commandPrUrl: entry.command?.prUrl || "",
       commandBranch: entry.command?.branchName || "",
-      linkedCommandId: entry.linkedCommand?.id || entry.message?.commandId || "",
-      replies: (entry.replies || []).map((reply) => ({
-        id: reply.id,
-        createdAt: reply.createdAt,
-        threadId: reply.threadId,
-        textLength: String(reply.text || "").length,
-        linkedCommandId: reply.linkedCommand?.id || reply.message?.commandId || ""
-      }))
+      linkedCommandId: entry.linkedCommand?.id || entry.message?.commandId || ""
     })),
     openAnswers: Object.keys(state.answerOpenUntil)
       .filter((id) => state.answerOpenUntil[id] > Date.now())
       .sort()
-  });
-}
-
-function pruneExpiredAnswerState() {
-  const now = Date.now();
-
-  Object.entries(state.answerOpenUntil).forEach(([entryId, expiresAt]) => {
-    if (!expiresAt || expiresAt <= now) {
-      delete state.answerOpenUntil[entryId];
-    }
   });
 }
 
@@ -1076,170 +658,27 @@ function scheduleAnswerAutoClose() {
     state.answerCloseTimer = null;
   }
 
-  pruneExpiredAnswerState();
+  const timestamps = Object.values(state.answerOpenUntil).filter((value) => Number(value) > Date.now());
 
-  const expirations = Object.values(state.answerOpenUntil)
-    .map((value) => Number(value) || 0)
-    .filter(Boolean)
-    .sort((left, right) => left - right);
-
-  if (!expirations.length) {
+  if (!timestamps.length) {
     return;
   }
 
-  const nextExpiration = expirations[0];
-  const delay = Math.max(nextExpiration - Date.now(), 0);
-
+  const nextCloseAt = Math.min(...timestamps);
   state.answerCloseTimer = window.setTimeout(() => {
     pruneExpiredAnswerState();
     renderCommands();
-  }, delay + 50);
+  }, Math.max(100, nextCloseAt - Date.now()));
 }
 
-function renderPhotoStatus() {
-  const file = commandPhotoInput.files?.[0];
+function pruneExpiredAnswerState() {
+  const now = Date.now();
 
-  if (!file) {
-    commandPhotoStatus.textContent = "Фото не выбрано.";
-    return;
-  }
-
-  commandPhotoStatus.textContent = `Фото: ${file.name}`;
-}
-
-async function readFileAsDataUrl(file) {
-  const inferContentType = () => {
-    const declared = String(file?.type || "").trim().toLowerCase();
-
-    if (declared.startsWith("image/")) {
-      return declared;
+  Object.keys(state.answerOpenUntil).forEach((key) => {
+    if (state.answerOpenUntil[key] <= now) {
+      delete state.answerOpenUntil[key];
     }
-
-    const name = String(file?.name || "").trim().toLowerCase();
-
-    if (name.endsWith(".png")) return "image/png";
-    if (name.endsWith(".webp")) return "image/webp";
-    if (name.endsWith(".gif")) return "image/gif";
-    if (name.endsWith(".heic")) return "image/heic";
-    if (name.endsWith(".heif")) return "image/heif";
-    if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-    return "";
-  };
-
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      const inferredContentType = inferContentType();
-
-      if (result.startsWith("data:image/")) {
-        resolve(result);
-        return;
-      }
-
-      if (result.startsWith("data:") && inferredContentType) {
-        resolve(result.replace(/^data:[^;]+;/i, `data:${inferredContentType};`));
-        return;
-      }
-
-      reject(new Error("Не удалось прочитать фото."));
-    };
-
-    reader.onerror = () => {
-      reject(new Error("Не удалось прочитать фото."));
-    };
-
-    reader.readAsDataURL(file);
   });
-}
-
-function inferDataUrlContentType(dataUrl) {
-  const match = /^data:([^;]+);base64,/i.exec(String(dataUrl || "").trim());
-  return match ? String(match[1] || "").trim().toLowerCase() : "";
-}
-
-function estimateDataUrlSize(dataUrl) {
-  const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
-
-  if (!match) {
-    return 0;
-  }
-
-  const base64 = match[1];
-  const padding = base64.endsWith("==") ? 2 : (base64.endsWith("=") ? 1 : 0);
-  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
-}
-
-function loadImageElement(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Не удалось подготовить фото."));
-    image.src = dataUrl;
-  });
-}
-
-async function optimizePhotoPayload(file) {
-  if (!file) {
-    return null;
-  }
-
-  if (file.size > MAX_PHOTO_FILE_SIZE) {
-    throw new Error("Фото слишком большое. Выберите изображение до 4.5 MB.");
-  }
-
-  const originalDataUrl = await readFileAsDataUrl(file);
-  const originalContentType = inferDataUrlContentType(originalDataUrl) || String(file.type || "image/jpeg").toLowerCase();
-
-  if (
-    file.size <= MAX_PHOTO_UPLOAD_BYTES
-    && /^(image\/jpeg|image\/jpg|image\/png|image\/webp|image\/gif|image\/heic|image\/heif)$/i.test(originalContentType)
-  ) {
-    return {
-      fileName: file.name,
-      contentType: originalContentType === "image/jpg" ? "image/jpeg" : originalContentType,
-      size: file.size,
-      dataUrl: originalDataUrl
-    };
-  }
-
-  const image = await loadImageElement(originalDataUrl);
-  const longestSide = Math.max(image.naturalWidth || 0, image.naturalHeight || 0);
-  const scale = longestSide > MAX_PHOTO_DIMENSION ? MAX_PHOTO_DIMENSION / longestSide : 1;
-  const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
-  const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    return {
-      fileName: file.name,
-      contentType: originalContentType === "image/jpg" ? "image/jpeg" : originalContentType,
-      size: file.size,
-      dataUrl: originalDataUrl
-    };
-  }
-
-  canvas.width = width;
-  canvas.height = height;
-  context.drawImage(image, 0, 0, width, height);
-
-  let dataUrl = originalDataUrl;
-
-  try {
-    dataUrl = canvas.toDataURL("image/jpeg", 0.82);
-  } catch {
-    dataUrl = originalDataUrl;
-  }
-
-  return {
-    fileName: file.name.replace(/\.[a-z0-9]+$/i, ".jpg"),
-    contentType: inferDataUrlContentType(dataUrl) || "image/jpeg",
-    size: estimateDataUrlSize(dataUrl),
-    dataUrl
-  };
 }
 
 async function parseJsonResponse(response) {
@@ -1284,83 +723,6 @@ function isSystemConversationEntry(entry) {
   );
 }
 
-function renderAssistantReplyMarkup(replyEntry) {
-  const message = replyEntry?.message || null;
-  const linkedCommand = replyEntry?.linkedCommand || null;
-  const detailsId = String(message?.id || "").trim();
-  const commandMeta = linkedCommand?.branchName
-    ? `<p>Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
-    : "";
-  const prMeta = linkedCommand?.prUrl
-    ? `<p><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
-    : "";
-
-  return `
-    <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
-      <summary>Ответ Codex</summary>
-      <p>${escapeHtml(replyEntry?.text || "")}</p>
-      ${prMeta}
-      ${commandMeta}
-      <div class="command-answer-actions">
-        <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
-          Ответить
-        </button>
-      </div>
-    </details>
-  `;
-}
-
-function bindAssistantReplyInteractions(container, replies) {
-  const normalizedReplies = Array.isArray(replies) ? replies : [];
-
-  container.querySelectorAll(".command-answer").forEach((details) => {
-    const detailsId = String(details.dataset.entryId || "").trim();
-
-    if (detailsId && state.answerOpenUntil[detailsId] && state.answerOpenUntil[detailsId] > Date.now()) {
-      details.open = true;
-    }
-
-    details.addEventListener("toggle", () => {
-      if (!detailsId) {
-        return;
-      }
-
-      if (details.open) {
-        state.answerOpenUntil[detailsId] = Date.now() + 2 * 60 * 1000;
-      } else {
-        delete state.answerOpenUntil[detailsId];
-      }
-
-      scheduleAnswerAutoClose();
-    });
-  });
-
-  container.querySelectorAll(".command-reply-link").forEach((replyLink) => {
-    replyLink.addEventListener("click", () => {
-      const threadId = String(replyLink.dataset.threadId || "").trim();
-      const reply = normalizedReplies.find((entry) => String(entry?.threadId || "").trim() === threadId) || normalizedReplies[0];
-      const message = reply?.message || null;
-      const didActivate = activateReplyThread(threadId);
-
-      if (!didActivate || !message) {
-        setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
-        return;
-      }
-
-      applyReplyToCommandInput(message, {
-        force: true,
-        threadId
-      });
-      commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
-      window.setTimeout(() => {
-        commandInput.focus();
-      }, 180);
-
-      setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, reply?.threadLabel || "")}`);
-    });
-  });
-}
-
 function renderCommands() {
   pruneExpiredAnswerState();
   const showAllMessages = storage.showAllMessages;
@@ -1382,32 +744,6 @@ function renderCommands() {
       .map((message) => String(message.commandId || "").trim())
       .filter(Boolean)
   );
-  const assistantRepliesByCommandId = new Map();
-
-  visibleMessages
-    .filter((message) => message?.role === "assistant")
-    .forEach((message) => {
-      const commandId = String(message.commandId || "").trim();
-
-      if (!commandId) {
-        return;
-      }
-
-      const entry = {
-        id: `message:${message.id}`,
-        kind: "message",
-        role: "assistant",
-        text: message.text || "",
-        createdAt: message.createdAt,
-        threadId: message.threadId || "",
-        threadLabel: message.threadLabel || "",
-        message,
-        linkedCommand: commandsById.get(commandId) || null
-      };
-      const items = assistantRepliesByCommandId.get(commandId) || [];
-      items.push(entry);
-      assistantRepliesByCommandId.set(commandId, items);
-    });
 
   const timelineItems = [
     ...visibleCommands
@@ -1420,16 +756,11 @@ function renderCommands() {
         createdAt: command.createdAt,
         threadId: command.threadId || "",
         threadLabel: command.threadLabel || "",
-        command,
-        replies: assistantRepliesByCommandId.get(String(command.id || "").trim()) || []
+        command
       })),
     ...visibleMessages
       .filter((message) => {
         const commandId = String(message.commandId || "").trim();
-        if (message.role === "assistant" && commandId) {
-          return false;
-        }
-
         return !(message.role === "user" && commandId && commandsById.has(commandId));
       })
       .map((message) => ({
@@ -1441,10 +772,7 @@ function renderCommands() {
         threadId: message.threadId || "",
         threadLabel: message.threadLabel || "",
         message,
-        linkedCommand: commandsById.get(String(message.commandId || "").trim()) || null,
-        replies: message.role === "user"
-          ? (assistantRepliesByCommandId.get(String(message.commandId || "").trim()) || [])
-          : []
+        linkedCommand: commandsById.get(String(message.commandId || "").trim()) || null
       }))
   ].sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
 
@@ -1483,7 +811,6 @@ function renderCommands() {
       const fallbackNote = getLocalBridgeFallbackMessage(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
-      const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
 
       element.innerHTML = `
         <div class="command-item-top">
@@ -1493,27 +820,49 @@ function renderCommands() {
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
         ${fallbackNote ? `<div class="command-fallback-note">${escapeHtml(fallbackNote)}</div>` : ""}
-        ${repliesMarkup}
         <div class="command-item-top">
           <span>${formatCommandStage(command)}</span>
           ${threadMeta}
         </div>
       `;
 
-      bindAssistantReplyInteractions(element, entry.replies);
       fragment.appendChild(element);
       return;
     }
 
     const message = entry.message;
     const linkedCommand = entry.linkedCommand;
+    const detailsId = String(message?.id || "").trim();
     const isAssistant = entry.role === "assistant";
     const statusLabel = isAssistant
       ? (linkedCommand?.prUrl ? "PR готов" : "Ответ получен")
       : "Сообщение в истории";
+    const replyAction = isAssistant
+      ? `
+        <div class="command-answer-actions">
+          <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(entry.threadId || "")}">
+            Ответить
+          </button>
+        </div>
+      `
+      : "";
+    const prMeta = isAssistant && linkedCommand?.prUrl
+      ? `<p><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
+      : "";
+    const branchMeta = isAssistant && linkedCommand?.branchName
+      ? `<p>Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
+      : "";
     const body = isAssistant
-      ? renderAssistantReplyMarkup(entry)
-      : `<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
+      ? `
+        <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
+          <summary>Ответ Codex</summary>
+          <p>${escapeHtml(entry.text)}</p>
+          ${prMeta}
+          ${branchMeta}
+          ${replyAction}
+        </details>
+      `
+      : `<p>${escapeHtml(entry.text)}</p>`;
 
     element.innerHTML = `
       <div class="command-item-top">
@@ -1527,150 +876,190 @@ function renderCommands() {
       </div>
     `;
 
-    bindAssistantReplyInteractions(element, isAssistant ? [entry] : entry.replies);
+    if (isAssistant) {
+      const details = element.querySelector(".command-answer");
+
+      if (details) {
+        if (detailsId && state.answerOpenUntil[detailsId] && state.answerOpenUntil[detailsId] > Date.now()) {
+          details.open = true;
+        }
+
+        details.addEventListener("toggle", () => {
+          if (!detailsId) {
+            return;
+          }
+
+          if (details.open) {
+            state.answerOpenUntil[detailsId] = Date.now() + 2 * 60 * 1000;
+          } else {
+            delete state.answerOpenUntil[detailsId];
+          }
+
+          scheduleAnswerAutoClose();
+        });
+      }
+
+      element.querySelector(".command-reply-link")?.addEventListener("click", () => {
+        const threadId = String(entry.threadId || "").trim();
+        const didActivate = activateReplyThread(threadId);
+
+        if (!didActivate) {
+          setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
+          return;
+        }
+
+        applyReplyToCommandInput(message, {
+          force: true,
+          threadId
+        });
+        commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => {
+          commandInput.focus();
+        }, 180);
+
+        setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, entry.threadLabel || "")}`);
+      });
+    }
+
     fragment.appendChild(element);
   });
 
   commandTimeline.appendChild(fragment);
 
-  state.lastRenderedTimelineSize = timelineItems.length;
+  if (timelineItems.length !== state.lastRenderedTimelineSize) {
+    commandTimeline.scrollTop = 0;
+    state.lastRenderedTimelineSize = timelineItems.length;
+  }
+
   scheduleAnswerAutoClose();
 }
 
-function getLatestTrackedCommand() {
-  return [...state.commands]
-    .filter((command) => ["queued", "dispatched", "processing"].includes(String(command?.status || "").trim().toLowerCase()))
-    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))[0] || null;
+function setCommandStatusMessage(message, options = {}) {
+  if (!commandStatus) {
+    return;
+  }
+
+  const tone = typeof options === "string" ? options : options.tone || "";
+  commandStatus.textContent = message || "";
+  commandStatus.dataset.tone = tone;
 }
 
-function renderSubmitProgress() {
+function setPhotoStatusMessage(message, tone = "") {
+  if (!commandPhotoStatus) {
+    return;
+  }
+
+  commandPhotoStatus.textContent = message || "";
+  commandPhotoStatus.dataset.tone = tone;
+}
+
+function setSubmitProgress(stage = "", tone = "") {
   if (!submitProgress) {
     return;
   }
 
+  submitProgress.dataset.stage = stage;
+  submitProgress.dataset.tone = tone;
   const dots = [...submitProgress.querySelectorAll(".submit-progress-dot")];
-  const command = getLatestTrackedCommand();
-  const currentStep = getProgressStep(command?.progressStage, command?.status);
-  const tone = command ? getCommandStageTone(command) : "neutral";
+  const activeCount = stage === "queued"
+    ? 2
+    : stage === "processing"
+      ? 4
+      : stage === "answered"
+        ? 5
+        : stage === "failed"
+          ? 5
+          : 0;
 
   dots.forEach((dot, index) => {
-    const step = index + 1;
-    dot.classList.toggle("is-active", currentStep > 0 && step <= currentStep);
-    dot.classList.toggle("is-current", currentStep > 0 && step === currentStep && !["acked", "answered", "failed"].includes(String(command?.status || "").trim().toLowerCase()));
+    dot.classList.toggle("is-active", index < activeCount);
+    dot.classList.toggle("is-current", index === Math.max(0, activeCount - 1) && activeCount > 0);
+  });
+}
+
+function renderCommandThreads() {
+  if (!commandThreadSelect) {
+    return;
+  }
+
+  const options = getAllThreadOptions();
+  const visibleIds = new Set(getSelectedThreadIds());
+  const nextOptions = options.filter((option) => visibleIds.has(option.id));
+
+  commandThreadSelect.innerHTML = "";
+
+  nextOptions.forEach((option) => {
+    const element = document.createElement("option");
+    element.value = option.id;
+    element.textContent = option.displayLabel;
+    commandThreadSelect.appendChild(element);
   });
 
-  submitProgress.dataset.tone = tone;
+  const currentValue = String(commandThreadSelect.value || "").trim();
+  const targetValue = nextOptions.some((option) => option.id === currentValue)
+    ? currentValue
+    : nextOptions[0]?.id || "";
 
-  submitProgress.setAttribute(
-    "aria-label",
-    `Стадия обработки запроса: ${command ? formatCommandStage(command) : "Нет активного запроса"}`
-  );
+  if (targetValue) {
+    commandThreadSelect.value = targetValue;
+  }
+
+  renderThreadSettingsSummary();
+  renderCommands();
+  syncCommandInputWithSelectedThread();
 }
 
-function isCloudMisconfigured(status) {
-  const mode = String(status?.dispatchMode || "").trim().toLowerCase();
-  const error = String(status?.lastError || "").trim().toLowerCase();
+async function fetchBridgeStatus() {
+  const response = await fetch(`/api/status?_=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json"
+    }
+  });
 
-  return mode !== "slack-codex-cloud" && error.includes("missing slack secrets");
+  if (!response.ok) {
+    throw new Error(`Failed to load status: ${response.status}`);
+  }
+
+  return response.json();
 }
 
-function renderBridgeStatus() {
-  if (!bridgeStatusText) {
-    return;
+async function fetchThreads() {
+  const response = await fetch(`/api/threads?_=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load threads: ${response.status}`);
   }
 
-  if (!state.bridgeWatchdog) {
-    bridgeStatusText.textContent = "Проверяю режим исполнения Codex…";
-    return;
-  }
-
-  const pending = state.commands.find((command) => ["queued", "dispatched", "processing", "pending"].includes(String(command?.status || "").trim().toLowerCase()));
-  const latestAnswered = [...state.commands]
-    .filter((command) => ["answered", "acked"].includes(String(command?.status || "").trim().toLowerCase()))
-    .sort((left, right) => String(right.completedAt || right.ackedAt || right.createdAt || "").localeCompare(String(left.completedAt || left.ackedAt || left.createdAt || "")))[0];
-  const dispatchMode = String(state.bridgeWatchdog?.dispatchMode || "").trim().toLowerCase();
-  const cloudMisconfigured = isCloudMisconfigured(state.bridgeWatchdog);
-
-  if (pending) {
-    bridgeStatusText.textContent = dispatchMode === "slack-codex-cloud"
-      ? "Codex Cloud обрабатывает очередь через Slack."
-      : (cloudMisconfigured
-        ? "Cloud не настроен: в Pages не заданы Slack secrets. Текущая задача ждет или уже обрабатывается локальным bridge."
-        : "Локальный bridge обрабатывает очередь.");
-    return;
-  }
-
-  if (latestAnswered) {
-    bridgeStatusText.textContent = dispatchMode === "slack-codex-cloud"
-      ? `Codex Cloud активен. Последний ответ получен ${formatDate(latestAnswered.completedAt || latestAnswered.ackedAt || latestAnswered.createdAt)}.`
-      : (cloudMisconfigured
-        ? `Cloud не настроен: видны только результаты локального bridge. Последний локальный ответ получен ${formatDate(latestAnswered.ackedAt || latestAnswered.createdAt)}.`
-        : `Локальный bridge активен. Последний ответ получен ${formatDate(latestAnswered.ackedAt || latestAnswered.createdAt)}.`);
-    return;
-  }
-
-  bridgeStatusText.textContent = dispatchMode === "slack-codex-cloud"
-    ? "Codex Cloud настроен. Прод-исполнение идёт через Slack, локальный bridge только запасной."
-    : (cloudMisconfigured
-      ? "Cloud не настроен: добавьте Slack secrets в Pages, иначе приложение работает только пока доступен локальный bridge."
-      : "Локальный bridge готов. Новые команды будут отправляться в Codex.");
+  const data = await response.json();
+  state.threads = Array.isArray(data?.threads) ? data.threads : [];
 }
 
-function renderBridgeWatchdog() {
-  if (!bridgeWatchdogText) {
+async function fetchThreadCounts() {
+  const response = await fetch(`/thread-counts.json?_=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    state.threadMessageCounts = {};
     return;
   }
 
-  const status = state.bridgeWatchdog;
-
-  if (!status) {
-    bridgeWatchdogText.textContent = "Watchdog: нет данных о текущем исполнителе.";
-    return;
-  }
-
-  const mode = String(status.dispatchMode || "").trim().toLowerCase();
-  const label = mode === "slack-codex-cloud" ? "cloud" : "local";
-  const stateLabel = status.bridgeOnline
-    ? (status.state === "running"
-      ? (label === "cloud" ? "Cloud online, обрабатывает" : "Local bridge online, обрабатывает")
-      : (label === "cloud" ? "Cloud online" : "Local bridge online"))
-    : (label === "cloud" ? "Cloud offline" : "Local bridge offline");
-  const parts = [stateLabel];
-
-  if (status.lastRunAt) {
-    parts.push(`последний запуск ${formatRelativeMinutes(status.lastRunAt)}`);
-  }
-
-  if (status.lastDispatchAt) {
-    parts.push(`последняя отправка ${formatRelativeMinutes(status.lastDispatchAt)}`);
-  }
-
-  parts.push(`в очереди ${status.pendingCount || 0}`);
-
-  if (status.oldestPendingAt) {
-    parts.push(`самая старая ${formatRelativeMinutes(status.oldestPendingAt)}`);
-  }
-
-  if (status.lastDeliveredCount) {
-    parts.push(`последняя доставка ${status.lastDeliveredCount}`);
-  }
-
-  if (status.lastError) {
-    parts.push(`ошибка: ${status.lastError}`);
-  }
-
-  bridgeWatchdogText.textContent = `Watchdog: ${parts.join(" · ")}`;
+  const data = await response.json();
+  state.threadMessageCounts = data && typeof data === "object" ? data : {};
 }
 
-async function loadCommands(options = {}) {
-  const { render = true } = options;
-
-  if (await ensureLatestClient()) {
-    return;
-  }
-
+async function fetchCommands() {
   const url = new URL("/api/commands", window.location.origin);
-  url.searchParams.set("scope", "public");
+  url.searchParams.set("clientId", storage.clientId);
   url.searchParams.set("_", String(Date.now()));
 
   const response = await fetch(url.toString(), {
@@ -1685,26 +1074,12 @@ async function loadCommands(options = {}) {
   }
 
   const data = await response.json();
-  state.commands = data.commands || [];
-  if (!threadSettingsPanel.hasAttribute("hidden")) {
-    renderThreadSettingsList();
-  }
-  if (render) {
-    renderCommands();
-  }
-  renderBridgeStatus();
-  renderSubmitProgress();
+  state.commands = Array.isArray(data?.commands) ? data.commands : [];
 }
 
-async function loadMessages(options = {}) {
-  const { render = true } = options;
-
-  if (state.hardReloading) {
-    return;
-  }
-
+async function fetchMessages() {
   const url = new URL("/api/messages", window.location.origin);
-  url.searchParams.set("scope", "public");
+  url.searchParams.set("clientId", storage.clientId);
   url.searchParams.set("_", String(Date.now()));
 
   const response = await fetch(url.toString(), {
@@ -1719,301 +1094,213 @@ async function loadMessages(options = {}) {
   }
 
   const data = await response.json();
-  const previousAssistantIds = new Set(
-    state.messages
-      .filter((message) => message?.role === "assistant")
-      .map((message) => String(message.id || "").trim())
-      .filter(Boolean)
-  );
-  state.messages = data.messages || [];
+  state.messages = Array.isArray(data?.messages) ? data.messages : [];
   const hasNewAssistantReply = state.hasLoadedMessagesOnce && state.messages.some((message) =>
-    message?.role === "assistant" && !previousAssistantIds.has(String(message.id || "").trim())
+    message?.role === "assistant"
   );
-
-  if (hasNewAssistantReply) {
-    playReplySound();
-  }
-
   state.hasLoadedMessagesOnce = true;
 
-  if (!threadSettingsPanel.hasAttribute("hidden")) {
-    renderThreadSettingsList();
-  }
-
-  if (render) {
-    renderCommands();
+  if (hasNewAssistantReply) {
+    syncCommandInputWithSelectedThread();
   }
 }
 
-async function loadThreads() {
-  if (state.hardReloading) {
-    return;
-  }
+async function refreshAll() {
+  const results = await Promise.allSettled([
+    fetchBridgeStatus(),
+    fetchCommands(),
+    fetchMessages(),
+    fetchThreads(),
+    fetchThreadCounts()
+  ]);
 
-  const url = new URL("/api/threads", window.location.origin);
-  url.searchParams.set("clientId", storage.clientId);
-  url.searchParams.set("_", String(Date.now()));
+  const statusResult = results[0];
+  const commandsError = results[1].status === "rejected" ? results[1].reason : null;
+  const messagesError = results[2].status === "rejected" ? results[2].reason : null;
 
-  const response = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
+  if (statusResult.status === "fulfilled") {
+    const status = statusResult.value?.status || {};
+    const bridgeStatusText = document.querySelector("#bridge-status-text");
+    const bridgeWatchdogText = document.querySelector("#bridge-watchdog-text");
+
+    if (bridgeStatusText) {
+      bridgeStatusText.textContent = `Статус: ${status.executorLabel || "неизвестно"} · ${status.state || "idle"}`;
     }
-  });
 
-  if (!response.ok) {
-    throw new Error(`Failed to load threads: ${response.status}`);
+    if (bridgeWatchdogText) {
+      bridgeWatchdogText.textContent = `Watchdog: ${status.lastError || "ошибок нет"}`;
+    }
   }
 
-  const data = await response.json();
-  state.threads = Array.isArray(data.threads) ? data.threads : [];
-
-  const selectedThreadIds = storage.selectedThreadIds;
-
-  if (selectedThreadIds !== null) {
-    const existingIds = new Set(
-      state.threads
-        .map((thread) => String(thread?.id || "").trim())
-        .filter(Boolean)
-    );
-
-    storage.selectedThreadIds = selectedThreadIds.filter((id) => existingIds.has(String(id || "").trim()));
-  }
-
-  if (state.activeThreadCategories.length) {
-    const existingCategories = new Set(
-      state.threads
-        .map((thread) => String(thread?.category || "").trim())
-        .filter(Boolean)
-    );
-
-    state.activeThreadCategories = state.activeThreadCategories.filter((category) => existingCategories.has(category));
-  }
-
-  renderCommandThreads();
-  renderCategoryList();
+  renderThreadCategories();
   renderThreadSettingsList();
-}
+  renderCommandThreads();
 
-async function loadThreadCounts() {
-  if (state.hardReloading) {
-    return;
-  }
+  const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
 
-  const url = new URL("/thread-counts.json", window.location.origin);
-  url.searchParams.set("v", BUILD_VERSION);
-  url.searchParams.set("_", String(Date.now()));
-
-  const response = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load thread counts: ${response.status}`);
-  }
-
-  const data = await response.json();
-  state.threadMessageCounts = data && typeof data === "object" ? data : {};
-
-  if (!threadSettingsPanel.hasAttribute("hidden")) {
-    renderThreadSettingsList();
-  }
-}
-
-async function loadBridgeWatchdog() {
-  if (state.hardReloading) {
-    return;
-  }
-
-  const url = new URL("/api/status", window.location.origin);
-  url.searchParams.set("_", String(Date.now()));
-
-  const response = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load bridge status: ${response.status}`);
-  }
-
-  const data = await response.json();
-  state.bridgeWatchdog = data.status || null;
-  renderBridgeWatchdog();
-}
-
-function getRejectedResult(results, index) {
-  return results[index]?.status === "rejected" ? results[index].reason : null;
-}
-
-function hasConversationSnapshot() {
-  return state.commands.length > 0 || state.messages.length > 0;
-}
-
-function hasActiveCommands() {
-  return state.commands.some((command) => ["queued", "dispatched", "processing"].includes(String(command?.status || "").trim().toLowerCase()));
-}
-
-async function refreshSiteData(options = {}) {
-  const { includeThreads = false, silent = false, forceRender = false } = options;
-  const jobs = [loadCommands({ render: false }), loadMessages({ render: false }), loadBridgeWatchdog()];
-
-  if (includeThreads) {
-    jobs.push(loadThreads());
-    jobs.push(loadThreadCounts());
-  }
-
-  const results = await Promise.allSettled(jobs);
-
-  if (state.hardReloading) {
-    return results;
-  }
-
-  const commandsError = getRejectedResult(results, 0);
-  const messagesError = getRejectedResult(results, 1);
-  const hasCachedData = hasConversationSnapshot();
-
-  if (!silent) {
-    if ((commandsError || messagesError) && hasCachedData) {
-      setCommandStatusMessage("");
-    } else if (commandsError && messagesError) {
-      setCommandStatusMessage("Не удалось загрузить переписку.", { tone: "error" });
-    } else if (commandsError) {
-      setCommandStatusMessage("Не удалось обновить очередь.", { tone: "error" });
-    } else if (messagesError) {
-      setCommandStatusMessage("Не удалось загрузить ответы Codex.", { tone: "error" });
-    } else if (
-      commandStatus.textContent === "Не удалось загрузить переписку."
-      || commandStatus.textContent === "Не удалось обновить очередь."
-      || commandStatus.textContent === "Не удалось загрузить ответы Codex."
-    ) {
-      setCommandStatusMessage("");
-    }
-  }
-
-  if (forceRender) {
-    state.lastRenderedTimelineSignature = "";
+  if ((commandsError || messagesError) && hasCachedData) {
+    setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
+  } else if (commandsError && messagesError) {
+    setCommandStatusMessage("Не удалось обновить команды и ответы.", { tone: "error" });
+  } else if (messagesError) {
+    setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
+  } else if (commandsError) {
+    setCommandStatusMessage("Не удалось обновить команды.", { tone: "error" });
   }
 
   renderCommands();
-  renderBridgeStatus();
-  renderSubmitProgress();
-  ensureCommandPolling();
-
-  return results;
-}
-
-function ensureCommandPolling() {
-  const nextInterval = hasActiveCommands() ? FAST_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
-
-  if (state.commandPoller && state.commandPollerInterval === nextInterval) {
-    return;
-  }
-
-  if (state.commandPoller) {
-    window.clearInterval(state.commandPoller);
-  }
-
-  state.commandPoller = window.setInterval(() => {
-    refreshSiteData({ silent: true }).catch(() => {});
-  }, nextInterval);
-  state.commandPollerInterval = nextInterval;
-}
-
-function playReplySound() {
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-
-  if (!AudioContextClass) {
-    return;
-  }
-
-  const context = new AudioContextClass();
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-
-  oscillator.type = "sine";
-  oscillator.frequency.setValueAtTime(880, context.currentTime);
-  oscillator.frequency.exponentialRampToValueAtTime(1240, context.currentTime + 0.16);
-  gain.gain.setValueAtTime(0.0001, context.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.07, context.currentTime + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
-
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start();
-  oscillator.stop(context.currentTime + 0.34);
-  oscillator.addEventListener("ended", () => {
-    context.close().catch(() => {});
-  });
 }
 
 async function submitCommand(event) {
   event.preventDefault();
-  setCommandStatusMessage("");
 
-  const text = String(commandInput.value || "").trim();
-  const photoFile = commandPhotoInput.files?.[0] || null;
+  const text = String(commandInput?.value || "").trim();
+  const threadId = getActiveThreadId();
 
-  if (!text && !photoFile) {
-    setCommandStatusMessage("Нужно ввести сообщение или выбрать фото.", { tone: "error" });
+  if (!text && !(commandPhotoInput?.files?.[0])) {
+    setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
     return;
   }
 
-  const selected = getThreadOptions().find((option) => option.id === commandThreadSelect.value);
+  setCommandStatusMessage("Отправляю сообщение…");
+  setSubmitProgress("queued", "queued");
 
-  if (!selected) {
-    setCommandStatusMessage("Нет доступного чата Codex.", { tone: "error" });
-    return;
+  const payload = {
+    clientId: storage.clientId,
+    threadId,
+    threadLabel: getThreadDisplayLabel(threadId, ""),
+    text
+  };
+
+  const photoFile = commandPhotoInput?.files?.[0];
+
+  if (photoFile) {
+    payload.photo = {
+      name: photoFile.name,
+      type: photoFile.type,
+      size: photoFile.size
+    };
   }
 
-  try {
-    const photo = photoFile ? await optimizePhotoPayload(photoFile) : null;
+  const response = await fetch("/api/commands", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
 
-    const response = await fetch("/api/commands", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        text,
-        clientId: storage.clientId,
-        threadId: selected.id,
-        threadLabel: selected.label,
-        photo
-      })
-    });
+  const result = await parseJsonResponse(response);
 
-    const result = await parseJsonResponse(response);
+  if (!response.ok) {
+    setSubmitProgress("failed", "error");
+    throw new Error(String(result?.error || "").trim() || `Не удалось отправить сообщение (HTTP ${response.status}).`);
+  }
 
-    if (!response.ok) {
-      const message = String(result?.error || "").trim();
-      throw new Error(message || `Не удалось отправить команду (HTTP ${response.status}).`);
-    }
+  commandInput.value = "";
+  clearCommandInputAutofill();
 
-    commandInput.value = "";
-    clearCommandInputAutofill();
+  if (commandPhotoInput) {
     commandPhotoInput.value = "";
-    renderPhotoStatus();
-    renderSubmitProgress();
-    await refreshSiteData({ includeThreads: true, silent: true });
-    setCommandStatusMessage("");
-  } catch (error) {
-    const message = String(error?.message || "").trim();
-    setCommandStatusMessage(
-      message === "The string did not match the expected pattern."
-        ? "Не удалось подготовить или отправить фото. Чаще всего это слишком большой файл или временная ошибка API."
-        : (message || "Не удалось отправить команду."),
-      { tone: "error" }
-    );
+    setPhotoStatusMessage("Фото не выбрано.");
   }
+
+  setSubmitProgress("processing", "processing");
+  setCommandStatusMessage("Сообщение отправлено.");
+  await refreshAll();
 }
 
-function bootApp() {
+function startPolling() {
+  if (state.commandPoller) {
+    window.clearInterval(state.commandPoller);
+  }
+
+  state.commandPollerInterval = FAST_POLL_INTERVAL_MS;
+  state.commandPoller = window.setInterval(() => {
+    refreshAll().catch(() => {});
+  }, state.commandPollerInterval);
+}
+
+function bindEvents() {
+  refreshButton?.addEventListener("click", async () => {
+    if (await ensureLatestClient()) {
+      return;
+    }
+
+    await refreshAll();
+  });
+
+  commandForm?.addEventListener("submit", (event) => {
+    submitCommand(event).catch((error) => {
+      setSubmitProgress("failed", "error");
+      setCommandStatusMessage(String(error?.message || "Не удалось отправить сообщение."), { tone: "error" });
+    });
+  });
+
+  commandThreadSelect?.addEventListener("change", () => {
+    renderThreadSettingsSummary();
+    renderCommands();
+    syncCommandInputWithSelectedThread();
+  });
+
+  commandPhotoInput?.addEventListener("change", () => {
+    const file = commandPhotoInput.files?.[0];
+
+    if (!file) {
+      setPhotoStatusMessage("Фото не выбрано.");
+      return;
+    }
+
+    setPhotoStatusMessage(`Выбрано фото: ${file.name}`);
+  });
+
+  threadSettingsToggle?.addEventListener("click", () => {
+    if (!threadSettingsPanel) {
+      return;
+    }
+
+    const nextHidden = !threadSettingsPanel.hidden;
+    threadSettingsPanel.hidden = nextHidden;
+    threadSettingsToggle.setAttribute("aria-expanded", String(!nextHidden));
+  });
+
+  threadSettingsShowAll?.addEventListener("change", () => {
+    storage.showAllMessages = Boolean(threadSettingsShowAll.checked);
+    renderThreadSettingsSummary();
+    renderCommands();
+  });
+
+  threadSettingsSearch?.addEventListener("input", () => {
+    renderThreadSettingsList();
+  });
+
+  threadSettingsSave?.addEventListener("click", () => {
+    if (threadSettingsPanel) {
+      threadSettingsPanel.hidden = true;
+      threadSettingsToggle?.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  threadSettingsSelectAll?.addEventListener("click", () => {
+    storage.selectedThreadIds = getAllThreadOptions().map((option) => option.id);
+    renderCommandThreads();
+    renderThreadSettingsList();
+  });
+
+  threadSettingsClear?.addEventListener("click", () => {
+    state.activeThreadCategories = [];
+    if (threadSettingsSearch) {
+      threadSettingsSearch.value = "";
+    }
+    storage.selectedThreadIds = null;
+    renderThreadCategories();
+    renderCommandThreads();
+    renderThreadSettingsList();
+  });
+}
+
+async function boot() {
   if (
     !refreshButton ||
     !threadSettingsToggle ||
@@ -2024,104 +1311,27 @@ function bootApp() {
     !commandThreadSelect ||
     !commandPhotoInput ||
     !commandForm ||
-    !commandStatus ||
-    !exportDateFrom ||
-    !exportDateTo ||
-    !exportDataset ||
-    !exportButton
+    !commandStatus
   ) {
     console.error("Codex Links: missing required DOM nodes during boot.");
     return;
   }
 
-  exportDateFrom.value = getDefaultExportFromDate();
-  exportDateTo.value = getDefaultExportToDate();
-  exportButton.addEventListener("click", () => {
-    exportDataForPeriod().catch(() => {});
-  });
+  if (threadSettingsShowAll) {
+    threadSettingsShowAll.checked = storage.showAllMessages;
+  }
 
-  refreshButton.addEventListener("click", async () => {
-    if (await ensureLatestClient()) {
-      return;
-    }
+  setPhotoStatusMessage("Фото не выбрано.");
+  bindEvents();
+  await refreshAll();
+  startPolling();
 
-    await refreshSiteData({ includeThreads: true, forceRender: true });
-  });
-
-  threadSettingsToggle.addEventListener("click", () => {
-    const willOpen = threadSettingsPanel.hasAttribute("hidden");
-    setThreadSettingsOpen(willOpen);
-
-    if (willOpen && !state.threads.length) {
-      loadThreads().catch(() => {
-        renderCategoryList();
-        renderThreadSettingsList();
-      });
-    }
-  });
-
-  threadSettingsShowAll?.addEventListener("change", () => {
-    storage.showAllMessages = threadSettingsShowAll.checked;
-    renderThreadSettingsSummary();
-    renderCommands();
-  });
-
-  threadSettingsSearch.addEventListener("input", () => {
-    renderThreadSettingsList();
-    renderThreadSettingsSummary();
-  });
-
-  threadSettingsSave.addEventListener("click", () => {
-    setCommandStatusMessage("Меню закрыто.");
-    setThreadSettingsOpen(false);
-  });
-
-  threadSettingsSelectAll.addEventListener("click", () => {
-    state.activeThreadCategories = [];
-    storage.selectedThreadIds = null;
-    threadSettingsSearch.value = "";
-    renderCategoryList();
-    renderCommandThreads();
-    renderThreadSettingsList();
-    renderThreadSettingsSummary();
-    setCommandStatusMessage("В поле Беседа Codex снова показаны все чаты.");
-  });
-
-  threadSettingsClear.addEventListener("click", () => {
-    state.activeThreadCategories = [];
-    threadSettingsSearch.value = "";
-    renderCategoryList();
-    renderCommandThreads();
-    renderThreadSettingsList();
-    renderThreadSettingsSummary();
-    setCommandStatusMessage("Фильтр меню сброшен.");
-  });
-
-  commandThreadSelect.addEventListener("change", () => {
-    renderThreadSettingsSummary();
-    renderThreadSettingsList();
-    renderCommands();
-  });
-  commandInput.addEventListener("input", () => {
-    if (String(commandInput.value || "") !== String(state.commandInputAutofill.text || "")) {
-      clearCommandInputAutofill();
-    }
-  });
-  commandPhotoInput.addEventListener("change", renderPhotoStatus);
-  commandForm.addEventListener("submit", submitCommand);
-
-  refreshSiteData({ includeThreads: true })
-    .then(() => {
-      renderShowAllMessagesToggle();
-      ensureCommandPolling();
-    })
-    .catch((error) => {
-      setCommandStatusMessage(String(error?.message || "Не удалось запустить интерфейс."), { tone: "error" });
-    });
-
-  loadThreadCounts().catch(() => {});
-
-  renderShowAllMessagesToggle();
+  const url = new URL(window.location.href);
+  url.searchParams.set("v", BUILD_VERSION);
+  window.history.replaceState({}, "", url.toString());
 }
 
-bootApp();
+boot().catch((error) => {
+  console.error(error);
+  setCommandStatusMessage(String(error?.message || "Не удалось запустить интерфейс."), { tone: "error" });
+});
