@@ -20,7 +20,7 @@ const state = {
   }
 };
 
-const BUILD_VERSION = "20260415-1710";
+const BUILD_VERSION = "20260416-0038";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -1351,7 +1351,6 @@ function bindAssistantReplyInteractions(container, replies) {
         force: true,
         threadId
       });
-
       commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
       window.setTimeout(() => {
         commandInput.focus();
@@ -1492,7 +1491,7 @@ function renderCommands() {
           <time>${formatDate(entry.createdAt)}</time>
         </div>
         <p>${escapeHtml(text)}</p>
-        ${hasPhoto ? '<div class="command-photo-note">К сообщению приложено фото.</div>' : ""}
+        ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
         ${fallbackNote ? `<div class="command-fallback-note">${escapeHtml(fallbackNote)}</div>` : ""}
         ${repliesMarkup}
         <div class="command-item-top">

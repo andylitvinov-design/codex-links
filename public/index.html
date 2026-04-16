@@ -11,13 +11,13 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260415-1710" />
+    <link rel="stylesheet" href="/styles.css?v=20260416-0038" />
   </head>
   <body>
     <main class="page">
       <section class="chat-shell">
         <header class="chat-header">
-          <h1>Ссылки (test ok)</h1>
+          <h1>Ссылки</h1>
           <div class="header-actions">
             <a class="button button-secondary header-link-button" href="/projects.html">Projects</a>
             <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
@@ -64,18 +64,18 @@
         <section class="command-wrap">
           <form id="command-form" class="command-form">
             <div class="thread-select-row">
+              <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
               <label class="thread-select-field">
                 <span class="field-label">Беседа Codex</span>
                 <select id="command-thread-select" name="thread"></select>
               </label>
-              <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
             </div>
             <div class="thread-settings-inline-row">
-              <span id="thread-settings-summary" class="form-status">Показываются все чаты.</span>
               <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
                 <input id="thread-settings-show-all" type="checkbox" />
                 <span>Все</span>
               </label>
+              <span id="thread-settings-summary" class="form-status">Показываются все чаты.</span>
             </div>
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
@@ -126,6 +126,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260415-1710"></script>
+    <script type="module" src="/app.js?v=20260416-0038"></script>
   </body>
 </html>
