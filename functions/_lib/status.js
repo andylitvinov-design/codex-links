@@ -48,14 +48,22 @@ function normalizeStatus(input) {
 
 export async function readBridgeStatus(env) {
   const runtimeConfig = await readRuntimeConfig(env);
+  const configuredDispatchMode = getConfiguredDispatchMode(runtimeConfig);
   const raw = await env.LINKS_STORE.get(BRIDGE_STATUS_STORAGE_KEY, "json");
   const status = normalizeStatus(raw);
 
-  if (!status.dispatchMode) {
-    status.dispatchMode = getConfiguredDispatchMode(runtimeConfig);
+  if (!status.dispatchMode || (
+    configuredDispatchMode === DISPATCH_MODE_SLACK
+    && isSlackDispatchConfigured(runtimeConfig)
+    && status.dispatchMode !== DISPATCH_MODE_SLACK
+  )) {
+    status.dispatchMode = configuredDispatchMode;
   }
 
-  if (!status.executorLabel) {
+  if (!status.executorLabel || (
+    status.dispatchMode === DISPATCH_MODE_SLACK
+    && status.executorLabel !== getDispatchModeLabel(DISPATCH_MODE_SLACK)
+  )) {
     status.executorLabel = getDispatchModeLabel(status.dispatchMode);
   }
 
@@ -88,6 +96,7 @@ export async function writeBridgeStatus(env, input) {
 
 export async function deriveBridgeStatusFromCommands(env, patch = {}) {
   const runtimeConfig = await readRuntimeConfig(env);
+  const configuredDispatchMode = getConfiguredDispatchMode(runtimeConfig);
   const commands = await readCommands(env);
   const current = await readBridgeStatus(env);
   const active = commands
@@ -99,8 +108,8 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
   return normalizeStatus({
     ...current,
     ...patch,
-    dispatchMode: patch.dispatchMode || current.dispatchMode || getConfiguredDispatchMode(runtimeConfig),
-    executorLabel: patch.executorLabel || current.executorLabel || getDispatchModeLabel(patch.dispatchMode || current.dispatchMode),
+    dispatchMode: patch.dispatchMode || configuredDispatchMode || current.dispatchMode,
+    executorLabel: patch.executorLabel || getDispatchModeLabel(patch.dispatchMode || configuredDispatchMode || current.dispatchMode),
     pendingCount: active.length,
     oldestPendingAt: active[0]?.createdAt || "",
     lastRunAt: patch.lastRunAt || current.lastRunAt,
