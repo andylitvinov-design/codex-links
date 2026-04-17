@@ -76,6 +76,36 @@ function isRealThreadId(value) {
   return /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(String(value || "").trim());
 }
 
+function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
+  const sourceThreadId = String(command?.threadId || "").trim();
+  const sourceThreadLabel = String(command?.threadLabel || "").trim();
+  const fallbackThreadId = String(command?.fallbackThreadId || "").trim();
+  const fallbackThreadLabel = String(command?.fallbackThreadLabel || "").trim();
+  let threadId = sourceThreadId;
+  let threadLabel = sourceThreadLabel;
+
+  if (!isRealThreadId(threadId) && isRealThreadId(fallbackThreadId)) {
+    threadId = fallbackThreadId;
+    threadLabel = fallbackThreadLabel || threadLabel;
+  }
+
+  if (!isRealThreadId(threadId)) {
+    if (
+      threadId.toLowerCase() === "links"
+      || threadLabel.toLowerCase() === "links"
+    ) {
+      threadId = legacyLinksThreadId || "";
+    }
+  }
+
+  return {
+    executionThreadId: threadId,
+    executionThreadLabel: threadLabel,
+    sourceThreadId,
+    sourceThreadLabel
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -591,17 +621,12 @@ while (true) {
   try {
     await updateProgress(command.id, "claimed");
 
-    let threadId = String(command?.threadId || "").trim();
-    const threadLabel = String(command?.threadLabel || "").trim();
-
-    if (!isRealThreadId(threadId)) {
-      if (
-        threadId.toLowerCase() === "links" ||
-        threadLabel.toLowerCase() === "links"
-      ) {
-        threadId = legacyLinksThreadId || "";
-      }
-    }
+    const {
+      executionThreadId,
+      sourceThreadId,
+      sourceThreadLabel
+    } = getResolvedExecutionThread(command, legacyLinksThreadId);
+    let threadId = executionThreadId;
 
     if (!threadId) {
       throw new Error("Missing threadId.");
@@ -653,13 +678,16 @@ while (true) {
 
     await updateProgress(command.id, "saving-reply");
 
+    const deliveryThreadId = sourceThreadId || threadId;
+    const deliveryThreadLabel = sourceThreadLabel || command.threadLabel || deliveryThreadId;
+
     const completedEntry = {
       id: command.id,
-      threadId,
-      threadLabel: command.threadLabel || threadId,
+      threadId: deliveryThreadId,
+      threadLabel: deliveryThreadLabel,
       ackedAt
     };
-    const syncedMessage = createAssistantMessage(command, threadId, command.threadLabel || threadId, assistantText, ackedAt);
+    const syncedMessage = createAssistantMessage(command, deliveryThreadId, deliveryThreadLabel, assistantText, ackedAt);
 
     completed.push(completedEntry);
     syncedMessages.push(syncedMessage);

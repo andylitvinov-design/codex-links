@@ -4,6 +4,8 @@ import fs from "node:fs";
 
 const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
+const MAX_THREADS_PER_CATEGORY = 7;
+const MIN_THREAD_MESSAGES = 4;
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running thread sync.");
@@ -116,6 +118,16 @@ function getThreadMessageCountFromSession(sessionPath) {
   }
 }
 
+function normalizeThreadTimestamp(rawValue) {
+  const value = Number(rawValue);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return Math.floor(value);
+}
+
 const threads = await withCodexAppServer(async ({ request }) => {
   const items = [];
   const seen = new Set();
@@ -134,8 +146,10 @@ const threads = await withCodexAppServer(async ({ request }) => {
       const rawLabel = String(row?.name || row?.preview || "").trim();
       const category = getCategoryFromCwd(row?.cwd);
       const messageCount = getThreadMessageCountFromSession(row?.path);
+      const createdAt = normalizeThreadTimestamp(row?.createdAt);
+      const updatedAt = normalizeThreadTimestamp(row?.updatedAt);
 
-      if (!shouldIncludeThread(rawLabel) || !id) {
+      if (!shouldIncludeThread(rawLabel) || !id || messageCount < MIN_THREAD_MESSAGES) {
         continue;
       }
 
@@ -147,7 +161,7 @@ const threads = await withCodexAppServer(async ({ request }) => {
       }
 
       seen.add(id);
-      items.push({ id, label, category, displayLabel, messageCount });
+      items.push({ id, label, category, displayLabel, messageCount, createdAt, updatedAt });
     }
 
     if (!result?.nextCursor) {
@@ -157,7 +171,22 @@ const threads = await withCodexAppServer(async ({ request }) => {
     cursor = result.nextCursor;
   }
 
-  return items;
+  return [...items.reduce((groups, item) => {
+    const key = item.category || "other";
+    const bucket = groups.get(key) || [];
+    bucket.push(item);
+    groups.set(key, bucket);
+    return groups;
+  }, new Map()).values()]
+    .flatMap((bucket) =>
+      bucket
+        .sort((left, right) =>
+          (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+          || right.messageCount - left.messageCount
+          || left.label.localeCompare(right.label, "ru")
+        )
+        .slice(0, MAX_THREADS_PER_CATEGORY)
+    );
 });
 
 const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/threads`, {

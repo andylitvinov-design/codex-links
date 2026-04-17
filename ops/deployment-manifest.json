@@ -1,0 +1,17 @@
+{
+  "repository": "andylitvinov-design/codex-links",
+  "platform": "cloudflare-pages",
+  "projectName": "codex-links",
+  "productionBranch": "main",
+  "previewRule": "Every pull request must receive a Cloudflare preview deploy before merge.",
+  "productionRule": "Only merged commits on main may update production.",
+  "rollback": {
+    "git": "node scripts/revert-last-good.mjs --commit <bad-commit-sha> --push",
+    "platform": "Redeploy the previous known-good Cloudflare Pages deployment, then merge the revert PR."
+  },
+  "smokeValidation": [
+    "npm run cloud:check",
+    "npm run smoke:release"
+  ],
+  "smokeUrl": "https://codex-links.pages.dev/"
+}

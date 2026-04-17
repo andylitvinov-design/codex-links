@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260417-1230" />
+    <link rel="stylesheet" href="/styles.css?v=20260417-2345" />
   </head>
   <body>
     <main class="page">
@@ -19,6 +19,16 @@
         <header class="chat-header">
           <h1>Ссылки</h1>
           <div class="header-actions">
+            <div class="dispatch-toggle" id="dispatch-toggle" role="tablist" aria-label="Режим отправки">
+              <button class="dispatch-toggle-button is-active" id="dispatch-mode-bridge" type="button" data-mode="bridge" role="tab" aria-selected="true">
+                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
+                <span>Bridge</span>
+              </button>
+              <button class="dispatch-toggle-button" id="dispatch-mode-cloud" type="button" data-mode="cloud" role="tab" aria-selected="false">
+                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
+                <span>Cloud</span>
+              </button>
+            </div>
             <a class="button button-secondary header-link-button" href="/projects.html">Projects</a>
             <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
             <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
@@ -42,7 +52,7 @@
           <form id="command-form" class="command-form">
             <div class="thread-select-row">
               <label class="thread-select-field">
-                <span class="field-label">Беседа Codex</span>
+                <span class="field-label" id="command-target-label">Беседа Codex</span>
                 <select id="command-thread-select" name="thread"></select>
               </label>
               <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
@@ -54,6 +64,13 @@
                 <span>Все</span>
               </label>
             </div>
+            <section id="cloud-repo-panel" class="cloud-repo-panel" hidden>
+              <div class="thread-categories-top">
+                <span class="field-label">Cloud repositories</span>
+                <span id="cloud-repo-summary" class="form-status"></span>
+              </div>
+              <div id="cloud-repo-list" class="cloud-repo-list" aria-live="polite"></div>
+            </section>
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
                 <span class="field-label">Поиск по чатам</span>
@@ -98,7 +115,7 @@
             </div>
           </form>
           <nav class="timeline-tabs" aria-label="Меню чатов">
-            <button class="timeline-tab-button is-active" id="timeline-tab-dialog" type="button" data-tab="dialog">Диалог</button>
+            <button class="timeline-tab-button is-active" id="timeline-tab-dialog" type="button" data-tab="dialog">Диалоги</button>
             <button class="timeline-tab-button" id="timeline-tab-notifications" type="button" data-tab="notifications">Уведомления</button>
           </nav>
           <div id="command-timeline" class="command-timeline" aria-live="polite"></div>
@@ -107,6 +124,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260417-1230"></script>
+    <script type="module" src="/app.js?v=20260417-2345"></script>
   </body>
 </html>
