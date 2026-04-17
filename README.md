@@ -104,6 +104,7 @@ Quick helpers added to this repo:
 
 - Slack app manifest: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
 - Local/prod setup check: `npm run cloud:check`
+- End-to-end text smoke: `npm run cloud:smoke`
 - Bulk Pages secret upload from `.dev.vars`: `npm run cloud:install-secrets`
 - KV-backed runtime config upload from `.dev.vars`: `npm run cloud:save-config`
 

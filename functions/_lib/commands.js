@@ -5,13 +5,14 @@ import {
   MAX_COMMANDS
 } from "./constants.js";
 import { DISPATCH_MODE_LOCAL, DISPATCH_MODE_SLACK, normalizeDispatchMode } from "./dispatch.js";
+import { parseCommandError, stringifyCommandError } from "./command-debug.js";
 
 const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 const STALE_LOCAL_QUEUE_MS = 20 * 1000;
 const STALE_SLACK_DISPATCH_MS = 5 * 60 * 1000;
-const STALE_SLACK_SILENT_MS = 3 * 60 * 1000;
-const STALE_SLACK_PROCESSING_MS = 10 * 60 * 1000;
+const STALE_SLACK_SILENT_MS = 45 * 1000;
+const STALE_SLACK_PROCESSING_MS = 90 * 1000;
 const STALE_LOCAL_PROCESSING_MS = 45 * 1000;
 
 function normalizeCommandStatus(rawStatus) {
@@ -117,7 +118,9 @@ function normalizeStringArray(rawValue, maxItems = 8, maxLength = 80) {
 }
 
 function normalizeErrorMessage(rawValue) {
-  return String(rawValue || "").trim().slice(0, 500);
+  const value = String(rawValue || "").trim().slice(0, 500);
+  const parsed = parseCommandError(value);
+  return parsed ? stringifyCommandError(parsed) : value;
 }
 
 function normalizeDateValue(rawValue) {
@@ -796,7 +799,7 @@ export async function markCommandDispatched(env, input = {}) {
     ...command,
     dispatchMode: normalizeDispatchValue(input.dispatchMode || command.dispatchMode),
     status: "processing",
-    progressStage: "processing",
+    progressStage: normalizeProgressStage(input.progressStage) || "processing",
     progressUpdatedAt: nowIso,
     slackChannelId: normalizeSlackValue(input.slackChannelId),
     slackMessageTs: normalizeSlackValue(input.slackMessageTs),
@@ -885,8 +888,10 @@ export async function recoverStaleSlackCommands(env, options = {}) {
     }
 
     const canFallbackToLocal = fallbackToLocal && (
-      (String(command.threadId || "").trim() && !String(command.threadId || "").trim().startsWith("cloud:"))
-      || String(command.fallbackThreadId || "").trim()
+      (
+        (String(command.threadId || "").trim() && !String(command.threadId || "").trim().startsWith("cloud:"))
+        || String(command.fallbackThreadId || "").trim()
+      )
     );
 
     if (command.status === "dispatched") {
@@ -904,8 +909,19 @@ export async function recoverStaleSlackCommands(env, options = {}) {
         progressStage: canFallbackToLocal ? "queued" : "failed",
         progressUpdatedAt: nowIso,
         errorMessage: canFallbackToLocal
-          ? "Cloud dispatch timeout. Automatically switched to local bridge."
-          : "Codex did not acknowledge the Slack task in time.",
+          ? stringifyCommandError({
+              code: "fallback_to_bridge",
+              stage: "fallback-to-bridge",
+              message: "Cloud dispatch timeout. Automatically switched to local bridge.",
+              detail: "Slack task was posted, but Codex Cloud did not acknowledge it in time.",
+              fallback: "local-bridge"
+            })
+          : stringifyCommandError({
+              code: "slack_dispatch_timeout",
+              stage: "slack-dispatch-timeout",
+              message: "Codex did not acknowledge the Slack task in time.",
+              detail: "No Codex Cloud acknowledgement was observed for the Slack-dispatched command."
+            }),
         slackChannelId: canFallbackToLocal ? "" : command.slackChannelId,
         slackMessageTs: canFallbackToLocal ? "" : command.slackMessageTs,
         slackThreadTs: canFallbackToLocal ? "" : command.slackThreadTs,
@@ -936,8 +952,19 @@ export async function recoverStaleSlackCommands(env, options = {}) {
         progressStage: canFallbackToLocal ? "queued" : "failed",
         progressUpdatedAt: nowIso,
         errorMessage: canFallbackToLocal
-          ? "Cloud reply timeout. Automatically switched to local bridge."
-          : "Codex did not send a Slack reply in time.",
+          ? stringifyCommandError({
+              code: "fallback_to_bridge",
+              stage: "fallback-to-bridge",
+              message: "Cloud reply timeout. Automatically switched to local bridge.",
+              detail: "Slack dispatch succeeded, but no threaded Codex reply arrived in time.",
+              fallback: "local-bridge"
+            })
+          : stringifyCommandError({
+              code: "slack_reply_timeout",
+              stage: "slack-reply-timeout",
+              message: "Codex did not send a Slack reply in time.",
+              detail: "Slack dispatch succeeded, but no threaded Codex reply was linked back to the command."
+            }),
         slackChannelId: canFallbackToLocal ? "" : command.slackChannelId,
         slackMessageTs: canFallbackToLocal ? "" : command.slackMessageTs,
         slackThreadTs: canFallbackToLocal ? "" : command.slackThreadTs,
@@ -971,10 +998,8 @@ export async function recoverStaleLocalCommands(env, options = {}) {
       return command;
     }
 
-    const cameFromCloudFallback = /cloud .*switched to local bridge|cloud does not support photo attachments yet/i.test(String(command.errorMessage || ""));
     const canFallbackToSlack = preferSlack
       && !command.photo
-      && !cameFromCloudFallback
       && String(command.targetRepo || "").trim();
 
     if (command.status === "queued") {
@@ -990,7 +1015,13 @@ export async function recoverStaleLocalCommands(env, options = {}) {
         progressStage: "queued",
         progressUpdatedAt: nowIso,
         errorMessage: canFallbackToSlack
-          ? "Local bridge queue timeout. Automatically switched to Codex Cloud."
+          ? stringifyCommandError({
+              code: "fallback_to_cloud",
+              stage: "fallback-to-cloud",
+              message: "Local bridge queue timeout. Automatically switched to Codex Cloud.",
+              detail: "The local bridge did not claim the command from the queue in time.",
+              fallback: "slack-codex-cloud"
+            })
           : command.errorMessage,
         processingStartedAt: "",
         processingLeaseUntil: "",
@@ -1020,7 +1051,13 @@ export async function recoverStaleLocalCommands(env, options = {}) {
       progressStage: "queued",
       progressUpdatedAt: nowIso,
       errorMessage: canFallbackToSlack
-        ? "Local bridge timeout. Automatically switched to Codex Cloud."
+        ? stringifyCommandError({
+            code: "fallback_to_cloud",
+            stage: "fallback-to-cloud",
+            message: "Local bridge timeout. Automatically switched to Codex Cloud.",
+            detail: "The local bridge stopped heartbeating while processing the command.",
+            fallback: "slack-codex-cloud"
+          })
         : command.errorMessage,
       processingStartedAt: "",
       processingLeaseUntil: "",

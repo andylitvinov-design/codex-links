@@ -344,6 +344,28 @@ input[type="radio"] {
   margin: 0;
 }
 
+.command-photo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.command-photo-field {
+  min-width: 0;
+}
+
+.command-photo-clear {
+  min-width: 144px;
+}
+
+.command-photo-clear:disabled {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+
 .thread-settings-inline-row {
   display: flex;
   align-items: center;
@@ -1051,6 +1073,14 @@ code {
 
   .command-compose-row {
     grid-template-columns: minmax(0, 1fr) 52px;
+  }
+
+  .command-photo-row {
+    grid-template-columns: 1fr;
+  }
+
+  .command-photo-clear {
+    width: 100%;
   }
 
   .submit-progress-wrap {

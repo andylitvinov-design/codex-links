@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260417-2358" />
+    <link rel="stylesheet" href="/styles.css?v=20260418-0001" />
   </head>
   <body>
     <main class="page">
@@ -64,16 +64,6 @@
                 <span>Все</span>
               </label>
             </div>
-            <section id="cloud-repo-panel" class="cloud-repo-panel" hidden>
-              <div class="thread-categories-top">
-                <span class="field-label">Cloud repositories</span>
-                <span id="cloud-repo-summary" class="form-status"></span>
-              </div>
-              <label class="cloud-repo-field">
-                <span class="field-label">Репозиторий</span>
-                <select id="cloud-repo-select" class="cloud-repo-select" aria-live="polite"></select>
-              </label>
-            </section>
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
                 <span class="field-label">Поиск по чатам</span>
@@ -93,10 +83,13 @@
               </div>
               <div id="thread-settings-list" class="thread-settings-list" aria-live="polite"></div>
             </section>
-            <label>
-              <span class="field-label">Фото</span>
-              <input id="command-photo-input" name="photo" type="file" accept="image/*" />
-            </label>
+            <div class="command-photo-row">
+              <label class="command-photo-field">
+                <span class="field-label">Фото</span>
+                <input id="command-photo-input" name="photo" type="file" accept="image/*" />
+              </label>
+              <button class="button button-secondary command-photo-clear" id="command-photo-clear" type="button" disabled>Удалить фото</button>
+            </div>
             <p id="command-photo-status" class="form-status command-photo-status">Фото не выбрано.</p>
             <div class="command-compose-row">
               <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true"></textarea>
@@ -127,6 +120,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260417-2358"></script>
+    <script type="module" src="/app.js?v=20260418-0001"></script>
   </body>
 </html>
