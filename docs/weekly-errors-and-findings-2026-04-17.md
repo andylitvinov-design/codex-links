@@ -128,6 +128,100 @@ Rules now enforced in repo code:
 - after fallback, executor is final for that command
 - UI now shows requested executor, actual executor, and fallback reason separately
 
+## 2026-04-17 Production Follow-Up: Slack Cloud And Photo Delivery
+
+### Newly confirmed errors
+
+- `cloud` requests from the site were still reaching `Direct OpenAI cloud` instead of the intended `Codex Cloud via Slack` path because `slack-codex-cloud` had been collapsed into the same dispatch mode as `cloud`.
+- Bridge claim timeout was too aggressive for real delivery conditions:
+  - fast watchdog path used `3s`
+  - maintenance path used a different threshold
+  - result: healthy bridge work could be switched away before claim/ack stabilized
+- `cloud + photo` failed after Slack thread creation with:
+  - code: `slack_photo_upload_failed`
+  - detail: `missing_scope`
+  - result: command fell back to local bridge
+- `cloud` smoke could produce false positives because the probe looked for `OK` in the whole Slack thread and matched the root task text itself.
+- Even after routing was fixed, `cloud via Slack` could still fall back to bridge if Codex did not send a fast enough first acknowledgement in the Slack thread.
+
+### Fixes landed
+
+- Distinct dispatch modes were restored:
+  - `cloud` = direct OpenAI cloud
+  - `slack-codex-cloud` = Codex Cloud via Slack
+- Request routing now prefers `slack-codex-cloud` when the UI asks for cloud and Slack dispatch is configured.
+- Bridge fast-claim timeout was increased to reduce premature fallback.
+- Smoke coverage now includes:
+  - `bridge` text
+  - `bridge` photo
+  - `cloud` text
+  - `cloud` photo
+- Slack app manifest now requests `files:write` so threaded file upload is represented in source control.
+
+### Production state after merge
+
+- PR merged: `#26` `Restore Slack cloud routing and photo smoke coverage`
+- `main` contains the routing fix
+- production build updated to:
+  - `public/version.json` -> `20260417-1910`
+- remaining external blocker:
+  - Slack app must be reinstalled after adding `files:write`
+
+### Remaining operational blockers
+
+- `cloud via Slack` is not yet reliable enough to stay on cloud for all text commands because the current first-ack watchdog can still reroute to bridge before Slack-thread acknowledgement arrives.
+- `cloud + photo` will not complete until the Slack app is reauthorized with the new scope set.
+
+### Recommended next actions
+
+1. Reinstall the Slack app after adding `files:write`.
+2. Re-run:
+   - `npm run cloud:smoke`
+   - `npm run cloud:photo-smoke`
+3. If text tasks still bounce to bridge, extend or redesign the `cloud via Slack` first-ack watchdog.
+4. Keep using bridge as the safe photo fallback until Slack reinstall is complete and verified.
+
+## 2026-04-17 Post-Reinstall Verification
+
+After Slack app reinstall with `files:write`:
+
+- `cloud + text` reached `slack-codex-cloud` successfully and the probe returned into the Codex thread, which confirms end-to-end delivery to Codex Cloud.
+- `cloud + photo` reached `slack-codex-cloud` and no longer failed with `missing_scope`.
+- remaining problem was unchanged watchdog behavior:
+  - both text and photo were moved to `local-bridge`
+  - fallback reason stayed `No first executor acknowledgement was observed within the fast cloud first-ack window.`
+
+Updated interpretation:
+
+- Slack scope issue is resolved.
+- The current highest-priority blocker is no longer Slack file permission.
+- The current highest-priority blocker is the `cloud via Slack` first-ack timeout policy.
+
+## 2026-04-17 Routing Simplification Decision
+
+New rule accepted for the product:
+
+- if `Bridge` is selected in the app:
+  - dispatch starts on local bridge
+  - if bridge hangs, task may be rerouted to cloud
+- if `Bridge` is not selected:
+  - dispatch is cloud-only
+  - cloud tasks must not auto-fallback back into bridge
+
+New error knowledge recorded:
+
+- `cloud -> bridge` fallback was making cloud-selected tasks look successful while silently switching executors, which hid the real cloud-worker failure mode.
+- after Slack scope fix, the remaining cloud-photo blocker was no longer `missing_scope`; the remaining issue became:
+  - Slack thread is created
+  - but the external Codex/Slack worker still does not respond in-thread in time
+- photo delivery to Slack cloud needs stronger worker prompting than “file exists in thread” alone.
+
+New fixes prepared:
+
+- removed automatic `cloud -> bridge` fallback for Slack-cloud execution
+- kept `bridge -> cloud` fallback for stalled bridge commands
+- after Slack photo upload, the app now posts an explicit thread nudge with the uploaded file reference and asks Codex to acknowledge in the same thread
+
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
