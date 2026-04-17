@@ -9,6 +9,7 @@
     "kv:seed": "node scripts/seed-demo.mjs",
     "cloud:check": "node scripts/check-cloud-setup.mjs",
     "cloud:smoke": "node scripts/smoke-cloud-delivery.mjs",
+    "bridge:smoke": "node scripts/smoke-bridge-delivery.mjs",
     "cloud:install-secrets": "zsh scripts/install-pages-secrets.sh",
     "cloud:save-config": "node scripts/save-cloud-config.mjs",
     "cloud:sync-repos": "node scripts/sync-cloud-repos.mjs",

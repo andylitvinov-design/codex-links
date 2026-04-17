@@ -11,6 +11,9 @@ function normalizeConfig(input) {
     COMMAND_DISPATCH_MODE: normalizeValue(source.COMMAND_DISPATCH_MODE, 80),
     GITHUB_OWNER: normalizeValue(source.GITHUB_OWNER, 120),
     GITHUB_TOKEN: normalizeValue(source.GITHUB_TOKEN, 300),
+    OPENAI_API_KEY: normalizeValue(source.OPENAI_API_KEY, 300),
+    PUBLIC_GA4_DEBUG_MODE: normalizeValue(source.PUBLIC_GA4_DEBUG_MODE, 20),
+    PUBLIC_GA4_MEASUREMENT_ID: normalizeValue(source.PUBLIC_GA4_MEASUREMENT_ID, 40),
     SLACK_BOT_TOKEN: normalizeValue(source.SLACK_BOT_TOKEN, 300),
     SLACK_SIGNING_SECRET: normalizeValue(source.SLACK_SIGNING_SECRET, 300),
     SLACK_CODEX_CHANNEL_ID: normalizeValue(source.SLACK_CODEX_CHANNEL_ID, 120),
@@ -27,6 +30,9 @@ function mergeConfig(stored, env) {
     COMMAND_DISPATCH_MODE: env?.COMMAND_DISPATCH_MODE || base.COMMAND_DISPATCH_MODE,
     GITHUB_OWNER: env?.GITHUB_OWNER || base.GITHUB_OWNER,
     GITHUB_TOKEN: env?.GITHUB_TOKEN || base.GITHUB_TOKEN,
+    OPENAI_API_KEY: env?.OPENAI_API_KEY || base.OPENAI_API_KEY,
+    PUBLIC_GA4_DEBUG_MODE: env?.PUBLIC_GA4_DEBUG_MODE || base.PUBLIC_GA4_DEBUG_MODE,
+    PUBLIC_GA4_MEASUREMENT_ID: env?.PUBLIC_GA4_MEASUREMENT_ID || base.PUBLIC_GA4_MEASUREMENT_ID,
     SLACK_BOT_TOKEN: env?.SLACK_BOT_TOKEN || base.SLACK_BOT_TOKEN,
     SLACK_SIGNING_SECRET: env?.SLACK_SIGNING_SECRET || base.SLACK_SIGNING_SECRET,
     SLACK_CODEX_CHANNEL_ID: env?.SLACK_CODEX_CHANNEL_ID || base.SLACK_CODEX_CHANNEL_ID,
@@ -82,10 +88,24 @@ export function describeConfig(config) {
     COMMAND_DISPATCH_MODE: normalized.COMMAND_DISPATCH_MODE || "",
     GITHUB_OWNER: normalized.GITHUB_OWNER || "",
     GITHUB_TOKEN: mask(normalized.GITHUB_TOKEN),
+    OPENAI_API_KEY: mask(normalized.OPENAI_API_KEY),
+    PUBLIC_GA4_DEBUG_MODE: normalized.PUBLIC_GA4_DEBUG_MODE || "",
+    PUBLIC_GA4_MEASUREMENT_ID: normalized.PUBLIC_GA4_MEASUREMENT_ID || "",
     SLACK_BOT_TOKEN: mask(normalized.SLACK_BOT_TOKEN),
     SLACK_SIGNING_SECRET: mask(normalized.SLACK_SIGNING_SECRET),
     SLACK_CODEX_CHANNEL_ID: mask(normalized.SLACK_CODEX_CHANNEL_ID),
     SLACK_CODEX_USER_ID: mask(normalized.SLACK_CODEX_USER_ID),
     SLACK_CODEX_MENTION: normalized.SLACK_CODEX_MENTION || ""
+  };
+}
+
+export function describePublicConfig(config) {
+  const normalized = normalizeConfig(config);
+
+  return {
+    analytics: {
+      ga4DebugMode: normalized.PUBLIC_GA4_DEBUG_MODE === "1" || normalized.PUBLIC_GA4_DEBUG_MODE.toLowerCase() === "true",
+      ga4MeasurementId: normalized.PUBLIC_GA4_MEASUREMENT_ID || ""
+    }
   };
 }
