@@ -23,6 +23,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -229,6 +233,17 @@ input[type="file"] {
   background: rgba(220, 252, 231, 0.96);
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  width: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  height: 18px;
+  padding: 0;
+  box-shadow: none;
+  accent-color: var(--accent);
+}
+
 .form-status {
   margin: 0;
   padding: 8px 10px;
@@ -254,6 +269,11 @@ input[type="file"] {
   justify-content: space-between;
   gap: 10px;
   margin-top: -2px;
+  min-width: 0;
+}
+
+.thread-settings-summary {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -347,61 +367,167 @@ input[type="file"] {
   border: 1px solid rgba(117, 103, 84, 0.08);
 }
 
+.thread-settings-item input {
+  flex: 0 0 auto;
+}
+
+.thread-settings-item span {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .command-compose-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 56px;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: stretch;
 }
 
 .command-compose-row textarea {
-  min-height: 72px;
+  min-height: 64px;
 }
 
 .button-send-icon {
-  min-width: 0;
+  min-width: 52px;
+  width: 52px;
+  min-height: 52px;
+  align-self: end;
   padding: 0;
-  font-size: 1.1rem;
+  border-radius: 16px;
+  border-color: rgba(15, 118, 110, 0.18);
+  background: linear-gradient(135deg, #0f766e, #16a34a);
+  color: #f7fffd;
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.2);
+}
+
+.button-send-icon span {
+  display: inline-block;
+  font-size: 1rem;
+  line-height: 1;
+  transform: translateX(1px);
+}
+
+.button-send-icon:hover {
+  box-shadow: 0 12px 26px rgba(15, 118, 110, 0.24);
 }
 
 .command-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .submit-progress-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 160px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 120px;
 }
 
 .submit-progress {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 10px;
 }
 
 .submit-progress-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  background: rgba(117, 103, 84, 0.24);
+  background: rgba(145, 132, 115, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(145, 132, 115, 0.18);
+  opacity: 0.55;
+  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
 }
 
 .submit-progress-dot.is-active {
-  background: rgba(15, 118, 110, 0.32);
+  background: rgba(15, 118, 110, 0.9);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+  opacity: 1;
+  transform: scale(1.05);
 }
 
 .submit-progress-dot.is-current {
-  background: var(--accent);
+  background: #0f766e;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.18);
+  transform: scale(1.16);
+}
+
+.submit-progress[data-tone="queued"] .submit-progress-dot.is-active {
+  background: rgba(180, 131, 0, 0.88);
+  box-shadow: 0 0 0 3px rgba(180, 131, 0, 0.12);
+}
+
+.submit-progress[data-tone="queued"] .submit-progress-dot.is-current {
+  background: #b45309;
+  box-shadow: 0 0 0 4px rgba(180, 131, 0, 0.16);
+}
+
+.submit-progress[data-tone="processing"] .submit-progress-dot.is-active {
+  background: rgba(217, 119, 6, 0.92);
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.14);
+}
+
+.submit-progress[data-tone="processing"] .submit-progress-dot.is-current {
+  background: #d97706;
+  box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.18);
 }
 
 .submit-progress[data-tone="error"] .submit-progress-dot.is-active,
 .submit-progress[data-tone="error"] .submit-progress-dot.is-current {
+  background: rgba(220, 38, 38, 0.88);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+
+.submit-progress[data-tone="error"] .submit-progress-dot.is-current {
   background: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.16);
+}
+
+#command-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid rgba(117, 103, 84, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+#command-status:empty {
+  display: none;
+}
+
+#command-status[data-tone="queued"] {
+  color: #8a5a12;
+  border-color: rgba(180, 131, 0, 0.18);
+  background: rgba(255, 249, 235, 0.96);
+}
+
+#command-status[data-tone="processing"] {
+  color: #9a5b07;
+  border-color: rgba(217, 119, 6, 0.24);
+  background: linear-gradient(180deg, rgba(255, 247, 213, 0.98), rgba(255, 237, 173, 0.94));
+}
+
+#command-status[data-tone="success"] {
+  color: #166534;
+  border-color: rgba(22, 163, 74, 0.18);
+  background: rgba(220, 252, 231, 0.96);
+}
+
+#command-status[data-tone="error"] {
+  color: #991b1b;
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(254, 226, 226, 0.96);
 }
 
 .command-timeline {
@@ -563,22 +689,14 @@ code {
     justify-content: center;
   }
 
-  .command-compose-row {
-    grid-template-columns: minmax(0, 1fr) 52px;
-  }
-
   .thread-select-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
   }
 
-  .thread-select-row .button {
-    width: 100%;
-  }
-
   .thread-settings-inline-row {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
   }
 
   .header-actions {
@@ -619,11 +737,30 @@ code {
   }
 
   .thread-settings-item-inline {
-    width: 100%;
-    justify-content: center;
+    width: auto;
+    justify-content: flex-end;
+    padding-inline: 12px;
   }
 
   .menu-button {
-    min-width: 0;
+    min-width: 92px;
+    width: auto;
+  }
+
+  .command-compose-row {
+    grid-template-columns: minmax(0, 1fr) 52px;
+  }
+
+  .submit-progress-wrap {
+    width: 100%;
+    align-items: center;
+  }
+
+  .submit-progress {
+    justify-content: center;
+  }
+
+  .command-answer-badge {
+    display: none;
   }
 }

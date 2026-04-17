@@ -32,19 +32,23 @@ Verified on `2026-04-16`:
 | --- | --- | --- |
 | `links/README.md` + `links/STATE.md` | `andylitvinov-design/codex-links` | dedicated |
 | `artefacts/README.md` + `artefacts/STATE.md` | `andylitvinov-design/artefacts` | dedicated |
-| `active-projects-ops/sales/README.md` + `STATE.md` | `andylitvinov-design/active-projects-ops` | shared repo, not 1:1 |
-| `active-projects-ops/ezohata/README.md` + `STATE.md` | `andylitvinov-design/active-projects-ops` | shared repo, not 1:1 |
+| `alchemist/README.md` + `alchemist/STATE.md` | `andylitvinov-design/alchemist` | dedicated |
+| `sales/README.md` + `sales/STATE.md` | `andylitvinov-design/sales` | dedicated |
+| `ezohata/README.md` + `ezohata/STATE.md` | `andylitvinov-design/ezohata` | dedicated ops repo |
 | `active-projects-ops/system-optimization/README.md` + `STATE.md` | `andylitvinov-design/active-projects-ops` | shared repo, not 1:1 |
 
 Still unverified from the current `links` inventory:
 
 - `Advice`
 - `Brain Management`
-- `Alchemist`
-- `Sales PsiMaster`
 - `Books`
 
 For these projects, `links` currently has live URLs but no verified GitHub repo mapping in the nearby workspace.
+
+Thread sync check on `2026-04-16`:
+
+- `codex-links` currently exposes live chat categories for `links`, `artefacts`, `alchemist`, `sales`, and `ezohata`
+- `links-inbox` heartbeat must stay `ACTIVE`; it now runs `scripts/run-links-bridge.sh`, which syncs Codex threads before starting the bridge loop
 
 ## Command Lifecycle
 

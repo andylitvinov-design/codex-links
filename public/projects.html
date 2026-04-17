@@ -341,7 +341,7 @@
 
       <section class="panel">
         <div class="section-label">Repo Audit</div>
-        <p>Каноническое правило для Codex: один проектный набор документов `README.md` + `STATE.md` должен вести на один GitHub repo root. Ниже показаны только проверенные связи из текущего workspace.</p>
+        <p>Каноническое правило для Codex: один проектный набор документов `README.md` + `STATE.md` должен вести на один GitHub repo root. Ниже показаны проверенные связи из текущего workspace и то, какие проекты уже доступны для правок через чат `codex-links`.</p>
         <ul class="audit-list">
           <li>
             <div class="audit-row">
@@ -349,6 +349,7 @@
                 <strong>codex-links</strong>
                 <p><code>README.md</code> + <code>STATE.md</code> в `links/`</p>
                 <p><a href="https://github.com/andylitvinov-design/codex-links" target="_blank" rel="noopener">github.com/andylitvinov-design/codex-links</a></p>
+                <p>Чат-правки: категория `links` синхронизируется автоматически через heartbeat `links-inbox`.</p>
               </div>
               <span class="audit-status is-good">dedicated repo</span>
             </div>
@@ -359,6 +360,18 @@
                 <strong>artefacts</strong>
                 <p><code>README.md</code> + <code>STATE.md</code> в `artefacts/`</p>
                 <p><a href="https://github.com/andylitvinov-design/artefacts" target="_blank" rel="noopener">github.com/andylitvinov-design/artefacts</a></p>
+                <p>Чат-правки: категория `artefacts` уже видна в `codex-links`.</p>
+              </div>
+              <span class="audit-status is-good">dedicated repo</span>
+            </div>
+          </li>
+          <li>
+            <div class="audit-row">
+              <div class="audit-copy">
+                <strong>alchemist</strong>
+                <p><code>README.md</code> + <code>STATE.md</code> в `alchemist/`</p>
+                <p><a href="https://github.com/andylitvinov-design/alchemist" target="_blank" rel="noopener">github.com/andylitvinov-design/alchemist</a></p>
+                <p>Чат-правки: категория `alchemist` уже видна в `codex-links`.</p>
               </div>
               <span class="audit-status is-good">dedicated repo</span>
             </div>
@@ -367,20 +380,22 @@
             <div class="audit-row">
               <div class="audit-copy">
                 <strong>sales</strong>
-                <p><code>README.md</code> + <code>STATE.md</code> в `active-projects-ops/sales/`</p>
-                <p><a href="https://github.com/andylitvinov-design/active-projects-ops" target="_blank" rel="noopener">github.com/andylitvinov-design/active-projects-ops</a></p>
+                <p><code>README.md</code> + <code>STATE.md</code> в `sales/`</p>
+                <p><a href="https://github.com/andylitvinov-design/sales" target="_blank" rel="noopener">github.com/andylitvinov-design/sales</a></p>
+                <p>Чат-правки: категория `sales` уже видна в `codex-links`.</p>
               </div>
-              <span class="audit-status is-warn">shared repo</span>
+              <span class="audit-status is-good">dedicated repo</span>
             </div>
           </li>
           <li>
             <div class="audit-row">
               <div class="audit-copy">
                 <strong>ezohata</strong>
-                <p><code>README.md</code> + <code>STATE.md</code> в `active-projects-ops/ezohata/`</p>
-                <p><a href="https://github.com/andylitvinov-design/active-projects-ops" target="_blank" rel="noopener">github.com/andylitvinov-design/active-projects-ops</a></p>
+                <p><code>README.md</code> + <code>STATE.md</code> в `ezohata/`</p>
+                <p><a href="https://github.com/andylitvinov-design/ezohata" target="_blank" rel="noopener">github.com/andylitvinov-design/ezohata</a></p>
+                <p>Чат-правки: категория `ezohata` уже видна в `codex-links`; это ops-repo, а не выгруженный код сайта.</p>
               </div>
-              <span class="audit-status is-warn">shared repo</span>
+              <span class="audit-status is-good">dedicated ops repo</span>
             </div>
           </li>
           <li>
@@ -389,6 +404,7 @@
                 <strong>system-optimization</strong>
                 <p><code>README.md</code> + <code>STATE.md</code> в `active-projects-ops/system-optimization/`</p>
                 <p><a href="https://github.com/andylitvinov-design/active-projects-ops" target="_blank" rel="noopener">github.com/andylitvinov-design/active-projects-ops</a></p>
+                <p>Чат-правки: держать как transitional shared repo, пока не вынесен в отдельный root.</p>
               </div>
               <span class="audit-status is-warn">shared repo</span>
             </div>
@@ -397,7 +413,7 @@
             <div class="audit-row">
               <div class="audit-copy">
                 <strong>Неподтверждённые repo-связки</strong>
-                <p>`Advice`, `Brain Management`, `Alchemist`, `Sales PsiMaster`, `Books`</p>
+                <p>`Advice`, `Brain Management`, `Books`</p>
                 <p>В `links` для них есть live URL, но рядом в текущем workspace не найден отдельный проверенный GitHub repo.</p>
               </div>
               <span class="audit-status is-risk">repo not verified</span>
@@ -479,9 +495,9 @@
             <div class="project-head">
               <div class="project-copy">
                 <h2>Ezohata Data</h2>
-                <p>Подтверждённый live storefront, который сейчас служит публичной точкой входа проекта.</p>
+                <p>Публичный storefront плюс отдельный онлайн-дэшборд по 5 финансовым вкладкам Google Sheets.</p>
               </div>
-              <span class="project-meta">1 опубликованная страница</span>
+              <span class="project-meta">2 опубликованные страницы</span>
             </div>
             <ul class="link-list">
               <li>
@@ -490,6 +506,14 @@
                   <a href="https://ezohata.com/" target="_blank" rel="noopener">https://ezohata.com/</a>
                 </div>
                 <span class="analysis-pill is-loading" data-analyze-url="https://ezohata.com/" data-analyze-mode="proxy-only" title="Считаю балл анализа">…</span>
+              </li>
+              <li>
+                <div class="link-main">
+                  <strong>EzoHata Finance Dashboard</strong>
+                  <a href="https://ezohata-dashboard.pages.dev/" target="_blank" rel="noopener">https://ezohata-dashboard.pages.dev/</a>
+                  <p class="note">Онлайн-зеркало финансового дэшборда: 5 вкладок, фильтр по периоду, экспорт CSV по каждой вкладке.</p>
+                </div>
+                <span class="analysis-pill is-loading" data-analyze-url="https://ezohata-dashboard.pages.dev/" title="Считаю балл анализа">…</span>
               </li>
             </ul>
           </article>
