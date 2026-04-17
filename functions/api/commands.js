@@ -15,7 +15,6 @@ import {
   writeCommands
 } from "../_lib/commands.js";
 import { handleOptions, json } from "../_lib/http.js";
-import { upsertMessages } from "../_lib/messages.js";
 import {
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
@@ -58,17 +57,6 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
     progressStage: "queued",
     errorMessage
   });
-
-  await upsertMessages(env, [{
-    id: `dispatch-fallback:${command.id}:${Date.now()}`,
-    clientId: command.clientId,
-    threadId: command.threadId,
-    threadLabel: command.threadLabel,
-    commandId: command.id,
-    role: "assistant",
-    text: "Cloud dispatch недоступен. Команда автоматически переведена на локальный bridge.",
-    createdAt: new Date().toISOString()
-  }]);
 
   await refreshBridgeStatusFromCommands(env, {
     dispatchMode: DISPATCH_MODE_LOCAL,
