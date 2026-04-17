@@ -11,16 +11,10 @@ const state = {
   lastRenderedTimelineSignature: "",
   answerOpenUntil: {},
   answerCloseTimer: null,
-  hardReloading: false,
-  hasLoadedMessagesOnce: false,
-  commandInputAutofill: {
-    text: "",
-    threadId: "",
-    replyId: ""
-  }
+  hardReloading: false
 };
 
-const BUILD_VERSION = "20260416-0115";
+const BUILD_VERSION = "20260416-2305";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -201,6 +195,111 @@ const threadSettingsSave = document.querySelector("#thread-settings-save");
 const threadSettingsSelectAll = document.querySelector("#thread-settings-select-all");
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
 
+function estimateDataUrlBytes(dataUrl) {
+  const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
+
+  if (!match) {
+    return 0;
+  }
+
+  const base64 = match[1];
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Не удалось прочитать фото."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageFromUrl(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Не удалось подготовить фото."));
+    image.src = url;
+  });
+}
+
+async function buildResizedPhotoData(file) {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await loadImageFromUrl(objectUrl);
+    const longestSide = Math.max(image.naturalWidth || 0, image.naturalHeight || 0) || 1;
+    const scale = Math.min(1, MAX_PHOTO_DIMENSION / longestSide);
+    const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+    const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Браузер не смог подготовить фото.");
+    }
+
+    context.drawImage(image, 0, 0, width, height);
+
+    let quality = 0.86;
+    let dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+    while (estimateDataUrlBytes(dataUrl) > MAX_PHOTO_UPLOAD_BYTES && quality > 0.45) {
+      quality -= 0.08;
+      dataUrl = canvas.toDataURL("image/jpeg", quality);
+    }
+
+    if (estimateDataUrlBytes(dataUrl) > MAX_PHOTO_UPLOAD_BYTES) {
+      throw new Error("Фото слишком большое даже после сжатия. Выберите другое изображение.");
+    }
+
+    return {
+      dataUrl,
+      contentType: "image/jpeg",
+      size: estimateDataUrlBytes(dataUrl)
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function preparePhotoPayload(file) {
+  if (!file) {
+    return null;
+  }
+
+  if (!String(file.type || "").toLowerCase().startsWith("image/")) {
+    throw new Error("Можно отправить только изображение.");
+  }
+
+  if (file.size > MAX_PHOTO_FILE_SIZE) {
+    throw new Error("Фото больше 4.5 MB. Уменьшите файл и попробуйте снова.");
+  }
+
+  if (file.size <= MAX_PHOTO_UPLOAD_BYTES) {
+    const dataUrl = await readFileAsDataUrl(file);
+    return {
+      fileName: file.name,
+      contentType: String(file.type || "image/jpeg").toLowerCase(),
+      size: file.size,
+      dataUrl
+    };
+  }
+
+  const resized = await buildResizedPhotoData(file);
+  return {
+    fileName: file.name,
+    contentType: resized.contentType,
+    size: resized.size,
+    dataUrl: resized.dataUrl
+  };
+}
+
 function formatDate(value) {
   try {
     return new Intl.DateTimeFormat("ru-RU", {
@@ -344,77 +443,6 @@ function getSelectedThreadIds() {
   }
 
   return getAllThreadOptions().map((option) => option.id);
-}
-
-function clearCommandInputAutofill() {
-  state.commandInputAutofill = {
-    text: "",
-    threadId: "",
-    replyId: ""
-  };
-}
-
-function getLatestAssistantReplyForThread(threadId) {
-  const normalizedThreadId = String(threadId || "").trim();
-
-  if (!normalizedThreadId) {
-    return null;
-  }
-
-  return [...state.messages]
-    .filter((message) =>
-      message?.role === "assistant"
-      && String(message.threadId || "").trim() === normalizedThreadId
-      && String(message.text || "").trim()
-    )
-    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))[0] || null;
-}
-
-function applyReplyToCommandInput(reply, options = {}) {
-  if (!commandInput || !reply) {
-    return false;
-  }
-
-  const {
-    force = false,
-    threadId = getActiveThreadId()
-  } = options;
-
-  const nextText = String(reply.text || "");
-
-  if (!nextText.trim()) {
-    return false;
-  }
-
-  const currentText = String(commandInput.value || "");
-  const previousAutofill = String(state.commandInputAutofill.text || "");
-
-  if (!force && currentText && currentText !== previousAutofill) {
-    return false;
-  }
-
-  commandInput.value = nextText;
-  state.commandInputAutofill = {
-    text: nextText,
-    threadId: String(threadId || "").trim(),
-    replyId: String(reply.id || "").trim()
-  };
-  return true;
-}
-
-function syncCommandInputWithSelectedThread(options = {}) {
-  const { force = false } = options;
-  const activeThreadId = getActiveThreadId();
-  const latestReply = getLatestAssistantReplyForThread(activeThreadId);
-
-  if (!latestReply) {
-    return false;
-  }
-
-  return applyReplyToCommandInput(latestReply, {
-    force,
-    threadId: activeThreadId
-  });
 }
 
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
@@ -576,6 +604,10 @@ function activateReplyThread(threadId) {
     return false;
   }
 
+  if (commandThreadSelect) {
+    commandThreadSelect.dataset.pendingValue = normalizedId;
+  }
+
   renderCommandThreads();
 
   if ([...commandThreadSelect.options].some((option) => option.value === normalizedId)) {
@@ -616,16 +648,16 @@ function formatCommandStage(command) {
   return relative ? `${label} · ${relative}` : label;
 }
 
-function getLocalBridgeFallbackMessage(command) {
-  if (String(command?.dispatchMode || "").trim() !== "local-bridge") {
+function getCommandDeliveryLabel(command) {
+  return String(command?.dispatchMode || "").trim() === "local-bridge" ? "bridge" : "cloud";
+}
+
+function getCommandFailureMessage(command) {
+  if (String(command?.status || "").trim() !== "failed") {
     return "";
   }
 
-  if (String(command?.status || "").trim() === "failed") {
-    return String(command?.errorMessage || "").trim() || "Локальная доставка не удалась.";
-  }
-
-  return "Используется локальный bridge.";
+  return String(command?.errorMessage || "").trim() || "Не удалось доставить сообщение.";
 }
 
 function buildTimelineSignature(items, context = {}) {
@@ -727,6 +759,7 @@ function isSystemConversationEntry(entry) {
     || text.includes("test command from site api")
     || text.includes("direct deploy command test")
     || text.includes("ready check command")
+    || text.includes("cloud dispatch недоступен. команда автоматически переведена на локальный bridge.")
   );
 }
 
@@ -734,6 +767,7 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
+  const deliveryLabel = getCommandDeliveryLabel(linkedCommand);
   const commandMeta = linkedCommand?.branchName
     ? `<p>Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
     : "";
@@ -743,7 +777,10 @@ function renderAssistantReplyMarkup(replyEntry) {
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
-      <summary>Ответ Codex</summary>
+      <summary>
+        <span>Ответ Codex</span>
+        <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
+      </summary>
       <p>${escapeHtml(replyEntry?.text || "")}</p>
       ${prMeta}
       ${commandMeta}
@@ -785,18 +822,16 @@ function bindAssistantReplyInteractions(container, replies) {
     replyLink.addEventListener("click", () => {
       const threadId = String(replyLink.dataset.threadId || "").trim();
       const reply = normalizedReplies.find((entry) => String(entry?.threadId || "").trim() === threadId) || normalizedReplies[0];
-      const message = reply?.message || null;
       const didActivate = activateReplyThread(threadId);
 
-      if (!didActivate || !message) {
+      if (!didActivate) {
         setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
         return;
       }
 
-      applyReplyToCommandInput(message, {
-        force: true,
-        threadId
-      });
+      if (commandInput) {
+        commandInput.value = "";
+      }
 
       commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
       window.setTimeout(() => {
@@ -927,7 +962,7 @@ function renderCommands() {
 
     if (entry.kind === "command") {
       const command = entry.command;
-      const fallbackNote = getLocalBridgeFallbackMessage(command);
+      const failureMessage = getCommandFailureMessage(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
@@ -939,7 +974,7 @@ function renderCommands() {
         </div>
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
-        ${fallbackNote ? `<div class="command-fallback-note">${escapeHtml(fallbackNote)}</div>` : ""}
+        ${failureMessage ? `<div class="command-fallback-note">${escapeHtml(failureMessage)}</div>` : ""}
         ${repliesMarkup}
         <div class="command-item-top">
           <span>${formatCommandStage(command)}</span>
@@ -1034,6 +1069,7 @@ function renderCommandThreads() {
   const options = getAllThreadOptions();
   const visibleIds = new Set(getSelectedThreadIds());
   const nextOptions = options.filter((option) => visibleIds.has(option.id));
+  const currentValue = String(commandThreadSelect.dataset.pendingValue || commandThreadSelect.value || "").trim();
 
   commandThreadSelect.innerHTML = "";
 
@@ -1044,7 +1080,7 @@ function renderCommandThreads() {
     commandThreadSelect.appendChild(element);
   });
 
-  const currentValue = String(commandThreadSelect.value || "").trim();
+  delete commandThreadSelect.dataset.pendingValue;
   const targetValue = nextOptions.some((option) => option.id === currentValue)
     ? currentValue
     : nextOptions[0]?.id || "";
@@ -1055,7 +1091,6 @@ function renderCommandThreads() {
 
   renderThreadSettingsSummary();
   renderCommands();
-  syncCommandInputWithSelectedThread();
 }
 
 async function fetchBridgeStatus() {
@@ -1144,14 +1179,6 @@ async function fetchMessages() {
 
   const data = await response.json();
   state.messages = Array.isArray(data?.messages) ? data.messages : [];
-  const hasNewAssistantReply = state.hasLoadedMessagesOnce && state.messages.some((message) =>
-    message?.role === "assistant"
-  );
-  state.hasLoadedMessagesOnce = true;
-
-  if (hasNewAssistantReply) {
-    syncCommandInputWithSelectedThread();
-  }
 }
 
 async function refreshAll() {
@@ -1224,11 +1251,8 @@ async function submitCommand(event) {
   const photoFile = commandPhotoInput?.files?.[0];
 
   if (photoFile) {
-    payload.photo = {
-      name: photoFile.name,
-      type: photoFile.type,
-      size: photoFile.size
-    };
+    setPhotoStatusMessage("Подготавливаю фото для отправки…");
+    payload.photo = await preparePhotoPayload(photoFile);
   }
 
   const response = await fetch("/api/commands", {
@@ -1248,7 +1272,6 @@ async function submitCommand(event) {
   }
 
   commandInput.value = "";
-  clearCommandInputAutofill();
 
   if (commandPhotoInput) {
     commandPhotoInput.value = "";
@@ -1290,7 +1313,6 @@ function bindEvents() {
   commandThreadSelect?.addEventListener("change", () => {
     renderThreadSettingsSummary();
     renderCommands();
-    syncCommandInputWithSelectedThread();
   });
 
   commandPhotoInput?.addEventListener("change", () => {
@@ -1301,7 +1323,10 @@ function bindEvents() {
       return;
     }
 
-    setPhotoStatusMessage(`Выбрано фото: ${file.name}`);
+    const sizeLabel = file.size > 1_000_000
+      ? `${(file.size / 1_000_000).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(file.size / 1000))} KB`;
+    setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})`);
   });
 
   threadSettingsToggle?.addEventListener("click", () => {

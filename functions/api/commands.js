@@ -8,13 +8,13 @@ import {
   getCommandsForClient,
   insertCommand,
   listCommandThreads,
+  recoverStaleSlackCommands,
   requeueCommand,
   readCommands,
   updateCommandProgress,
   writeCommands
 } from "../_lib/commands.js";
 import { handleOptions, json } from "../_lib/http.js";
-import { upsertMessages } from "../_lib/messages.js";
 import {
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
@@ -58,17 +58,6 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
     errorMessage
   });
 
-  await upsertMessages(env, [{
-    id: `dispatch-fallback:${command.id}:${Date.now()}`,
-    clientId: command.clientId,
-    threadId: command.threadId,
-    threadLabel: command.threadLabel,
-    commandId: command.id,
-    role: "assistant",
-    text: "Cloud dispatch недоступен. Команда автоматически переведена на локальный bridge.",
-    createdAt: new Date().toISOString()
-  }]);
-
   await refreshBridgeStatusFromCommands(env, {
     dispatchMode: DISPATCH_MODE_LOCAL,
     executorLabel: getDispatchModeLabel(DISPATCH_MODE_LOCAL),
@@ -99,11 +88,11 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     };
   }
 
-  if (!String(command?.text || "").trim()) {
+  if (command?.photo) {
     const fallbackCommand = await fallbackToLocalBridge(
       env,
       command,
-      "Cloud Slack dispatch v1 does not support photo-only requests yet. Falling back to local bridge."
+      "Cloud Slack dispatch v1 does not support photo attachments yet. Falling back to local bridge."
     );
 
     return {
@@ -161,6 +150,7 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
+    await recoverStaleSlackCommands(env);
     const url = new URL(request.url);
     const commandId = url.searchParams.get("id");
     const clientId = url.searchParams.get("clientId");
@@ -319,6 +309,7 @@ export async function onRequest(context) {
   }
 
   const runtimeConfig = await readRuntimeConfig(env);
+  await recoverStaleSlackCommands(env);
   const created = await insertCommand(env, {
     ...(payload || {}),
     dispatchMode: payload?.dispatchMode || getConfiguredDispatchMode(runtimeConfig)
