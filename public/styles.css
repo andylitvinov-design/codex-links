@@ -553,7 +553,7 @@ input[type="radio"] {
 }
 
 .command-item-user {
-  border-left: 4px solid rgba(217, 119, 6, 0.4);
+  border-left: 1px solid rgba(117, 103, 84, 0.12);
 }
 
 .command-item-assistant {
