@@ -272,6 +272,11 @@ input[type="radio"] {
   min-width: 0;
 }
 
+.thread-settings-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .thread-settings-item-inline {
   display: inline-flex;
   align-items: center;
@@ -431,7 +436,7 @@ input[type="radio"] {
 
 .command-timeline {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .command-empty {
@@ -444,10 +449,10 @@ input[type="radio"] {
 
 .command-item {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 11px 12px;
   border: 1px solid rgba(117, 103, 84, 0.12);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -466,14 +471,14 @@ input[type="radio"] {
   justify-content: space-between;
   gap: 10px;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 .command-item p {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.55;
+  line-height: 1.42;
 }
 
 .command-fallback-note {
@@ -514,7 +519,7 @@ input[type="radio"] {
   justify-content: space-between;
   gap: 10px;
   cursor: pointer;
-  padding: 10px 12px;
+  padding: 8px 10px;
   font-weight: 700;
   list-style: none;
 }
@@ -525,7 +530,7 @@ input[type="radio"] {
 
 .command-answer p,
 .command-answer .command-answer-actions {
-  padding: 0 12px 12px;
+  padding: 0 10px 10px;
 }
 
 .command-answer-badge {
@@ -588,22 +593,14 @@ code {
     justify-content: center;
   }
 
-  .command-compose-row {
-    grid-template-columns: minmax(0, 1fr) 52px;
-  }
-
   .thread-select-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
   }
 
-  .thread-select-row .button {
-    width: 100%;
-  }
-
   .thread-settings-inline-row {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
   }
 
   .header-actions {
@@ -644,11 +641,46 @@ code {
   }
 
   .thread-settings-item-inline {
-    width: 100%;
-    justify-content: center;
+    width: auto;
+    justify-content: flex-end;
+    padding-inline: 12px;
   }
 
   .menu-button {
-    min-width: 0;
+    min-width: 92px;
+    width: auto;
+  }
+
+  .command-compose-row {
+    grid-template-columns: minmax(0, 1fr) 52px;
+  }
+
+  .command-timeline {
+    gap: 8px;
+  }
+
+  .command-item {
+    gap: 6px;
+    padding: 10px 11px;
+    border-radius: 14px;
+  }
+
+  .command-item-top {
+    font-size: 0.76rem;
+    gap: 8px;
+  }
+
+  .command-item p {
+    font-size: 0.94rem;
+    line-height: 1.35;
+  }
+
+  .command-answer summary {
+    padding: 8px 10px;
+  }
+
+  .command-answer p,
+  .command-answer .command-answer-actions {
+    padding: 0 10px 10px;
   }
 }
