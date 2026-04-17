@@ -43,6 +43,9 @@ import {
 } from "../_lib/delivery.js";
 
 const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
+const SLACK_DISPATCH_GRACE_MS = 30_000;
+const SLACK_RESULT_WAIT_MS = 3 * 60_000;
+const SLACK_SYNC_POLL_MS = 5_000;
 
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
   const requestedExecutor = String(
@@ -627,7 +630,125 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     return command;
   }
 
-  const waitMs = command.dispatchMode === DISPATCH_MODE_SLACK ? 25_000 : 15_000;
+  if (command.dispatchMode === DISPATCH_MODE_SLACK) {
+    const startedAt = Date.now();
+    let dispatchObservedAt = 0;
+
+    while ((Date.now() - startedAt) < SLACK_RESULT_WAIT_MS) {
+      await sleep(SLACK_SYNC_POLL_MS);
+      command = await getCommandById(env, commandId);
+
+      if (!command) {
+        return null;
+      }
+
+      const status = String(command.status || "").trim().toLowerCase();
+
+      if (
+        status === "answered"
+        || status === "failed"
+        || status === "acked"
+        || Number(command.fallbackCount || 0) >= 1
+      ) {
+        return command;
+      }
+
+      if (String(command.slackChannelId || "").trim() && String(command.slackThreadTs || command.slackMessageTs || "").trim()) {
+        dispatchObservedAt = dispatchObservedAt || Date.now();
+
+        try {
+          await syncSpecificSlackReplies(env, runtimeConfig, [command]);
+        } catch {}
+
+        command = await getCommandById(env, commandId);
+
+        if (!command) {
+          return null;
+        }
+
+        const syncedStatus = String(command.status || "").trim().toLowerCase();
+
+        if (
+          syncedStatus === "answered"
+          || syncedStatus === "failed"
+          || syncedStatus === "acked"
+          || String(command.firstExecutorAckSeenAt || "").trim()
+        ) {
+          return command;
+        }
+
+        continue;
+      }
+
+      if ((Date.now() - startedAt) < SLACK_DISPATCH_GRACE_MS) {
+        continue;
+      }
+
+      if (canFallbackToLocalBridge(command)) {
+        return fallbackToLocalBridge(env, command, {
+          code: "fallback_to_bridge",
+          stage: "fallback-to-bridge",
+          message: "Cloud via Slack did not create a dispatch thread in time. Switched to local bridge.",
+          detail: "Slack dispatch metadata was still missing after the dispatch grace window.",
+          fallback: "local-bridge"
+        });
+      }
+
+      break;
+    }
+
+    command = await getCommandById(env, commandId);
+
+    if (!command) {
+      return null;
+    }
+
+    const status = String(command.status || "").trim().toLowerCase();
+
+    if (
+      status === "answered"
+      || status === "failed"
+      || status === "acked"
+      || String(command.firstExecutorAckSeenAt || "").trim()
+      || Number(command.fallbackCount || 0) >= 1
+    ) {
+      return command;
+    }
+
+    if (canFallbackToLocalBridge(command)) {
+      return fallbackToLocalBridge(env, command, {
+        code: "fallback_to_bridge",
+        stage: "fallback-to-bridge",
+        message: "Cloud via Slack did not produce a reply in time. Switched to local bridge.",
+        detail: dispatchObservedAt
+          ? "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window."
+          : "No Slack dispatch thread or Codex reply was observed within the Slack result wait window.",
+        fallback: "local-bridge"
+      });
+    }
+
+    const failed = await markCommandFailed(env, {
+      id: command.id,
+      progressStage: "failed",
+      timeoutPhase: "result-timeout",
+      lastDiagnosticCode: "cloud_result_timeout",
+      lastDiagnosticDetail: dispatchObservedAt
+        ? "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window."
+        : "No Slack dispatch thread or Codex reply was observed within the Slack result wait window.",
+      errorMessage: stringifyCommandError({
+        code: "cloud_result_timeout",
+        stage: "cloud-result-timeout",
+        message: "Cloud via Slack did not produce a reply in time.",
+        detail: dispatchObservedAt
+          ? "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window."
+          : "No Slack dispatch thread or Codex reply was observed within the Slack result wait window."
+      })
+    });
+
+    return failed.value || command;
+  }
+
+  const waitMs = 15_000;
   await sleep(waitMs);
   command = await getCommandById(env, commandId);
 
@@ -645,34 +766,6 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     || Number(command.fallbackCount || 0) >= 1
   ) {
     return command;
-  }
-
-  if (command.dispatchMode === DISPATCH_MODE_SLACK) {
-    if (canFallbackToLocalBridge(command)) {
-      return fallbackToLocalBridge(env, command, {
-        code: "fallback_to_bridge",
-        stage: "fallback-to-bridge",
-        message: "Cloud via Slack did not acknowledge the task in time. Switched to local bridge.",
-        detail: "No first executor acknowledgement was observed within the fast cloud first-ack window.",
-        fallback: "local-bridge"
-      });
-    }
-
-    const failed = await markCommandFailed(env, {
-      id: command.id,
-      progressStage: "failed",
-      timeoutPhase: "first-ack-timeout",
-      lastDiagnosticCode: "cloud_first_ack_timeout",
-      lastDiagnosticDetail: "No first executor acknowledgement was observed within the fast cloud first-ack window.",
-      errorMessage: stringifyCommandError({
-        code: "cloud_first_ack_timeout",
-        stage: "cloud-first-ack-timeout",
-        message: "Cloud via Slack did not acknowledge the task in time.",
-        detail: "No first executor acknowledgement was observed within the fast cloud first-ack window."
-      })
-    });
-
-    return failed.value || command;
   }
 
   if (canFallbackToCloud(command, runtimeConfig)) {
