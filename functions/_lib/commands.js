@@ -8,8 +8,8 @@ import { DISPATCH_MODE_LOCAL, DISPATCH_MODE_SLACK, normalizeDispatchMode } from 
 
 const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
-const STALE_SLACK_DISPATCH_MS = 90 * 1000;
-const STALE_SLACK_PROCESSING_MS = 20 * 60 * 1000;
+const STALE_SLACK_DISPATCH_MS = 2 * 60 * 1000;
+const STALE_SLACK_PROCESSING_MS = 3 * 60 * 1000;
 
 function normalizeCommandStatus(rawStatus) {
   const status = String(rawStatus || "").trim().toLowerCase();
@@ -807,19 +807,12 @@ export async function recoverStaleSlackCommands(env) {
       changed = true;
       return {
         ...command,
-        dispatchMode: DISPATCH_MODE_LOCAL,
-        status: "queued",
-        progressStage: "queued",
+        status: "failed",
+        progressStage: "failed",
         progressUpdatedAt: nowIso,
-        slackChannelId: "",
-        slackMessageTs: "",
-        slackThreadTs: "",
-        errorMessage: "Slack dispatch timed out before Codex acknowledged the task. Falling back to local bridge.",
-        dispatchedAt: "",
-        processingStartedAt: "",
-        processingLeaseUntil: "",
+        errorMessage: "Codex did not acknowledge the Slack task in time.",
         processorId: "",
-        completedAt: ""
+        completedAt: nowIso
       };
     }
 
@@ -833,19 +826,12 @@ export async function recoverStaleSlackCommands(env) {
       changed = true;
       return {
         ...command,
-        dispatchMode: DISPATCH_MODE_LOCAL,
-        status: "queued",
-        progressStage: "queued",
+        status: "failed",
+        progressStage: "failed",
         progressUpdatedAt: nowIso,
-        slackChannelId: "",
-        slackMessageTs: "",
-        slackThreadTs: "",
-        errorMessage: "Slack processing timed out. Falling back to local bridge.",
-        dispatchedAt: "",
-        processingStartedAt: "",
-        processingLeaseUntil: "",
+        errorMessage: "Codex did not send a Slack reply in time.",
         processorId: "",
-        completedAt: ""
+        completedAt: nowIso
       };
     }
 

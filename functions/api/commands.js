@@ -157,15 +157,22 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   }
 
   if (command?.photo) {
-    const fallbackCommand = await fallbackToLocalBridge(
-      env,
-      command,
-      "Cloud Slack dispatch v1 does not support photo attachments yet. Falling back to local bridge."
-    );
+    const failed = await markCommandFailed(env, {
+      id: command.id,
+      errorMessage: "Cloud Slack dispatch v1 does not support photo attachments yet."
+    });
+
+    await refreshBridgeStatusFromCommands(env, {
+      dispatchMode,
+      executorLabel: getDispatchModeLabel(dispatchMode),
+      bridgeOnline: true,
+      lastRunAt: new Date().toISOString(),
+      lastError: "Cloud Slack dispatch v1 does not support photo attachments yet."
+    });
 
     return {
       ok: true,
-      command: fallbackCommand
+      command: failed.value || command
     };
   }
 
