@@ -14,7 +14,7 @@ const state = {
   hardReloading: false
 };
 
-const BUILD_VERSION = "20260416-2305";
+const BUILD_VERSION = "20260416-2332";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -1143,7 +1143,7 @@ async function fetchThreadCounts() {
 
 async function fetchCommands() {
   const url = new URL("/api/commands", window.location.origin);
-  url.searchParams.set("clientId", storage.clientId);
+  url.searchParams.set("scope", "public");
   url.searchParams.set("_", String(Date.now()));
 
   const response = await fetch(url.toString(), {
@@ -1163,7 +1163,7 @@ async function fetchCommands() {
 
 async function fetchMessages() {
   const url = new URL("/api/messages", window.location.origin);
-  url.searchParams.set("clientId", storage.clientId);
+  url.searchParams.set("scope", "public");
   url.searchParams.set("_", String(Date.now()));
 
   const response = await fetch(url.toString(), {
@@ -1393,6 +1393,10 @@ async function boot() {
 
   if (threadSettingsShowAll) {
     threadSettingsShowAll.checked = storage.showAllMessages;
+  }
+
+  if (commandInput) {
+    commandInput.value = "";
   }
 
   setPhotoStatusMessage("Фото не выбрано.");
