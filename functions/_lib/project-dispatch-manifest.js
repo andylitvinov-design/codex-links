@@ -163,24 +163,53 @@ export function findProjectTargetById(projectId) {
 export function resolveProjectDispatchTarget(input = {}) {
   const project = findProjectTargetById(input.threadId || input.projectId || input.id);
   const dispatchMode = normalizeText(input.dispatchMode, 80).toLowerCase();
+  const providedTargetRepo = normalizeText(input.targetRepo, 240).toLowerCase();
+  const providedTargetRepoUrl = normalizeText(input.targetRepoUrl, 400);
+  const providedWorkspacePath = normalizeText(input.targetWorkspacePath, 500);
+  const providedContextFiles = normalizeContextFiles(input.targetContextFiles);
+  const projectId = normalizeProjectId(input.projectId || input.threadId || input.id) || project?.id || "links";
+  const projectLabel = normalizeText(input.projectLabel, 160) || project?.label || projectId;
+  const projectGroup = normalizeText(input.projectCategory, 120) || project?.group || "other";
 
-  if (!project || !project.visible) {
+  if (!project && !providedTargetRepo) {
     return {
       ok: false,
       error: "Selected project is not present in the dispatch manifest."
     };
   }
 
-  if (dispatchMode === "slack-codex-cloud" && !project.cloudReady) {
+  if (project && !project.visible) {
     return {
       ok: false,
-      error: `Project ${project.label} is bridge-only until a manifest-backed GitHub repository is confirmed.`
+      error: "Selected project is not present in the dispatch manifest."
+    };
+  }
+
+  const effectiveTargetRepo = providedTargetRepo || project?.targetRepo || "";
+  const effectiveTargetRepoUrl = providedTargetRepoUrl || project?.targetRepoUrl || "";
+  const effectiveWorkspacePath = providedWorkspacePath || project?.workspacePath || "";
+  const effectiveContextFiles = providedContextFiles.length ? providedContextFiles : (project?.contextFiles || []);
+
+  if (dispatchMode === "slack-codex-cloud" && !effectiveTargetRepo) {
+    return {
+      ok: false,
+      error: `Project ${projectLabel} is bridge-only until a manifest-backed GitHub repository is confirmed.`
     };
   }
 
   return {
     ok: true,
-    value: project
+    value: {
+      id: projectId,
+      label: projectLabel,
+      group: projectGroup,
+      workspacePath: effectiveWorkspacePath,
+      targetRepo: effectiveTargetRepo,
+      targetRepoUrl: effectiveTargetRepoUrl,
+      contextFiles: effectiveContextFiles,
+      visible: project?.visible ?? true,
+      cloudReady: Boolean(effectiveTargetRepo)
+    }
   };
 }
 
