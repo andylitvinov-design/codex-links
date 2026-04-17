@@ -9,9 +9,21 @@ import {
 import { readCommands } from "./commands.js";
 import { readRuntimeConfig } from "./config.js";
 
+export const BRIDGE_HEARTBEAT_STALE_MS = 75 * 1000;
+
 function normalizeDate(value) {
   const raw = String(value || "").trim();
   return raw || "";
+}
+
+function isRecentTimestamp(value, maxAgeMs = BRIDGE_HEARTBEAT_STALE_MS) {
+  const timestamp = Date.parse(String(value || "").trim());
+
+  if (Number.isNaN(timestamp)) {
+    return false;
+  }
+
+  return (Date.now() - timestamp) <= maxAgeMs;
 }
 
 function normalizeStatus(input) {
@@ -44,6 +56,18 @@ function normalizeStatus(input) {
     lastDeliveredCount: Number.isFinite(Number(input.lastDeliveredCount)) ? Number(input.lastDeliveredCount) : 0,
     lastError: String(input.lastError || "").trim()
   };
+}
+
+export function isBridgeHeartbeatFresh(status, maxAgeMs = BRIDGE_HEARTBEAT_STALE_MS) {
+  return isRecentTimestamp(status?.lastRunAt, maxAgeMs);
+}
+
+export function isLocalBridgeHealthy(status, maxAgeMs = BRIDGE_HEARTBEAT_STALE_MS) {
+  if (String(status?.dispatchMode || "").trim() !== DISPATCH_MODE_LOCAL) {
+    return false;
+  }
+
+  return Boolean(status?.bridgeOnline) && isBridgeHeartbeatFresh(status, maxAgeMs);
 }
 
 export async function readBridgeStatus(env) {
@@ -102,14 +126,30 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
   const active = commands
     .filter((command) => ["queued", "dispatched", "processing"].includes(String(command?.status || "").trim().toLowerCase()))
     .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+  const nextDispatchMode = patch.dispatchMode || configuredDispatchMode || current.dispatchMode;
+  const localActive = active.filter((command) => command.dispatchMode === DISPATCH_MODE_LOCAL);
   const hasActive = active.length > 0;
-  const derivedState = hasActive ? "running" : "idle";
+  const freshHeartbeat = isBridgeHeartbeatFresh({
+    ...current,
+    ...patch,
+    lastRunAt: patch.lastRunAt || current.lastRunAt
+  });
+  const bridgeOnline = typeof patch.bridgeOnline === "boolean"
+    ? patch.bridgeOnline
+    : nextDispatchMode === DISPATCH_MODE_SLACK
+      ? true
+      : (current.bridgeOnline && freshHeartbeat);
+  const derivedState = nextDispatchMode === DISPATCH_MODE_LOCAL && localActive.length > 0 && !bridgeOnline
+    ? "stale"
+    : hasActive
+      ? "running"
+      : "idle";
 
   return normalizeStatus({
     ...current,
     ...patch,
-    dispatchMode: patch.dispatchMode || configuredDispatchMode || current.dispatchMode,
-    executorLabel: patch.executorLabel || getDispatchModeLabel(patch.dispatchMode || configuredDispatchMode || current.dispatchMode),
+    dispatchMode: nextDispatchMode,
+    executorLabel: patch.executorLabel || getDispatchModeLabel(nextDispatchMode),
     pendingCount: active.length,
     oldestPendingAt: active[0]?.createdAt || "",
     lastRunAt: patch.lastRunAt || current.lastRunAt,
@@ -118,7 +158,7 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
     lastDeliveredCount: Number.isFinite(Number(patch.lastDeliveredCount))
       ? Number(patch.lastDeliveredCount)
       : current.lastDeliveredCount,
-    bridgeOnline: typeof patch.bridgeOnline === "boolean" ? patch.bridgeOnline : current.bridgeOnline,
+    bridgeOnline,
     state: typeof patch.state === "string" && patch.state.trim()
       ? String(patch.state).trim()
       : derivedState,
