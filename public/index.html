@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260417-0057" />
+    <link rel="stylesheet" href="/styles.css?v=20260417-1230" />
   </head>
   <body>
     <main class="page">
@@ -28,7 +28,6 @@
         <section class="bridge-status-block">
           <p id="bridge-status-text" class="bridge-status">Подключаю статус Codex Cloud…</p>
           <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
-          <p class="ops-release-notice">Изменение считается завершённым только после ветки или PR в GitHub и понятного deploy status.</p>
         </section>
 
         <section class="projects-entry">
@@ -98,12 +97,16 @@
               </div>
             </div>
           </form>
+          <nav class="timeline-tabs" aria-label="Меню чатов">
+            <button class="timeline-tab-button is-active" id="timeline-tab-dialog" type="button" data-tab="dialog">Диалог</button>
+            <button class="timeline-tab-button" id="timeline-tab-notifications" type="button" data-tab="notifications">Уведомления</button>
+          </nav>
           <div id="command-timeline" class="command-timeline" aria-live="polite"></div>
         </section>
 
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260417-0057"></script>
+    <script type="module" src="/app.js?v=20260417-1230"></script>
   </body>
 </html>

@@ -4,6 +4,7 @@ const state = {
   threads: [],
   threadMessageCounts: {},
   activeThreadCategories: [],
+  activeTimelineTab: "dialog",
   bridgeWatchdog: null,
   commandPoller: null,
   commandPollerInterval: 0,
@@ -14,7 +15,7 @@ const state = {
   hardReloading: false
 };
 
-const BUILD_VERSION = "20260417-0057";
+const BUILD_VERSION = "20260417-1230";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -171,6 +172,17 @@ const storage = {
     const normalized = value ? "1" : "0";
     safeLocalStorageSet("codex-links-show-all-messages", normalized);
     writeCookie("codex-links-show-all-messages", normalized);
+  },
+
+  get activeTimelineTab() {
+    const raw = safeLocalStorageGet("codex-links-active-timeline-tab") ?? readCookie("codex-links-active-timeline-tab");
+    return raw === "notifications" ? "notifications" : "dialog";
+  },
+
+  set activeTimelineTab(value) {
+    const normalized = value === "notifications" ? "notifications" : "dialog";
+    safeLocalStorageSet("codex-links-active-timeline-tab", normalized);
+    writeCookie("codex-links-active-timeline-tab", normalized);
   }
 };
 
@@ -194,6 +206,8 @@ const threadSettingsList = document.querySelector("#thread-settings-list");
 const threadSettingsSave = document.querySelector("#thread-settings-save");
 const threadSettingsSelectAll = document.querySelector("#thread-settings-select-all");
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
+const timelineTabDialog = document.querySelector("#timeline-tab-dialog");
+const timelineTabNotifications = document.querySelector("#timeline-tab-notifications");
 
 function estimateDataUrlBytes(dataUrl) {
   const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
@@ -414,6 +428,8 @@ function getAllThreadOptions() {
         const displayLabel = formatThreadOptionLabel(thread);
         const category = String(thread?.category || "").trim();
         const messageCount = Math.max(0, Number(thread?.messageCount || 0));
+        const createdAt = Math.max(0, Number(thread?.createdAt || 0));
+        const updatedAt = Math.max(0, Number(thread?.updatedAt || 0));
 
         if (!id || !label || !displayLabel) {
           return null;
@@ -424,11 +440,35 @@ function getAllThreadOptions() {
           label,
           displayLabel,
           category,
-          messageCount
+          messageCount,
+          createdAt,
+          updatedAt
         }];
       })
       .filter(Boolean)
-  ).values()].sort((left, right) => left.displayLabel.localeCompare(right.displayLabel, "ru"));
+  ).values()].sort((left, right) =>
+    left.category.localeCompare(right.category, "ru")
+    || (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+    || left.displayLabel.localeCompare(right.displayLabel, "ru")
+  );
+}
+
+function groupThreadOptions(options) {
+  return [...options.reduce((groups, option) => {
+    const key = option.category || "Без категории";
+    const bucket = groups.get(key) || [];
+    bucket.push(option);
+    groups.set(key, bucket);
+    return groups;
+  }, new Map()).entries()]
+    .sort((left, right) => left[0].localeCompare(right[0], "ru"))
+    .map(([category, items]) => ({
+      category,
+      items: items.sort((left, right) =>
+        (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+        || left.displayLabel.localeCompare(right.displayLabel, "ru")
+      )
+    }));
 }
 
 function getActiveThreadId() {
@@ -471,9 +511,10 @@ function renderThreadCategories() {
 
   threadCategoriesList.innerHTML = "";
   const categories = getAllCategories();
+  const totalThreads = getAllThreadOptions().length;
 
   threadCategoriesSummary.textContent = categories.length
-    ? `Показано категорий: ${categories.length}`
+    ? `Категорий: ${categories.length} · чатов: ${totalThreads}`
     : "Категории не найдены.";
 
   categories.forEach((category) => {
@@ -537,41 +578,54 @@ function renderThreadSettingsList() {
 
     return activeCategories.has(option.category);
   });
+  const groupedOptions = groupThreadOptions(options);
 
   threadSettingsList.innerHTML = "";
 
-  options.forEach((option) => {
-    const row = document.createElement("label");
-    row.className = "thread-settings-item";
+  groupedOptions.forEach(({ category, items }) => {
+    const section = document.createElement("section");
+    section.className = "thread-settings-group";
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selectedThreadIds.has(option.id);
-    checkbox.addEventListener("change", () => {
-      const next = new Set(getSelectedThreadIds());
+    const heading = document.createElement("div");
+    heading.className = "thread-settings-group-title";
+    heading.textContent = `${category} · ${items.length}`;
+    section.appendChild(heading);
 
-      if (checkbox.checked) {
-        next.add(option.id);
-      } else {
-        next.delete(option.id);
-      }
+    items.forEach((option) => {
+      const row = document.createElement("label");
+      row.className = "thread-settings-item";
 
-      storage.selectedThreadIds = [...next];
-      renderCommandThreads();
-      renderThreadSettingsList();
-      renderCommands();
-      setCommandStatusMessage(
-        checkbox.checked
-          ? `Чат добавлен в поле Беседа Codex: ${option.displayLabel}.`
-          : `Чат убран из поля Беседа Codex: ${option.displayLabel}.`
-      );
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedThreadIds.has(option.id);
+      checkbox.addEventListener("change", () => {
+        const next = new Set(getSelectedThreadIds());
+
+        if (checkbox.checked) {
+          next.add(option.id);
+        } else {
+          next.delete(option.id);
+        }
+
+        storage.selectedThreadIds = [...next];
+        renderCommandThreads();
+        renderThreadSettingsList();
+        renderCommands();
+        setCommandStatusMessage(
+          checkbox.checked
+            ? `Чат добавлен в поле Беседа Codex: ${option.displayLabel}.`
+            : `Чат убран из поля Беседа Codex: ${option.displayLabel}.`
+        );
+      });
+
+      const text = document.createElement("span");
+      text.textContent = option.displayLabel;
+
+      row.append(checkbox, text);
+      section.appendChild(row);
     });
 
-    const text = document.createElement("span");
-    text.textContent = option.displayLabel;
-
-    row.append(checkbox, text);
-    threadSettingsList.appendChild(row);
+    threadSettingsList.appendChild(section);
   });
 }
 
@@ -654,7 +708,7 @@ function getVisibleTimelineCommands() {
 
   return state.commands
     .filter((command) => !activeThreadId || command.threadId === activeThreadId)
-    .filter((command) => !isSystemConversationEntry(command))
+    .filter((command) => !isHiddenSystemEntry(command))
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
 }
 
@@ -697,6 +751,7 @@ function buildTimelineSignature(items, context = {}) {
   return JSON.stringify({
     activeThreadId: context.activeThreadId || "",
     showAllMessages: Boolean(context.showAllMessages),
+    activeTimelineTab: context.activeTimelineTab || "dialog",
     items: items.map((entry) => ({
       id: entry.id,
       role: entry.role,
@@ -779,7 +834,7 @@ function hasAssistantReply(commandId) {
   return state.messages.some((message) => String(message?.commandId || "").trim() === normalizedId);
 }
 
-function isSystemConversationEntry(entry) {
+function isHiddenSystemEntry(entry) {
   const threadId = String(entry?.threadId || "").trim().toLowerCase();
   const text = String(entry?.text || "").trim().toLowerCase();
 
@@ -793,8 +848,40 @@ function isSystemConversationEntry(entry) {
     || text.includes("test command from site api")
     || text.includes("direct deploy command test")
     || text.includes("ready check command")
-    || text.includes("cloud dispatch недоступен. команда автоматически переведена на локальный bridge.")
   );
+}
+
+function isNotificationEntry(entry) {
+  if (entry?.systemChannel === "notifications") {
+    return true;
+  }
+
+  if (isHiddenSystemEntry(entry)) {
+    return false;
+  }
+
+  const text = String(entry?.text || "").trim().toLowerCase();
+  return text.includes("cloud dispatch недоступен. команда автоматически переведена на локальный bridge.");
+}
+
+function getReleaseNotificationEntry() {
+  return {
+    id: `release:${BUILD_VERSION}`,
+    kind: "notification",
+    role: "assistant",
+    text: "готово",
+    createdAt: "2026-04-17T12:30:00.000Z",
+    threadId: "system-notifications",
+    threadLabel: "Уведомления",
+    systemChannel: "notifications",
+    statusLabel: "Системное сообщение"
+  };
+}
+
+function renderTimelineTabButtons() {
+  const isDialogActive = state.activeTimelineTab !== "notifications";
+  timelineTabDialog?.classList.toggle("is-active", isDialogActive);
+  timelineTabNotifications?.classList.toggle("is-active", !isDialogActive);
 }
 
 function renderAssistantReplyMarkup(replyEntry) {
@@ -879,12 +966,14 @@ function bindAssistantReplyInteractions(container, replies) {
 
 function renderCommands() {
   pruneExpiredAnswerState();
+  renderTimelineTabButtons();
   const showAllMessages = storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
   const visibleCommands = getVisibleTimelineCommands();
   const visibleMessages = state.messages
     .filter((message) => !activeThreadId || message.threadId === activeThreadId)
-    .filter((message) => !isSystemConversationEntry(message));
+    .filter((message) => !isHiddenSystemEntry(message))
+    .filter((message) => !isNotificationEntry(message));
 
   const commandsById = new Map(
     visibleCommands.map((command) => [String(command.id || "").trim(), command])
@@ -960,10 +1049,30 @@ function renderCommands() {
           : []
       }))
   ].sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  const notificationItems = [
+    getReleaseNotificationEntry(),
+    ...state.messages
+      .filter((message) => !activeThreadId || message.threadId === activeThreadId)
+      .filter((message) => isNotificationEntry(message))
+      .map((message) => ({
+        id: `notification:${message.id}`,
+        kind: "notification",
+        role: "assistant",
+        text: message.text || "",
+        createdAt: message.createdAt,
+        threadId: message.threadId || "",
+        threadLabel: message.threadLabel || "",
+        message,
+        systemChannel: "notifications",
+        statusLabel: "Системное сообщение"
+      }))
+  ].sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  const activeItems = state.activeTimelineTab === "notifications" ? notificationItems : timelineItems;
 
-  const signature = buildTimelineSignature(timelineItems, {
+  const signature = buildTimelineSignature(activeItems, {
     activeThreadId,
-    showAllMessages
+    showAllMessages,
+    activeTimelineTab: state.activeTimelineTab
   });
 
   if (signature === state.lastRenderedTimelineSignature) {
@@ -974,17 +1083,35 @@ function renderCommands() {
   state.lastRenderedTimelineSignature = signature;
   commandTimeline.innerHTML = "";
 
-  if (!timelineItems.length) {
-    commandTimeline.innerHTML = '<div class="command-empty">Здесь будут только ваши сообщения и их доставка.</div>';
+  if (!activeItems.length) {
+    commandTimeline.innerHTML = state.activeTimelineTab === "notifications"
+      ? '<div class="command-empty">Системные сообщения появятся здесь.</div>'
+      : '<div class="command-empty">Здесь будут только ваши сообщения и их доставка.</div>';
     state.lastRenderedTimelineSize = 0;
     return;
   }
 
   const fragment = document.createDocumentFragment();
 
-  timelineItems.forEach((entry) => {
+  activeItems.forEach((entry) => {
     const element = document.createElement("article");
     element.className = `command-item ${entry.role === "assistant" ? "command-item-assistant" : "command-item-user"}`;
+
+    if (entry.kind === "notification") {
+      element.classList.add("command-item-notification");
+      element.innerHTML = `
+        <div class="command-item-top">
+          <strong>Система</strong>
+          <time>${formatDate(entry.createdAt)}</time>
+        </div>
+        <p>${escapeHtml(entry.text || "")}</p>
+        <div class="command-item-top">
+          <span>${escapeHtml(entry.statusLabel || "Системное сообщение")}</span>
+        </div>
+      `;
+      fragment.appendChild(element);
+      return;
+    }
 
     if (entry.kind === "command") {
       const command = entry.command;
@@ -1038,7 +1165,7 @@ function renderCommands() {
   });
 
   commandTimeline.appendChild(fragment);
-  state.lastRenderedTimelineSize = timelineItems.length;
+  state.lastRenderedTimelineSize = activeItems.length;
   scheduleAnswerAutoClose();
 }
 
@@ -1097,11 +1224,18 @@ function renderCommandThreads() {
 
   commandThreadSelect.innerHTML = "";
 
-  nextOptions.forEach((option) => {
-    const element = document.createElement("option");
-    element.value = option.id;
-    element.textContent = option.displayLabel;
-    commandThreadSelect.appendChild(element);
+  groupThreadOptions(nextOptions).forEach(({ category, items }) => {
+    const group = document.createElement("optgroup");
+    group.label = category;
+
+    items.forEach((option) => {
+      const element = document.createElement("option");
+      element.value = option.id;
+      element.textContent = option.displayLabel;
+      group.appendChild(element);
+    });
+
+    commandThreadSelect.appendChild(group);
   });
 
   delete commandThreadSelect.dataset.pendingValue;
@@ -1315,7 +1449,11 @@ function startPolling() {
   }
 
   state.commandPollerInterval = FAST_POLL_INTERVAL_MS;
-  state.commandPoller = window.setInterval(() => {
+  state.commandPoller = window.setInterval(async () => {
+    if (await ensureLatestClient()) {
+      return;
+    }
+
     refreshAll().catch(() => {});
   }, state.commandPollerInterval);
 }
@@ -1338,6 +1476,18 @@ function bindEvents() {
 
   commandThreadSelect?.addEventListener("change", () => {
     renderThreadSettingsSummary();
+    renderCommands();
+  });
+
+  timelineTabDialog?.addEventListener("click", () => {
+    state.activeTimelineTab = "dialog";
+    storage.activeTimelineTab = "dialog";
+    renderCommands();
+  });
+
+  timelineTabNotifications?.addEventListener("click", () => {
+    state.activeTimelineTab = "notifications";
+    storage.activeTimelineTab = "notifications";
     renderCommands();
   });
 
@@ -1398,6 +1548,18 @@ function bindEvents() {
     renderCommandThreads();
     renderThreadSettingsList();
   });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+
+    ensureLatestClient().catch(() => {});
+  });
+
+  window.addEventListener("focus", () => {
+    ensureLatestClient().catch(() => {});
+  });
 }
 
 async function boot() {
@@ -1421,12 +1583,20 @@ async function boot() {
     threadSettingsShowAll.checked = storage.showAllMessages;
   }
 
+  state.activeTimelineTab = storage.activeTimelineTab;
+  renderTimelineTabButtons();
+
   if (commandInput) {
     commandInput.value = "";
   }
 
   setPhotoStatusMessage("Фото не выбрано.");
   bindEvents();
+
+  if (await ensureLatestClient()) {
+    return;
+  }
+
   await refreshAll();
   startPolling();
 

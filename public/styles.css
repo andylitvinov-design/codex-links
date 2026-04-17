@@ -74,8 +74,20 @@ body {
 .header-actions {
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.header-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.header-actions .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .button {
@@ -151,15 +163,6 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 0.92rem;
-}
-
-.ops-release-notice {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(217, 119, 6, 0.12);
-  color: #92400e;
-  font-size: 0.88rem;
 }
 
 .field-label {
@@ -357,6 +360,24 @@ input[type="radio"] {
   overflow: auto;
 }
 
+.thread-settings-group {
+  display: grid;
+  gap: 8px;
+}
+
+.thread-settings-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 2px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, rgba(249, 247, 240, 0.98), rgba(249, 247, 240, 0.82));
+}
+
 .thread-settings-item {
   display: flex;
   align-items: center;
@@ -535,6 +556,34 @@ input[type="radio"] {
   gap: 12px;
 }
 
+.timeline-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.timeline-tab-button {
+  min-height: 44px;
+  border: 1px solid var(--field-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--muted);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 120ms ease;
+}
+
+.timeline-tab-button.is-active {
+  border-color: rgba(15, 118, 110, 0.26);
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.14), rgba(22, 163, 74, 0.1));
+  color: var(--accent-strong);
+}
+
+.timeline-tab-button:hover {
+  transform: translateY(-1px);
+}
+
 .command-empty {
   padding: 16px;
   border: 1px dashed var(--field-line);
@@ -559,6 +608,11 @@ input[type="radio"] {
 .command-item-assistant {
   border-left: 4px solid rgba(15, 118, 110, 0.42);
   background: linear-gradient(180deg, rgba(245, 253, 248, 0.98), rgba(255, 255, 255, 0.94));
+}
+
+.command-item-notification {
+  border-left: 4px solid rgba(217, 119, 6, 0.42);
+  background: linear-gradient(180deg, rgba(255, 249, 235, 0.98), rgba(255, 255, 255, 0.94));
 }
 
 .command-item-top {
@@ -700,10 +754,10 @@ code {
   }
 
   .header-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
     align-items: stretch;
-    justify-content: stretch;
+    justify-content: flex-start;
     width: 100%;
     gap: 8px;
   }
@@ -725,7 +779,7 @@ code {
   }
 
   .header-actions .button {
-    width: 100%;
+    width: auto;
   }
 
   .header-actions .bridge-status {
