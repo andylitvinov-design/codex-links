@@ -27,6 +27,13 @@ function buildSlackHeaders(token) {
   };
 }
 
+function buildSlackAuthHeaders(token, headers = {}) {
+  return {
+    authorization: `Bearer ${token}`,
+    ...headers
+  };
+}
+
 function normalizeSlackQueryTs(rawValue) {
   const value = normalizeText(rawValue);
 
@@ -76,6 +83,100 @@ async function callSlackApi(token, method, body = null, query = null) {
   }
 
   return data;
+}
+
+function decodeSlackDataUrl(dataUrl) {
+  const value = normalizeText(dataUrl);
+  const match = value.match(/^data:([^;,]+)?;base64,(.+)$/i);
+
+  if (!match) {
+    throw new Error("Photo payload is not a valid base64 data URL.");
+  }
+
+  const contentType = normalizeText(match[1]) || "application/octet-stream";
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return {
+    bytes,
+    contentType
+  };
+}
+
+async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
+  if (!photo || typeof photo !== "object") {
+    return null;
+  }
+
+  const fileName = normalizeText(photo.fileName) || "photo";
+  const decoded = decodeSlackDataUrl(photo.dataUrl);
+  const contentType = normalizeText(photo.contentType) || decoded.contentType;
+  const length = Number(photo.size || decoded.bytes.byteLength || 0) || decoded.bytes.byteLength;
+  const upload = await callSlackApi(token, "files.getUploadURLExternal", {
+    filename: fileName,
+    length
+  });
+
+  const uploadResponse = await fetch(String(upload.upload_url || ""), {
+    method: "POST",
+    headers: buildSlackAuthHeaders(token, {
+      "content-type": contentType,
+      "content-length": String(length)
+    }),
+    body: decoded.bytes
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error(`Slack file upload failed with ${uploadResponse.status}.`);
+  }
+
+  await callSlackApi(token, "files.completeUploadExternal", {
+    files: [
+      {
+        id: normalizeText(upload.file_id),
+        title: fileName
+      }
+    ],
+    channel_id: channel,
+    thread_ts: threadTs,
+    initial_comment: "Attached image from Codex Links request."
+  });
+
+  let permalink = "";
+
+  try {
+    const info = await callSlackApi(token, "files.info", null, {
+      file: normalizeText(upload.file_id)
+    });
+    permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
+  } catch {}
+
+  return {
+    fileId: normalizeText(upload.file_id),
+    permalink,
+    fileName
+  };
+}
+
+async function postSlackThreadNudge(token, channel, threadTs, text) {
+  const value = normalizeText(text);
+
+  if (!value) {
+    return null;
+  }
+
+  return callSlackApi(token, "chat.postMessage", {
+    channel,
+    thread_ts: threadTs,
+    text: value,
+    mrkdwn: true,
+    unfurl_links: false,
+    unfurl_media: false
+  });
 }
 
 export async function fetchSlackThreadReplies(env, channel, threadTs) {
@@ -186,7 +287,7 @@ export function buildSlackCommandPrompt(command, env) {
     ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
     : ["AGENTS.md", "README.md", "STATE.md"];
   const photoNote = command?.photo
-    ? "\n\nФото было приложено в Codex Links, но облачный Slack-trigger v1 пока не пересылает изображение. Если без фото задачу выполнить нельзя, ответь об этом явно."
+    ? "\n\nAn image from Codex Links is attached in a file reply inside this same Slack thread. Read the attached image before doing the work. If the image is missing, say so in-thread and wait."
     : "";
   const repoUrlLine = targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "";
   const workspacePathLine = targetWorkspacePath ? `Workspace path: ${targetWorkspacePath}` : "";
@@ -275,10 +376,40 @@ export async function postSlackCommand(env, command, mention) {
     );
   }
 
+  const resolvedChannel = normalizeText(data.channel) || channel;
+  const resolvedThreadTs = normalizeText(data.message?.thread_ts) || normalizeText(data.ts);
+
+  if (command?.photo) {
+    try {
+      const uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo);
+      await postSlackThreadNudge(
+        token,
+        resolvedChannel,
+        resolvedThreadTs,
+        [
+          mention ? `${mention} image uploaded in this thread.` : "Image uploaded in this thread.",
+          uploaded?.permalink ? `File: <${uploaded.permalink}|${uploaded.fileName || "uploaded image"}>.` : "",
+          "Acknowledge in this same thread before starting the work."
+        ].filter(Boolean).join(" ")
+      );
+    } catch (error) {
+      throw withCommandError(
+        new Error(error instanceof Error ? error.message : "Slack photo upload failed."),
+        {
+          code: "slack_photo_upload_failed",
+          stage: "slack-photo-upload-failed",
+          message: "Slack photo upload failed.",
+          detail: error instanceof Error ? error.message : "Slack photo upload failed.",
+          fallback: "local-bridge"
+        }
+      );
+    }
+  }
+
   return {
-    channel: normalizeText(data.channel) || channel,
+    channel: resolvedChannel,
     ts: normalizeText(data.ts),
-    threadTs: normalizeText(data.message?.thread_ts) || normalizeText(data.ts)
+    threadTs: resolvedThreadTs
   };
 }
 

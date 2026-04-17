@@ -684,16 +684,6 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
         continue;
       }
 
-      if (canFallbackToLocalBridge(command)) {
-        return fallbackToLocalBridge(env, command, {
-          code: "fallback_to_bridge",
-          stage: "fallback-to-bridge",
-          message: "Cloud via Slack did not create a dispatch thread in time. Switched to local bridge.",
-          detail: "Slack dispatch metadata was still missing after the dispatch grace window.",
-          fallback: "local-bridge"
-        });
-      }
-
       break;
     }
 
@@ -713,18 +703,6 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
       || Number(command.fallbackCount || 0) >= 1
     ) {
       return command;
-    }
-
-    if (canFallbackToLocalBridge(command)) {
-      return fallbackToLocalBridge(env, command, {
-        code: "fallback_to_bridge",
-        stage: "fallback-to-bridge",
-        message: "Cloud via Slack did not produce a reply in time. Switched to local bridge.",
-        detail: dispatchObservedAt
-          ? "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window."
-          : "No Slack dispatch thread or Codex reply was observed within the Slack result wait window.",
-        fallback: "local-bridge"
-      });
     }
 
     const failed = await markCommandFailed(env, {
