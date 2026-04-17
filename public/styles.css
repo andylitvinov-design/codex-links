@@ -23,6 +23,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -229,6 +233,17 @@ input[type="file"] {
   background: rgba(220, 252, 231, 0.96);
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  width: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  height: 18px;
+  padding: 0;
+  box-shadow: none;
+  accent-color: var(--accent);
+}
+
 .form-status {
   margin: 0;
   padding: 8px 10px;
@@ -345,6 +360,16 @@ input[type="file"] {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.86);
   border: 1px solid rgba(117, 103, 84, 0.08);
+}
+
+.thread-settings-item input {
+  flex: 0 0 auto;
+}
+
+.thread-settings-item span {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .command-compose-row {
