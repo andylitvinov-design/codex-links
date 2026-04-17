@@ -249,6 +249,17 @@ export function extractBranchName(text) {
   return codexBranch ? codexBranch[0] : "";
 }
 
+function isLikelyProgressOnlySlackReply(text) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return false;
+  }
+
+  return /\b(checking|investigating|looking into|working on|reading|starting|preparing|waiting|running|processing|analyzing|analysing|searching|syncing|opening|reviewing|triaging|debugging|retrying|dispatching|queue(?:d)?|queued|in progress|wip|thinking)\b/i.test(value)
+    || /(проверяю|смотрю|изучаю|читаю|готовлю|запускаю|жду|обрабатываю|анализирую|ищу|синхронизирую|открываю|разбираю|дебажу|повторяю|в очереди|в работе|работаю)/i.test(value);
+}
+
 export function classifySlackReply(text) {
   const value = String(text || "").trim();
   const lower = value.toLowerCase();
@@ -277,9 +288,18 @@ export function classifySlackReply(text) {
     };
   }
 
+  if (isLikelyProgressOnlySlackReply(value)) {
+    return {
+      status: "processing",
+      progressStage: "processing",
+      prUrl,
+      branchName: extractBranchName(value)
+    };
+  }
+
   return {
-    status: "processing",
-    progressStage: "processing",
+    status: "answered",
+    progressStage: "answered",
     prUrl,
     branchName: extractBranchName(value)
   };

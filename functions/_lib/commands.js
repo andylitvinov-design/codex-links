@@ -10,7 +10,8 @@ const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 const STALE_LOCAL_QUEUE_MS = 20 * 1000;
 const STALE_SLACK_DISPATCH_MS = 5 * 60 * 1000;
-const STALE_SLACK_PROCESSING_MS = 15 * 60 * 1000;
+const STALE_SLACK_SILENT_MS = 3 * 60 * 1000;
+const STALE_SLACK_PROCESSING_MS = 10 * 60 * 1000;
 const STALE_LOCAL_PROCESSING_MS = 45 * 1000;
 
 function normalizeCommandStatus(rawStatus) {
@@ -917,9 +918,13 @@ export async function recoverStaleSlackCommands(env, options = {}) {
     }
 
     if (command.status === "processing") {
-      const staleSince = command.progressUpdatedAt || command.processingStartedAt || command.dispatchedAt || command.createdAt;
+      const hasSlackReply = Boolean(String(command.processingStartedAt || "").trim());
+      const staleSince = hasSlackReply
+        ? (command.progressUpdatedAt || command.processingStartedAt || command.dispatchedAt || command.createdAt)
+        : (command.dispatchedAt || command.createdAt);
+      const staleWindowMs = hasSlackReply ? STALE_SLACK_PROCESSING_MS : STALE_SLACK_SILENT_MS;
 
-      if (!isOlderThan(staleSince, STALE_SLACK_PROCESSING_MS)) {
+      if (!isOlderThan(staleSince, staleWindowMs)) {
         return command;
       }
 
@@ -966,7 +971,11 @@ export async function recoverStaleLocalCommands(env, options = {}) {
       return command;
     }
 
-    const canFallbackToSlack = preferSlack && !command.photo && String(command.targetRepo || "").trim();
+    const cameFromCloudFallback = /cloud .*switched to local bridge|cloud does not support photo attachments yet/i.test(String(command.errorMessage || ""));
+    const canFallbackToSlack = preferSlack
+      && !command.photo
+      && !cameFromCloudFallback
+      && String(command.targetRepo || "").trim();
 
     if (command.status === "queued") {
       if (!isOlderThan(command.progressUpdatedAt || command.createdAt, STALE_LOCAL_QUEUE_MS)) {
