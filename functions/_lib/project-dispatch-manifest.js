@@ -179,7 +179,7 @@ export function resolveProjectDispatchTarget(input = {}) {
   const providedTargetRepoUrl = normalizeText(input.targetRepoUrl, 400);
   const providedWorkspacePath = normalizeText(input.targetWorkspacePath, 500);
   const providedContextFiles = normalizeContextFiles(input.targetContextFiles);
-  const projectId = normalizeProjectId(input.projectId || input.threadId || input.id) || project?.id || "links";
+  const projectId = project?.id || normalizeProjectId(input.projectId || input.threadId || input.id) || "links";
   const projectLabel = normalizeText(input.projectLabel, 160) || project?.label || projectId;
   const projectGroup = normalizeText(input.projectCategory, 120) || project?.group || "other";
 
