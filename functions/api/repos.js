@@ -1,4 +1,5 @@
 import { handleOptions, json } from "../_lib/http.js";
+import { listVisibleProjectTargets } from "../_lib/project-dispatch-manifest.js";
 import { listEligibleCloudRepos, readRepoContexts, writeRepoContexts } from "../_lib/repos.js";
 import { isAuthorized } from "../_lib/security.js";
 
@@ -11,7 +12,7 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
-    const data = await listEligibleCloudRepos(env);
+    const data = listVisibleProjectTargets();
     return json(data);
   }
 

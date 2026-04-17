@@ -17,7 +17,7 @@ const state = {
   audioUnlocked: false
 };
 
-const BUILD_VERSION = "20260418-0215";
+const BUILD_VERSION = "20260418-2315";
 const FAST_POLL_INTERVAL_MS = 3500;
 const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -444,6 +444,22 @@ function getProjectCategory(repo) {
 
 function getProjectStatusLabel(repo) {
   return isCloudReadyRepo(repo) ? "cloud-ready" : "bridge-only";
+}
+
+function getSelectedDispatchModeLabel() {
+  return getActiveDispatchMode() === "cloud" ? "Cloud" : "Bridge";
+}
+
+function formatExecutorStatus(status = {}) {
+  const selectedModeLabel = getSelectedDispatchModeLabel();
+  const executorLabel = String(status?.executorLabel || "").trim() || "неизвестно";
+  const executorState = String(status?.state || "").trim() || "idle";
+
+  if (getActiveDispatchMode() === "cloud") {
+    return `Статус: ${selectedModeLabel} selected · ${executorLabel} · ${executorState}`;
+  }
+
+  return `Статус: ${selectedModeLabel} selected · backend ${executorLabel} · ${executorState}`;
 }
 
 function formatProjectPath(repo) {
@@ -2227,7 +2243,7 @@ async function refreshAll() {
     const bridgeWatchdogText = document.querySelector("#bridge-watchdog-text");
 
     if (bridgeStatusText) {
-      bridgeStatusText.textContent = `Статус: ${status.executorLabel || "неизвестно"} · ${status.state || "idle"}`;
+      bridgeStatusText.textContent = formatExecutorStatus(status);
     }
 
     if (bridgeWatchdogText) {
