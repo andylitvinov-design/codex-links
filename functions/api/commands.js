@@ -2,7 +2,9 @@ import {
   acknowledgeCommands,
   claimNextCommand,
   fallbackCommandToLocalBridge,
+  markCommandAnswered,
   markCommandDispatched,
+  markCommandFailed,
   getCommandById,
   getCommandsForClient,
   insertCommand,
@@ -24,21 +26,65 @@ import {
   getSlackCodexMention
 } from "../_lib/dispatch.js";
 import { isAuthorized } from "../_lib/security.js";
-import { classifySlackReply, fetchSlackThreadReplies, postSlackCommand } from "../_lib/slack.js";
+import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
 import { upsertMessages } from "../_lib/messages.js";
-import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
+import { isLocalBridgeHealthy, readBridgeStatus, refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
 import { stringifyCommandError } from "../_lib/command-debug.js";
+import { resolveProjectDispatchTarget } from "../_lib/project-dispatch-manifest.js";
+
+const CLOUD_FALLBACK_RETRY_MS = 2 * 60 * 1000;
+const CLOUD_FALLBACK_RETRY_WHEN_BRIDGE_STALE_MS = 20 * 1000;
+const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
 
 function normalizeEntryText(entry) {
   return String(entry?.text || "").trim().toLowerCase();
+}
+
+function isHiddenJunkFeedText(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  const allowedTokens = new Set(["photo", "repro", "ignore", "test", "probe"]);
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^(?:photo|repro|ignore)(?:\s+(?:photo|repro|ignore))*$/i.test(normalized)) {
+    return true;
+  }
+
+  const tokens = normalized
+    .replace(/[^a-z\s]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  return tokens.length > 0
+    && tokens.length <= 6
+    && tokens.every((token) => allowedTokens.has(token))
+    && tokens.includes("ignore")
+    && (tokens.includes("photo") || tokens.includes("repro"));
+}
+
+function isProductionVerificationProbe(text) {
+  return text.includes("production")
+    && (
+      text.includes("verification")
+      || text.includes("route check")
+      || text.includes(" ping")
+    )
+    && (
+      text.includes("ignore if seen")
+      || text.includes("reply with ok only")
+    );
 }
 
 function isHiddenPublicCommand(entry) {
   const text = normalizeEntryText(entry);
 
   return (
-    text.includes("delivery-probe")
+    isHiddenJunkFeedText(text)
+    || isProductionVerificationProbe(text)
+    || text.includes("delivery-probe")
     || text.includes("local bridge probe")
     || text.includes("probe reply with ok only")
     || text.includes("dedupe test ignore")
@@ -70,9 +116,13 @@ function serializeCommand(command) {
   return {
     ...command,
     photo,
+    projectId: String(command.projectId || "").trim(),
+    projectLabel: String(command.projectLabel || "").trim(),
+    projectCategory: String(command.projectCategory || "").trim(),
     targetRepo: String(command.targetRepo || "").trim(),
     targetRepoUrl: String(command.targetRepoUrl || "").trim(),
     targetContextFiles: Array.isArray(command.targetContextFiles) ? command.targetContextFiles : [],
+    targetWorkspacePath: String(command.targetWorkspacePath || "").trim(),
     targetExecutionMode: String(command.targetExecutionMode || "").trim()
   };
 }
@@ -101,11 +151,12 @@ function shouldDispatchQueuedSlackCommand(command) {
   return true;
 }
 
-function shouldRetryCloudFallback(command) {
+function shouldRetryCloudFallback(command, options = {}) {
   const status = String(command?.status || "").trim().toLowerCase();
   const dispatchMode = String(command?.dispatchMode || "").trim().toLowerCase();
   const errorMessage = String(command?.errorMessage || "").trim();
   const text = String(command?.text || "").trim().toLowerCase();
+  const bridgeHealthy = Boolean(options.bridgeHealthy);
 
   if (status !== "queued" || dispatchMode !== DISPATCH_MODE_LOCAL) {
     return false;
@@ -130,8 +181,9 @@ function shouldRetryCloudFallback(command) {
   }
 
   const updatedAt = Date.parse(String(command?.progressUpdatedAt || command?.createdAt || "").trim());
+  const retryAfterMs = bridgeHealthy ? CLOUD_FALLBACK_RETRY_MS : CLOUD_FALLBACK_RETRY_WHEN_BRIDGE_STALE_MS;
 
-  if (Number.isNaN(updatedAt) || (Date.now() - updatedAt) < 2 * 60 * 1000) {
+  if (Number.isNaN(updatedAt) || (Date.now() - updatedAt) < retryAfterMs) {
     return false;
   }
 
@@ -143,16 +195,17 @@ async function retryCloudFallbackCommands(env, runtimeConfig) {
     return;
   }
 
+  const bridgeHealthy = isLocalBridgeHealthy(await readBridgeStatus(env));
   let current = await readCommands(env);
   const candidates = current
-    .filter((command) => shouldDispatchQueuedSlackCommand(command) || shouldRetryCloudFallback(command))
+    .filter((command) => shouldDispatchQueuedSlackCommand(command) || shouldRetryCloudFallback(command, { bridgeHealthy }))
     .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")))
     .slice(0, 6);
 
   for (const candidate of candidates) {
     let refreshed = candidate;
 
-    if (shouldRetryCloudFallback(candidate)) {
+    if (shouldRetryCloudFallback(candidate, { bridgeHealthy })) {
       const nowIso = new Date().toISOString();
       const next = current.map((command) => {
         if (command.id !== candidate.id) {
@@ -165,6 +218,10 @@ async function retryCloudFallbackCommands(env, runtimeConfig) {
           status: "queued",
           progressStage: "queued",
           progressUpdatedAt: nowIso,
+          actualDispatchMode: "cloud",
+          fallbackApplied: false,
+          fallbackReason: "",
+          timeoutPhase: "",
           errorMessage: "",
           completedAt: ""
         };
@@ -180,7 +237,7 @@ async function retryCloudFallbackCommands(env, runtimeConfig) {
   }
 }
 
-async function syncSlackCommandReplies(env, command) {
+async function syncSlackCommandReplies(env, command, runtimeConfig) {
   const channelId = String(command?.slackChannelId || "").trim();
   const threadTs = String(command?.slackThreadTs || command?.slackMessageTs || "").trim();
 
@@ -192,20 +249,51 @@ async function syncSlackCommandReplies(env, command) {
   const rootTs = String(command?.slackMessageTs || "").trim();
   const threadReplies = replies.filter((reply) => reply.ts && reply.ts !== rootTs && reply.text);
 
-  if (!threadReplies.length) {
+  let latestReply = threadReplies.at(-1) || null;
+  let progressStage = "slack-reply-received";
+
+  if (!latestReply) {
+    const channelMessages = await fetchSlackChannelMessages(env, channelId, {
+      oldest: command.dispatchedAt || command.createdAt
+    });
+    const unthreadedReplies = channelMessages.filter((reply) =>
+      reply.ts
+      && reply.ts !== rootTs
+      && reply.text
+      && (!reply.threadTs || reply.threadTs === reply.ts)
+      && isLikelyCodexSlackActor(runtimeConfig, reply, { candidateCount: 1 })
+    );
+
+    latestReply = unthreadedReplies.at(0) || null;
+    progressStage = latestReply ? "slack-reply-received-unthreaded" : progressStage;
+  }
+
+  if (!latestReply) {
     return false;
   }
 
-  const latestReply = threadReplies.at(-1);
   const classification = classifySlackReply(latestReply.text);
 
   await upsertCommandDispatchState(env, {
     id: command.id,
     dispatchMode: DISPATCH_MODE_SLACK,
     status: classification.status,
-    progressStage: "slack-reply-received",
+    progressStage,
+    actualDispatchMode: "cloud",
+    slackReplyReceived: true,
+    slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
+    slackReplyMatched: true,
+    timeoutPhase: "",
+    fallbackApplied: false,
+    fallbackReason: "",
+    lastDiagnosticCode: progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : "",
+    lastDiagnosticDetail: progressStage === "slack-reply-received-unthreaded"
+      ? "A Codex reply arrived outside the original Slack thread and was reconciled from recent channel history."
+      : "",
     slackChannelId: channelId,
-    slackThreadTs: threadTs,
+    slackThreadTs: progressStage === "slack-reply-received-unthreaded"
+      ? (latestReply.threadTs || latestReply.ts || threadTs)
+      : threadTs,
     slackMessageTs: rootTs,
     prUrl: classification.prUrl,
     branchName: classification.branchName,
@@ -213,7 +301,7 @@ async function syncSlackCommandReplies(env, command) {
     processingStartedAt: classification.status === "processing" ? new Date().toISOString() : ""
   });
 
-  await upsertMessages(env, threadReplies.map((reply) => ({
+  await upsertMessages(env, [latestReply].map((reply) => ({
     id: `slack:${channelId}:${reply.ts}`,
     clientId: command.clientId,
     threadId: command.threadId,
@@ -251,17 +339,45 @@ async function syncRecentSlackReplies(env, runtimeConfig) {
       return status === "dispatched" || status === "processing";
     })
     .filter((command) => String(command?.slackChannelId || "").trim() && String(command?.slackThreadTs || command?.slackMessageTs || "").trim())
-    .sort((left, right) => String(right.progressUpdatedAt || right.dispatchedAt || right.createdAt || "").localeCompare(String(left.progressUpdatedAt || left.dispatchedAt || right.createdAt || "")))
-    .slice(0, 5);
+    .sort((left, right) => String(right.progressUpdatedAt || right.dispatchedAt || right.createdAt || "").localeCompare(String(left.progressUpdatedAt || left.dispatchedAt || left.createdAt || "")))
+    .slice(0, MAX_RECENT_SLACK_SYNC_COMMANDS);
 
   for (const command of candidates) {
     try {
-      await syncSlackCommandReplies(env, command);
+      await syncSlackCommandReplies(env, command, runtimeConfig);
+    } catch {}
+  }
+}
+
+async function syncSpecificSlackReplies(env, runtimeConfig, commands) {
+  if (!isSlackDispatchConfigured(runtimeConfig)) {
+    return;
+  }
+
+  const candidates = (Array.isArray(commands) ? commands : [])
+    .filter((command) => command?.dispatchMode === DISPATCH_MODE_SLACK)
+    .filter((command) => {
+      const status = String(command?.status || "").trim().toLowerCase();
+      return status === "dispatched" || status === "processing";
+    })
+    .filter((command) => String(command?.slackChannelId || "").trim() && String(command?.slackThreadTs || command?.slackMessageTs || "").trim())
+    .sort((left, right) => String(right.progressUpdatedAt || right.dispatchedAt || right.createdAt || "").localeCompare(String(left.progressUpdatedAt || left.dispatchedAt || left.createdAt || "")))
+    .slice(0, MAX_RECENT_SLACK_SYNC_COMMANDS);
+
+  for (const command of candidates) {
+    try {
+      await syncSlackCommandReplies(env, command, runtimeConfig);
     } catch {}
   }
 }
 
 async function fallbackToLocalBridge(env, command, errorMessage) {
+  const fallbackReason = typeof errorMessage === "string"
+    ? errorMessage
+    : String(errorMessage?.detail || errorMessage?.message || "").trim();
+  const timeoutPhase = typeof errorMessage === "object" && errorMessage
+    ? String(errorMessage.stage || "").trim().includes("reply") ? "first-reply-timeout" : ""
+    : "";
   const normalizedErrorMessage = typeof errorMessage === "string"
     ? stringifyCommandError({
         code: "fallback_to_bridge",
@@ -274,7 +390,11 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
   const fallback = await fallbackCommandToLocalBridge(env, {
     id: command.id,
     progressStage: "fallback-to-bridge",
-    errorMessage: normalizedErrorMessage
+    errorMessage: normalizedErrorMessage,
+    timeoutPhase,
+    fallbackReason,
+    lastDiagnosticCode: typeof errorMessage === "object" && errorMessage ? errorMessage.code : "",
+    lastDiagnosticDetail: fallbackReason
   });
 
   await refreshBridgeStatusFromCommands(env, {
@@ -394,19 +514,29 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
-    const runtimeConfig = await readRuntimeConfig(env);
-    await syncRecentSlackReplies(env, runtimeConfig);
-    await recoverStaleCommands(env, {
-      preferSlack: isSlackDispatchConfigured(runtimeConfig),
-      fallbackToLocal: true
-    });
-    await retryCloudFallbackCommands(env, runtimeConfig);
     const url = new URL(request.url);
     const commandId = url.searchParams.get("id");
     const clientId = url.searchParams.get("clientId");
     const status = url.searchParams.get("status");
     const catalog = url.searchParams.get("catalog");
     const scope = url.searchParams.get("scope");
+    const runtimeConfig = await readRuntimeConfig(env);
+    if (commandId) {
+      const command = await getCommandById(env, commandId);
+
+      if (command) {
+        await syncSpecificSlackReplies(env, runtimeConfig, [command]);
+      }
+    } else if (clientId) {
+      const commands = await getCommandsForClient(env, clientId);
+      await syncSpecificSlackReplies(env, runtimeConfig, commands);
+    } else {
+      await syncRecentSlackReplies(env, runtimeConfig);
+    }
+    await recoverStaleCommands(env, {
+      preferSlack: isSlackDispatchConfigured(runtimeConfig),
+      fallbackToLocal: true
+    });
 
     if (catalog === "threads") {
       if (!isAuthorized(request, env)) {
@@ -493,6 +623,52 @@ export async function onRequest(context) {
     return json({ ok: true, commands: acked.value });
   }
 
+  if (action === "answer") {
+    if (!isAuthorized(request, env)) {
+      return json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    const answered = await markCommandAnswered(env, {
+      id: payload?.id,
+      progressStage: payload?.progressStage,
+      completedAt: payload?.completedAt,
+      actualDispatchMode: payload?.actualDispatchMode,
+      prUrl: payload?.prUrl,
+      branchName: payload?.branchName
+    });
+
+    if (!answered.ok) {
+      return json({ error: answered.error }, { status: 400 });
+    }
+
+    return json({ ok: true, command: serializeCommand(answered.value) });
+  }
+
+  if (action === "fail") {
+    if (!isAuthorized(request, env)) {
+      return json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    const failed = await markCommandFailed(env, {
+      id: payload?.id,
+      progressStage: payload?.progressStage,
+      completedAt: payload?.completedAt,
+      actualDispatchMode: payload?.actualDispatchMode,
+      errorMessage: payload?.errorMessage,
+      fallbackApplied: payload?.fallbackApplied,
+      fallbackReason: payload?.fallbackReason,
+      timeoutPhase: payload?.timeoutPhase,
+      lastDiagnosticCode: payload?.lastDiagnosticCode,
+      lastDiagnosticDetail: payload?.lastDiagnosticDetail
+    });
+
+    if (!failed.ok) {
+      return json({ error: failed.error }, { status: 400 });
+    }
+
+    return json({ ok: true, command: serializeCommand(failed.value) });
+  }
+
   if (action === "claim") {
     if (!isAuthorized(request, env)) {
       return json({ error: "Unauthorized." }, { status: 401 });
@@ -560,6 +736,17 @@ export async function onRequest(context) {
 
   const runtimeConfig = await readRuntimeConfig(env);
   const dispatchMode = getConfiguredDispatchMode(runtimeConfig);
+  const requestedDispatchMode = payload?.dispatchMode || dispatchMode;
+  const manifestTarget = resolveProjectDispatchTarget({
+    threadId: payload?.threadId,
+    projectId: payload?.projectId,
+    dispatchMode: requestedDispatchMode
+  });
+
+  if (!manifestTarget.ok) {
+    return json({ error: manifestTarget.error }, { status: 400 });
+  }
+
   await recoverStaleCommands(env, {
     preferSlack: isSlackDispatchConfigured(runtimeConfig),
     fallbackToLocal: true
@@ -567,7 +754,14 @@ export async function onRequest(context) {
   await retryCloudFallbackCommands(env, runtimeConfig);
   const created = await insertCommand(env, {
     ...(payload || {}),
-    dispatchMode: payload?.dispatchMode || dispatchMode
+    dispatchMode: requestedDispatchMode,
+    projectId: manifestTarget.value.id,
+    projectLabel: manifestTarget.value.label,
+    projectCategory: manifestTarget.value.group,
+    targetRepo: manifestTarget.value.targetRepo,
+    targetRepoUrl: manifestTarget.value.targetRepoUrl,
+    targetContextFiles: manifestTarget.value.contextFiles,
+    targetWorkspacePath: manifestTarget.value.workspacePath
   });
 
   if (!created.ok) {

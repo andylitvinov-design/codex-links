@@ -27,6 +27,26 @@ function buildSlackHeaders(token) {
   };
 }
 
+function normalizeSlackQueryTs(rawValue) {
+  const value = normalizeText(rawValue);
+
+  if (!value) {
+    return "";
+  }
+
+  if (/^\d+(?:\.\d+)?$/.test(value)) {
+    return value;
+  }
+
+  const parsed = Date.parse(value);
+
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    return "";
+  }
+
+  return String(parsed / 1000);
+}
+
 function withCommandError(error, input) {
   const wrapped = error instanceof Error ? error : new Error(String(error || "Slack request failed."))
   wrapped.commandError = createCommandError(input)
@@ -71,7 +91,7 @@ export async function fetchSlackThreadReplies(env, channel, threadTs) {
     channel: normalizedChannel,
     ts: normalizedThreadTs,
     inclusive: true,
-    limit: 30
+    limit: 100
   });
 
   return (Array.isArray(data?.messages) ? data.messages : [])
@@ -84,6 +104,32 @@ export async function fetchSlackThreadReplies(env, channel, threadTs) {
       botId: normalizeText(message?.bot_id),
       subtype: normalizeText(message?.subtype)
     }));
+}
+
+export async function fetchSlackChannelMessages(env, channel, options = {}) {
+  const token = normalizeText(env?.SLACK_BOT_TOKEN);
+  const normalizedChannel = normalizeText(channel);
+  const oldest = normalizeSlackQueryTs(options.oldest);
+
+  if (!token || !normalizedChannel) {
+    return [];
+  }
+
+  const data = await callSlackApi(token, "conversations.history", null, {
+    channel: normalizedChannel,
+    inclusive: true,
+    limit: 100,
+    oldest
+  });
+
+  return (Array.isArray(data?.messages) ? data.messages : []).map((message) => ({
+    ts: normalizeText(message?.ts),
+    threadTs: normalizeText(message?.thread_ts || message?.ts),
+    text: extractSlackMessageText(message),
+    user: normalizeText(message?.user),
+    botId: normalizeText(message?.bot_id),
+    subtype: normalizeText(message?.subtype)
+  }));
 }
 
 async function validateSlackTarget(token, channel, targetUserId) {
@@ -127,9 +173,15 @@ async function validateSlackTarget(token, channel, targetUserId) {
 }
 
 export function buildSlackCommandPrompt(command, env) {
-  const threadLabel = normalizeText(command?.threadLabel) || normalizeText(command?.threadId) || "Links";
-  const targetRepo = normalizeText(command?.targetRepo) || "andylitvinov-design/codex-links";
+  const threadId = normalizeText(command?.threadId);
+  const threadLabel = normalizeText(command?.threadLabel) || threadId || "Links";
+  const projectCategory = normalizeText(command?.projectCategory) || "other";
+  const projectLabel = normalizeText(command?.projectLabel) || threadLabel;
+  const projectId = normalizeText(command?.projectId) || threadId;
+  const targetRepo = normalizeText(command?.targetRepo);
   const targetRepoUrl = normalizeText(command?.targetRepoUrl);
+  const targetWorkspacePath = normalizeText(command?.targetWorkspacePath);
+  const codexThreadId = /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(threadId) ? threadId : "";
   const contextFiles = Array.isArray(command?.targetContextFiles) && command.targetContextFiles.length
     ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
     : ["AGENTS.md", "README.md", "STATE.md"];
@@ -137,6 +189,7 @@ export function buildSlackCommandPrompt(command, env) {
     ? "\n\nФото было приложено в Codex Links, но облачный Slack-trigger v1 пока не пересылает изображение. Если без фото задачу выполнить нельзя, ответь об этом явно."
     : "";
   const repoUrlLine = targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "";
+  const workspacePathLine = targetWorkspacePath ? `Workspace path: ${targetWorkspacePath}` : "";
   const contextLine = contextFiles.length
     ? `Start by reading repo root context files in order: ${contextFiles.join(" -> ")}.`
     : "Start by reading the repo root context files first.";
@@ -145,12 +198,21 @@ export function buildSlackCommandPrompt(command, env) {
     `${String(env?.SLACK_CODEX_MENTION || "").trim() || ""}`.trim(),
     "New Codex Links task.",
     "",
+    `Project: ${projectCategory} / ${projectLabel}`,
+    `Project Key: ${projectId}`,
     `Repository: ${targetRepo}`,
     repoUrlLine,
-    `Conversation: ${threadLabel}`,
+    workspacePathLine,
+    `Conversation Label: ${threadLabel}`,
+    codexThreadId ? `Codex Thread ID: ${codexThreadId}` : "",
     `Command ID: ${normalizeText(command?.id)}`,
-    "Mode: work in Codex Cloud only inside the selected repository.",
+    "Mode: work in Codex Cloud only inside the selected repository boundary.",
+    "Do not switch to sibling repositories or unrelated workspace folders.",
+    "Important: Conversation Label is a human label, not a thread id.",
+    "If Codex Thread ID is absent, create or reuse the correct Codex thread inside the target repository yourself.",
     contextLine,
+    "Immediately reply in this Slack thread with a short acknowledgement before doing the work.",
+    "Keep every progress update and the final result in the same Slack thread.",
     "Delivery rule: create a branch and PR, never push directly to main.",
     "",
     "User request:",
@@ -346,4 +408,22 @@ export function classifySlackReply(text) {
     prUrl,
     branchName: extractBranchName(value)
   };
+}
+
+export function isLikelyCodexSlackActor(runtimeConfig, event, options = {}) {
+  const targetUserId = normalizeText(runtimeConfig?.SLACK_CODEX_USER_ID);
+  const userId = normalizeText(event?.user);
+  const subtype = normalizeText(event?.subtype);
+  const botId = normalizeText(event?.bot_id);
+  const candidateCount = Number(options.candidateCount || 0);
+
+  if (targetUserId && userId === targetUserId) {
+    return true;
+  }
+
+  if (botId || subtype === "bot_message") {
+    return candidateCount <= 1;
+  }
+
+  return false;
 }
