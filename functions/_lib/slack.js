@@ -69,7 +69,7 @@ async function validateSlackTarget(token, channel, targetUserId) {
   const memberIds = Array.isArray(members.members) ? members.members.map((value) => normalizeText(value)) : [];
 
   if (!memberIds.includes(normalizedTarget)) {
-    return;
+    throw new Error("Configured Slack Codex user is not a member of the dispatch channel.");
   }
 }
 

@@ -709,8 +709,8 @@ export async function markCommandDispatched(env, input = {}) {
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
     dispatchMode: normalizeDispatchValue(input.dispatchMode || command.dispatchMode),
-    status: "dispatched",
-    progressStage: "dispatched",
+    status: "processing",
+    progressStage: "processing",
     progressUpdatedAt: nowIso,
     slackChannelId: normalizeSlackValue(input.slackChannelId),
     slackMessageTs: normalizeSlackValue(input.slackMessageTs),

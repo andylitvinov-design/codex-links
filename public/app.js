@@ -14,7 +14,7 @@ const state = {
   hardReloading: false
 };
 
-const BUILD_VERSION = "20260416-2402";
+const BUILD_VERSION = "20260417-0015";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -648,6 +648,39 @@ function formatCommandStage(command) {
   return relative ? `${label} · ${relative}` : label;
 }
 
+function getVisibleTimelineCommands() {
+  const showAllMessages = storage.showAllMessages;
+  const activeThreadId = showAllMessages ? "" : getActiveThreadId();
+
+  return state.commands
+    .filter((command) => !activeThreadId || command.threadId === activeThreadId)
+    .filter((command) => !isSystemConversationEntry(command))
+    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+}
+
+function syncCommandStatusFromState() {
+  const activeCommand = getVisibleTimelineCommands().find((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    return status === "queued" || status === "dispatched" || status === "processing";
+  });
+
+  if (!activeCommand) {
+    setCommandStatusMessage("");
+    setSubmitProgress("", "");
+    return;
+  }
+
+  const status = String(activeCommand?.status || "").trim().toLowerCase();
+  const isProcessing = status === "processing" || status === "dispatched";
+  const tone = isProcessing ? "processing" : "queued";
+  const message = isProcessing
+    ? "Обработка…"
+    : "Сообщение в очереди…";
+
+  setCommandStatusMessage(message, { tone });
+  setSubmitProgress(isProcessing ? "processing" : "queued", tone);
+}
+
 function getCommandDeliveryLabel(command) {
   return String(command?.dispatchMode || "").trim() === "local-bridge" ? "bridge" : "cloud";
 }
@@ -847,10 +880,7 @@ function renderCommands() {
   pruneExpiredAnswerState();
   const showAllMessages = storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
-  const visibleCommands = state.commands
-    .filter((command) => !activeThreadId || command.threadId === activeThreadId)
-    .filter((command) => !isSystemConversationEntry(command))
-    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  const visibleCommands = getVisibleTimelineCommands();
   const visibleMessages = state.messages
     .filter((message) => !activeThreadId || message.threadId === activeThreadId)
     .filter((message) => !isSystemConversationEntry(message));
@@ -955,11 +985,6 @@ function renderCommands() {
     const element = document.createElement("article");
     element.className = `command-item ${entry.role === "assistant" ? "command-item-assistant" : "command-item-user"}`;
 
-    const shouldShowThreadMeta = showAllMessages || !activeThreadId;
-    const threadMeta = shouldShowThreadMeta
-      ? `<span>${escapeHtml(getThreadDisplayLabel(entry.threadId, entry.threadLabel || ""))}</span>`
-      : "";
-
     if (entry.kind === "command") {
       const command = entry.command;
       const failureMessage = getCommandFailureMessage(command);
@@ -978,7 +1003,6 @@ function renderCommands() {
         ${repliesMarkup}
         <div class="command-item-top">
           <span>${formatCommandStage(command)}</span>
-          ${threadMeta}
         </div>
       `;
 
@@ -1005,7 +1029,6 @@ function renderCommands() {
       ${body}
       <div class="command-item-top">
         <span>${statusLabel}</span>
-        ${threadMeta}
       </div>
     `;
 
@@ -1222,6 +1245,8 @@ async function refreshAll() {
     setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
   } else if (commandsError) {
     setCommandStatusMessage("Не удалось обновить команды.", { tone: "error" });
+  } else {
+    syncCommandStatusFromState();
   }
 
   renderCommands();
@@ -1279,7 +1304,7 @@ async function submitCommand(event) {
   }
 
   setSubmitProgress("processing", "processing");
-  setCommandStatusMessage("Сообщение отправлено.");
+  setCommandStatusMessage("Обработка…", { tone: "processing" });
   await refreshAll();
 }
 
