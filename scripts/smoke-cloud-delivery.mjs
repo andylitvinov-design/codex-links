@@ -1,18 +1,92 @@
 #!/usr/bin/env node
 
 const BASE_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev"
+const TARGET_PROJECT_ID = process.env.CODEX_LINKS_SMOKE_PROJECT_ID || "links"
+const TARGET_PROJECT_LABEL = process.env.CODEX_LINKS_SMOKE_PROJECT_LABEL || "links"
 const TARGET_REPO = process.env.CODEX_LINKS_SMOKE_REPO || "andylitvinov-design/codex-links"
 const TARGET_REPO_URL = process.env.CODEX_LINKS_SMOKE_REPO_URL || "https://github.com/andylitvinov-design/codex-links"
+const TARGET_WORKSPACE_PATH = process.env.CODEX_LINKS_SMOKE_WORKSPACE_PATH || "/Users/andriilitvinov/projects/MYPROJECTS/links"
+const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"]
 const FALLBACK_THREAD_ID = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_ID || ""
 const FALLBACK_THREAD_LABEL = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_LABEL || ""
 const clientId = `smoke-${Date.now()}`
 const text = "delivery-probe: reply with OK only"
+const pollStartedAt = Date.now()
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function fetchAssistantReplies(commandId) {
+  const response = await fetch(`${BASE_URL}/api/messages?scope=public`, {
+    headers: { accept: "application/json" }
+  })
+  const data = await response.json().catch(() => ({}))
+
+  return Array.isArray(data?.messages)
+    ? data.messages.filter((message) =>
+        String(message?.commandId || "").trim() === String(commandId || "").trim()
+        && String(message?.role || "").trim() === "assistant"
+      )
+    : []
+}
+
+function normalizeStringArray(value) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || "").trim()).filter(Boolean)
+    : []
+}
+
+function assertManifestContext(command, label) {
+  if (!command || typeof command !== "object") {
+    throw new Error(`${label}: command payload is missing.`)
+  }
+
+  const projectId = String(command.projectId || command.threadId || "").trim()
+  const targetRepo = String(command.targetRepo || "").trim()
+  const targetRepoUrl = String(command.targetRepoUrl || "").trim()
+  const targetWorkspacePath = String(command.targetWorkspacePath || "").trim()
+  const targetContextFiles = normalizeStringArray(command.targetContextFiles)
+
+  if (projectId !== TARGET_PROJECT_ID) {
+    throw new Error(`${label}: expected projectId=${TARGET_PROJECT_ID}, got ${projectId || "empty"}.`)
+  }
+
+  if (targetRepo !== TARGET_REPO) {
+    throw new Error(`${label}: expected targetRepo=${TARGET_REPO}, got ${targetRepo || "empty"}.`)
+  }
+
+  if (targetRepoUrl !== TARGET_REPO_URL) {
+    throw new Error(`${label}: expected targetRepoUrl=${TARGET_REPO_URL}, got ${targetRepoUrl || "empty"}.`)
+  }
+
+  if (targetWorkspacePath !== TARGET_WORKSPACE_PATH) {
+    throw new Error(`${label}: expected targetWorkspacePath=${TARGET_WORKSPACE_PATH}, got ${targetWorkspacePath || "empty"}.`)
+  }
+
+  if (targetContextFiles.join("::") !== TARGET_CONTEXT_FILES.join("::")) {
+    throw new Error(`${label}: expected targetContextFiles=${TARGET_CONTEXT_FILES.join(", ")}, got ${targetContextFiles.join(", ") || "empty"}.`)
+  }
+}
+
+function assertDirectCloudState(command, label) {
+  if (String(command?.requestedExecutor || "").trim() !== "cloud") {
+    throw new Error(`${label}: expected requestedExecutor=cloud, got ${String(command?.requestedExecutor || "").trim() || "empty"}.`)
+  }
+
+  if (String(command?.status || "").trim().toLowerCase() === "answered" && String(command?.actualExecutor || "").trim() !== "cloud") {
+    throw new Error(`${label}: expected actualExecutor=cloud on answered command, got ${String(command?.actualExecutor || "").trim() || "empty"}.`)
+  }
+
+  if (String(command?.status || "").trim().toLowerCase() === "answered") {
+    if (String(command?.slackChannelId || "").trim() || String(command?.slackThreadTs || "").trim() || String(command?.slackMessageTs || "").trim()) {
+      throw new Error(`${label}: direct cloud answered command unexpectedly contains Slack thread metadata.`)
+    }
+  }
+}
+
 async function postCommand() {
+  const startedAt = Date.now()
   const response = await fetch(`${BASE_URL}/api/commands`, {
     method: "POST",
     headers: {
@@ -21,16 +95,16 @@ async function postCommand() {
     },
     body: JSON.stringify({
       clientId,
-      threadId: "cloud:smoke",
-      threadLabel: "Cloud Smoke",
+      threadId: TARGET_PROJECT_ID,
+      threadLabel: TARGET_PROJECT_LABEL,
       fallbackThreadId: FALLBACK_THREAD_ID,
       fallbackThreadLabel: FALLBACK_THREAD_LABEL,
       text,
-      dispatchMode: "slack-codex-cloud",
+      dispatchMode: "cloud",
       targetExecutionMode: "cloud",
       targetRepo: TARGET_REPO,
       targetRepoUrl: TARGET_REPO_URL,
-      targetContextFiles: ["AGENTS.md", "README.md"]
+      targetContextFiles: TARGET_CONTEXT_FILES
     })
   })
 
@@ -40,7 +114,12 @@ async function postCommand() {
     throw new Error(String(data?.error || "").trim() || `POST /api/commands failed with ${response.status}`)
   }
 
-  return data.command
+  assertManifestContext(data.command, "cloud create")
+  assertDirectCloudState(data.command, "cloud create")
+  return {
+    command: data.command,
+    createAckMs: Date.now() - startedAt
+  }
 }
 
 async function pollCommand(id) {
@@ -54,6 +133,8 @@ async function pollCommand(id) {
     const command = data?.command || null
 
     if (command) {
+      assertManifestContext(command, "cloud poll")
+      assertDirectCloudState(command, "cloud poll")
       const status = String(command.status || "").trim().toLowerCase()
       const stage = String(command.progressStage || "").trim()
 
@@ -61,6 +142,14 @@ async function pollCommand(id) {
 
       if (status === "answered") {
         return command
+      }
+
+      if (status === "acked") {
+        const replies = await fetchAssistantReplies(command.id)
+
+        if (replies.length) {
+          return command
+        }
       }
 
       if (status === "failed") {
@@ -71,14 +160,23 @@ async function pollCommand(id) {
     await sleep(5000)
   }
 
-  throw new Error("Smoke test timed out waiting for a Codex Cloud reply or fallback-matched reply.")
+  throw new Error("Smoke test timed out waiting for a direct cloud reply or fallback-matched reply.")
 }
 
 async function main() {
   console.log(`Submitting cloud smoke command to ${BASE_URL}`)
   const created = await postCommand()
-  console.log(`commandId=${created.id}`)
-  const answered = await pollCommand(created.id)
+  console.log(`commandId=${created.command.id}`)
+  const answered = await pollCommand(created.command.id)
+  const report = {
+    path: "cloud",
+    createAckMs: created.createAckMs,
+    executorVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstAckMs ?? null),
+    firstReplyVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstReplyMs ?? null),
+    doneMs: Date.now() - pollStartedAt,
+    stage: answered?.deliveryStage || answered?.progressStage || answered?.status || "unknown"
+  }
+  console.log(JSON.stringify({ latencyReport: report }, null, 2))
   console.log(`Smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`)
 }
 

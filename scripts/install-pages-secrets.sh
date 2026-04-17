@@ -16,12 +16,9 @@ typeset -a required_keys
 required_keys=(
   LINKS_WRITE_TOKEN
   COMMAND_DISPATCH_MODE
+  OPENAI_API_KEY
   GITHUB_OWNER
   GITHUB_TOKEN
-  SLACK_BOT_TOKEN
-  SLACK_SIGNING_SECRET
-  SLACK_CODEX_CHANNEL_ID
-  SLACK_CODEX_USER_ID
 )
 
 extract_value() {
@@ -43,12 +40,24 @@ for key in "${required_keys[@]}"; do
   printf "%s" "$value" | npx wrangler pages secret put "$key" --project-name "$PROJECT_NAME"
 done
 
-optional_mention="$(extract_value SLACK_CODEX_MENTION)"
+optional_slack_keys=(
+  SLACK_BOT_TOKEN
+  SLACK_SIGNING_SECRET
+  SLACK_CODEX_CHANNEL_ID
+  SLACK_CODEX_USER_ID
+  SLACK_CODEX_MENTION
+)
 
-if [[ -n "$optional_mention" ]]; then
-  echo "Uploading SLACK_CODEX_MENTION to Pages project $PROJECT_NAME"
-  printf "%s" "$optional_mention" | npx wrangler pages secret put SLACK_CODEX_MENTION --project-name "$PROJECT_NAME"
-fi
+for key in "${optional_slack_keys[@]}"; do
+  value="$(extract_value "$key")"
+
+  if [[ -z "$value" ]]; then
+    continue
+  fi
+
+  echo "Uploading optional legacy key $key to Pages project $PROJECT_NAME"
+  printf "%s" "$value" | npx wrangler pages secret put "$key" --project-name "$PROJECT_NAME"
+done
 
 echo ""
 echo "Secrets uploaded. Verify production mode:"
