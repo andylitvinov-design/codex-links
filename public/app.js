@@ -902,6 +902,7 @@ function formatProgressStage(progressStage, status) {
     "fallback-to-bridge": "Переведено на bridge",
     "fallback-to-cloud": "Переведено в Codex Cloud",
     "slack-reply-received": "Slack reply получен",
+    "slack-reply-received-unthreaded": "Slack reply получен вне thread и сопоставлен",
     "slack-signature-failed": "Slack signature не прошла",
     "reply-not-threaded": "Reply пришёл вне thread",
     "codex-target-user-invalid": "Неверный Codex target user",
