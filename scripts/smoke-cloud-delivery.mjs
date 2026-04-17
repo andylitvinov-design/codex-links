@@ -3,8 +3,10 @@
 const BASE_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev"
 const TARGET_REPO = process.env.CODEX_LINKS_SMOKE_REPO || "andylitvinov-design/codex-links"
 const TARGET_REPO_URL = process.env.CODEX_LINKS_SMOKE_REPO_URL || "https://github.com/andylitvinov-design/codex-links"
+const FALLBACK_THREAD_ID = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_ID || ""
+const FALLBACK_THREAD_LABEL = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_LABEL || ""
 const clientId = `smoke-${Date.now()}`
-const text = "delivery-probe: reply in this Slack thread with OK only"
+const text = "delivery-probe: reply with OK only"
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -21,6 +23,8 @@ async function postCommand() {
       clientId,
       threadId: "cloud:smoke",
       threadLabel: "Cloud Smoke",
+      fallbackThreadId: FALLBACK_THREAD_ID,
+      fallbackThreadLabel: FALLBACK_THREAD_LABEL,
       text,
       dispatchMode: "slack-codex-cloud",
       targetExecutionMode: "cloud",
@@ -53,7 +57,7 @@ async function pollCommand(id) {
       const status = String(command.status || "").trim().toLowerCase()
       const stage = String(command.progressStage || "").trim()
 
-      console.log(`status=${status || "unknown"} stage=${stage || "unknown"}`)
+      console.log(`status=${status || "unknown"} stage=${stage || "unknown"} dispatchMode=${String(command.dispatchMode || "").trim() || "unknown"}`)
 
       if (status === "answered") {
         return command
@@ -67,7 +71,7 @@ async function pollCommand(id) {
     await sleep(5000)
   }
 
-  throw new Error("Smoke test timed out waiting for a threaded Codex Cloud reply.")
+  throw new Error("Smoke test timed out waiting for a Codex Cloud reply or fallback-matched reply.")
 }
 
 async function main() {
@@ -75,7 +79,7 @@ async function main() {
   const created = await postCommand()
   console.log(`commandId=${created.id}`)
   const answered = await pollCommand(created.id)
-  console.log(`Smoke OK: command ${answered.id} answered`)
+  console.log(`Smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`)
 }
 
 main().catch((error) => {
