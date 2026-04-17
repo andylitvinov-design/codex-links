@@ -2,9 +2,11 @@ const state = {
   commands: [],
   messages: [],
   threads: [],
+  cloudRepos: [],
   threadMessageCounts: {},
   activeThreadCategories: [],
   activeTimelineTab: "dialog",
+  dispatchMode: "bridge",
   bridgeWatchdog: null,
   commandPoller: null,
   commandPollerInterval: 0,
@@ -12,23 +14,17 @@ const state = {
   lastRenderedTimelineSignature: "",
   answerOpenUntil: {},
   answerCloseTimer: null,
-  hardReloading: false
+  hardReloading: false,
+  hasLoadedMessagesOnce: false,
+  audioUnlocked: false
 };
 
-const BUILD_VERSION = "20260417-1230";
-const FAST_POLL_INTERVAL_MS = 6000;
-const IDLE_POLL_INTERVAL_MS = 20000;
+const BUILD_VERSION = "20260417-2345";
+const FAST_POLL_INTERVAL_MS = 3500;
+const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
 const MAX_PHOTO_UPLOAD_BYTES = 1_600_000;
 const MAX_PHOTO_DIMENSION = 1600;
-
-const CLOUD_CODEX_CATEGORIES = new Set([
-  "artefacts",
-  "ezohata",
-  "links",
-  "sales",
-  "system-optimization"
-]);
 
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
@@ -183,11 +179,61 @@ const storage = {
     const normalized = value === "notifications" ? "notifications" : "dialog";
     safeLocalStorageSet("codex-links-active-timeline-tab", normalized);
     writeCookie("codex-links-active-timeline-tab", normalized);
+  },
+
+  get dispatchModePreference() {
+    const raw = safeLocalStorageGet("codex-links-dispatch-mode") ?? readCookie("codex-links-dispatch-mode");
+    return raw === "cloud" ? "cloud" : "bridge";
+  },
+
+  set dispatchModePreference(value) {
+    const normalized = value === "cloud" ? "cloud" : "bridge";
+    safeLocalStorageSet("codex-links-dispatch-mode", normalized);
+    writeCookie("codex-links-dispatch-mode", normalized);
+  },
+
+  get selectedCloudRepoId() {
+    const raw = safeLocalStorageGet("codex-links-selected-cloud-repo") ?? readCookie("codex-links-selected-cloud-repo");
+    return String(raw || "").trim().toLowerCase();
+  },
+
+  set selectedCloudRepoId(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+
+    if (!normalized) {
+      safeLocalStorageRemove("codex-links-selected-cloud-repo");
+      removeCookie("codex-links-selected-cloud-repo");
+      return;
+    }
+
+    safeLocalStorageSet("codex-links-selected-cloud-repo", normalized);
+    writeCookie("codex-links-selected-cloud-repo", normalized);
+  },
+
+  get activeBridgeThreadId() {
+    const raw = safeLocalStorageGet("codex-links-active-bridge-thread") ?? readCookie("codex-links-active-bridge-thread");
+    return String(raw || "").trim();
+  },
+
+  set activeBridgeThreadId(value) {
+    const normalized = String(value || "").trim();
+
+    if (!normalized) {
+      safeLocalStorageRemove("codex-links-active-bridge-thread");
+      removeCookie("codex-links-active-bridge-thread");
+      return;
+    }
+
+    safeLocalStorageSet("codex-links-active-bridge-thread", normalized);
+    writeCookie("codex-links-active-bridge-thread", normalized);
   }
 };
 
 const refreshButton = document.querySelector("#refresh-button");
+const dispatchModeBridgeButton = document.querySelector("#dispatch-mode-bridge");
+const dispatchModeCloudButton = document.querySelector("#dispatch-mode-cloud");
 const commandForm = document.querySelector("#command-form");
+const commandTargetLabel = document.querySelector("#command-target-label");
 const commandThreadSelect = document.querySelector("#command-thread-select");
 const commandPhotoInput = document.querySelector("#command-photo-input");
 const commandPhotoStatus = document.querySelector("#command-photo-status");
@@ -197,6 +243,9 @@ const commandTimeline = document.querySelector("#command-timeline");
 const submitProgress = document.querySelector("#submit-progress");
 const threadSettingsToggle = document.querySelector("#thread-settings-toggle");
 const threadSettingsSummary = document.querySelector("#thread-settings-summary");
+const cloudRepoPanel = document.querySelector("#cloud-repo-panel");
+const cloudRepoSummary = document.querySelector("#cloud-repo-summary");
+const cloudRepoList = document.querySelector("#cloud-repo-list");
 const threadSettingsPanel = document.querySelector("#thread-settings-panel");
 const threadSettingsShowAll = document.querySelector("#thread-settings-show-all");
 const threadSettingsSearch = document.querySelector("#thread-settings-search");
@@ -329,8 +378,24 @@ function escapeThreadLabel(thread) {
   return thread || "";
 }
 
-function isCloudCodexCategory(category) {
-  return CLOUD_CODEX_CATEGORIES.has(String(category || "").trim().toLowerCase());
+function getActiveDispatchMode() {
+  return state.dispatchMode === "cloud" ? "cloud" : "bridge";
+}
+
+function buildCloudThreadId(repoId) {
+  const normalized = String(repoId || "").trim().toLowerCase();
+  return normalized ? `cloud:${normalized}` : "";
+}
+
+function getCloudRepoById(repoId) {
+  const normalized = String(repoId || "").trim().toLowerCase();
+  return state.cloudRepos.find((repo) => String(repo?.id || "").trim().toLowerCase() === normalized) || null;
+}
+
+function formatCloudRepoLabel(repo) {
+  const name = String(repo?.name || "").trim();
+  const owner = String(repo?.nameWithOwner || "").trim();
+  return name || owner;
 }
 
 function compareBuildVersions(left, right) {
@@ -359,13 +424,11 @@ async function ensureLatestClient() {
 
     const data = await response.json();
     const latestVersion = String(data?.build || "").trim();
-    const currentUrlVersion = String(new URL(window.location.href).searchParams.get("v") || "").trim();
 
     if (
       !latestVersion
       || latestVersion === BUILD_VERSION
       || compareBuildVersions(latestVersion, BUILD_VERSION) < 0
-      || latestVersion === currentUrlVersion
     ) {
       return false;
     }
@@ -374,6 +437,7 @@ async function ensureLatestClient() {
     setCommandStatusMessage("Обновляю страницу до новой версии…");
     const nextUrl = new URL(window.location.href);
     nextUrl.searchParams.set("v", latestVersion);
+    nextUrl.searchParams.set("reload", String(Date.now()));
     window.location.replace(nextUrl.toString());
     return true;
   } catch {
@@ -453,7 +517,27 @@ function getAllThreadOptions() {
   );
 }
 
-function groupThreadOptions(options) {
+function getAllCloudRepoOptions() {
+  return state.cloudRepos.map((repo) => ({
+    id: buildCloudThreadId(repo.id),
+    repoId: String(repo.id || "").trim().toLowerCase(),
+    label: String(repo.name || "").trim(),
+    displayLabel: formatCloudRepoLabel(repo),
+    category: "GitHub",
+    updatedAt: Number(new Date(repo.updatedAt || 0)) || 0
+  })).sort((left, right) =>
+    (right.updatedAt || 0) - (left.updatedAt || 0)
+    || left.displayLabel.localeCompare(right.displayLabel, "ru")
+  );
+}
+
+function getSelectableOptions() {
+  return getActiveDispatchMode() === "cloud"
+    ? getAllCloudRepoOptions()
+    : getAllThreadOptions();
+}
+
+function groupSelectableOptions(options) {
   return [...options.reduce((groups, option) => {
     const key = option.category || "Без категории";
     const bucket = groups.get(key) || [];
@@ -472,7 +556,11 @@ function groupThreadOptions(options) {
 }
 
 function getActiveThreadId() {
-  return String(commandThreadSelect?.value || "").trim();
+  if (getActiveDispatchMode() === "cloud") {
+    return buildCloudThreadId(storage.selectedCloudRepoId);
+  }
+
+  return String(commandThreadSelect?.value || storage.activeBridgeThreadId || "").trim();
 }
 
 function getSelectedThreadIds() {
@@ -492,6 +580,11 @@ function getThreadDisplayLabel(threadId, fallbackLabel = "") {
     return fallbackLabel;
   }
 
+  if (normalizedId.startsWith("cloud:")) {
+    const cloudRepo = getCloudRepoById(normalizedId.slice("cloud:".length));
+    return cloudRepo ? formatCloudRepoLabel(cloudRepo) : fallbackLabel;
+  }
+
   const match = state.threads.find((thread) => String(thread?.id || "").trim() === normalizedId);
   return match ? formatThreadOptionLabel(match) : fallbackLabel;
 }
@@ -506,6 +599,12 @@ function getAllCategories() {
 
 function renderThreadCategories() {
   if (!threadCategoriesList || !threadCategoriesSummary) {
+    return;
+  }
+
+  if (getActiveDispatchMode() === "cloud") {
+    threadCategoriesList.innerHTML = "";
+    threadCategoriesSummary.textContent = "В cloud-режиме вместо категорий показываются репозитории GitHub.";
     return;
   }
 
@@ -545,6 +644,14 @@ function renderThreadSettingsSummary() {
     return;
   }
 
+  if (getActiveDispatchMode() === "cloud") {
+    const repo = getCloudRepoById(storage.selectedCloudRepoId);
+    threadSettingsSummary.textContent = repo
+      ? `Cloud target: ${formatCloudRepoLabel(repo)}.`
+      : "Выберите GitHub-репозиторий для Codex Cloud.";
+    return;
+  }
+
   if (storage.showAllMessages) {
     threadSettingsSummary.textContent = "Показываются все чаты.";
     return;
@@ -559,6 +666,11 @@ function renderThreadSettingsSummary() {
 
 function renderThreadSettingsList() {
   if (!threadSettingsList) {
+    return;
+  }
+
+  if (getActiveDispatchMode() === "cloud") {
+    threadSettingsList.innerHTML = "";
     return;
   }
 
@@ -578,7 +690,7 @@ function renderThreadSettingsList() {
 
     return activeCategories.has(option.category);
   });
-  const groupedOptions = groupThreadOptions(options);
+  const groupedOptions = groupSelectableOptions(options);
 
   threadSettingsList.innerHTML = "";
 
@@ -629,6 +741,37 @@ function renderThreadSettingsList() {
   });
 }
 
+function renderCloudRepos() {
+  if (!cloudRepoList || !cloudRepoSummary) {
+    return;
+  }
+
+  const repos = [...state.cloudRepos];
+  cloudRepoList.innerHTML = "";
+  cloudRepoSummary.textContent = repos.length
+    ? `Репозиториев: ${repos.length}`
+    : "Cloud-репозитории пока не синхронизированы.";
+
+  repos.forEach((repo) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "cloud-repo-card";
+    card.dataset.active = storage.selectedCloudRepoId === repo.id ? "1" : "0";
+    card.innerHTML = `
+      <div class="cloud-repo-title-row">
+        <span class="cloud-repo-title">${escapeHtml(repo.name || repo.nameWithOwner || repo.id)}</span>
+      </div>
+    `;
+    card.addEventListener("click", () => {
+      storage.selectedCloudRepoId = repo.id;
+      renderDispatchModeUi();
+      renderCommands();
+      setCommandStatusMessage(`Выбран cloud repo: ${repo.nameWithOwner}.`);
+    });
+    cloudRepoList.appendChild(card);
+  });
+}
+
 function ensureThreadVisible(threadId) {
   const normalizedId = String(threadId || "").trim();
 
@@ -636,10 +779,18 @@ function ensureThreadVisible(threadId) {
     return false;
   }
 
-  const allOptionIds = getAllThreadOptions().map((option) => option.id);
+  const isCloudThread = normalizedId.startsWith("cloud:");
+  const allOptionIds = isCloudThread
+    ? getAllCloudRepoOptions().map((option) => option.id)
+    : getAllThreadOptions().map((option) => option.id);
 
   if (!allOptionIds.includes(normalizedId)) {
     return false;
+  }
+
+  if (isCloudThread) {
+    storage.selectedCloudRepoId = normalizedId.slice("cloud:".length);
+    return true;
   }
 
   const selectedThreadIds = storage.selectedThreadIds;
@@ -657,6 +808,10 @@ function activateReplyThread(threadId) {
   if (!ensureThreadVisible(normalizedId)) {
     return false;
   }
+
+  state.dispatchMode = normalizedId.startsWith("cloud:") ? "cloud" : "bridge";
+  storage.dispatchModePreference = state.dispatchMode;
+  renderDispatchModeUi();
 
   if (commandThreadSelect) {
     commandThreadSelect.dataset.pendingValue = normalizedId;
@@ -696,14 +851,79 @@ function formatProgressStage(progressStage, status) {
 }
 
 function formatCommandStage(command) {
+  if (hasAssistantReply(command?.id, command)) {
+    const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
+    return relative ? `Ответ получен · ${relative}` : "Ответ получен";
+  }
+
   const status = String(command?.status || "").trim().toLowerCase();
   const label = formatProgressStage(command?.progressStage, status);
   const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
   return relative ? `${label} · ${relative}` : label;
 }
 
+function getCommandDeliveryStatus(command) {
+  if (hasAssistantReply(command?.id, command)) {
+    return null;
+  }
+
+  const status = String(command?.status || "").trim().toLowerCase();
+  const stage = String(command?.progressStage || "").trim().toLowerCase();
+  const errorMessage = String(command?.errorMessage || "").trim();
+
+  if (status === "failed") {
+    return {
+      tone: "error",
+      text: getCommandFailureMessage(command)
+    };
+  }
+
+  const stageTextByKey = {
+    queued: "В очереди на отправку",
+    claimed: "Команда принята в работу",
+    "preparing-input": "Подготавливаю сообщение",
+    "sending-to-codex": "Отправляю в Codex",
+    dispatched: "Отправляю в Codex",
+    processing: "Codex обрабатывает запрос",
+    "waiting-for-codex": "Жду ответ Codex",
+    "reading-codex-reply": "Читаю ответ Codex",
+    "saving-reply": "Сохраняю ответ",
+    answered: "Ответ сохранён",
+    acked: "Ответ сохранён"
+  };
+
+  const text = stageTextByKey[stage] || stageTextByKey[status] || "";
+
+  if (!text) {
+    return null;
+  }
+
+  if (status === "answered" || status === "acked" || stage === "answered" || stage === "acked") {
+    return null;
+  }
+
+  if (/automatically switched to local bridge/i.test(errorMessage)) {
+    return {
+      tone: "queued",
+      text: "Cloud не ответил вовремя. Автоматически перевёл задачу на bridge."
+    };
+  }
+
+  if (/automatically switched to codex cloud/i.test(errorMessage)) {
+    return {
+      tone: "queued",
+      text: "Bridge задержался. Автоматически перевёл задачу в Codex Cloud."
+    };
+  }
+
+  return {
+    tone: "delivery",
+    text
+  };
+}
+
 function getVisibleTimelineCommands() {
-  const showAllMessages = storage.showAllMessages;
+  const showAllMessages = getActiveDispatchMode() === "cloud" ? false : storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
 
   return state.commands
@@ -715,6 +935,10 @@ function getVisibleTimelineCommands() {
 function syncCommandStatusFromState() {
   const activeCommand = getVisibleTimelineCommands().find((command) => {
     const status = String(command?.status || "").trim().toLowerCase();
+    if (hasAssistantReply(command?.id, command)) {
+      return false;
+    }
+
     return status === "queued" || status === "dispatched" || status === "processing";
   });
 
@@ -744,7 +968,37 @@ function getCommandFailureMessage(command) {
     return "";
   }
 
-  return String(command?.errorMessage || "").trim() || "Не удалось доставить сообщение.";
+  const message = String(command?.errorMessage || "").trim();
+
+  if (!message) {
+    return "Не удалось доставить сообщение.";
+  }
+
+  if (/did not send a slack reply in time/i.test(message)) {
+    return "Codex Cloud не ответил вовремя.";
+  }
+
+  if (/did not acknowledge the slack task in time/i.test(message)) {
+    return "Codex Cloud не подтвердил задачу вовремя.";
+  }
+
+  if (/cloud dispatch timeout/i.test(message)) {
+    return "Cloud не ответил вовремя, задача переведена на bridge.";
+  }
+
+  if (/cloud reply timeout/i.test(message)) {
+    return "Cloud завис на ответе, задача переведена на bridge.";
+  }
+
+  if (/local bridge timeout/i.test(message) || /local bridge queue timeout/i.test(message)) {
+    return "Bridge задержался, задача переведена в Codex Cloud.";
+  }
+
+  if (/photo attachments yet/i.test(message)) {
+    return "Cloud пока не поддерживает фото. Для изображения используйте bridge.";
+  }
+
+  return message;
 }
 
 function buildTimelineSignature(items, context = {}) {
@@ -824,31 +1078,103 @@ async function parseJsonResponse(response) {
   }
 }
 
-function hasAssistantReply(commandId) {
+function hasAssistantReply(commandId, command = null) {
   const normalizedId = String(commandId || "").trim();
+  const directReplyExists = normalizedId
+    ? state.messages.some((message) => String(message?.commandId || "").trim() === normalizedId)
+    : false;
 
-  if (!normalizedId) {
-    return false;
-  }
-
-  return state.messages.some((message) => String(message?.commandId || "").trim() === normalizedId);
-}
-
-function isHiddenSystemEntry(entry) {
-  const threadId = String(entry?.threadId || "").trim().toLowerCase();
-  const text = String(entry?.text || "").trim().toLowerCase();
-
-  if (threadId === "dedupe-thread") {
+  if (directReplyExists) {
     return true;
   }
 
+  if (!command || !command.threadId || !command.createdAt) {
+    return false;
+  }
+
+  return getInferredAssistantReplies(command, state.messages, state.commands).length > 0;
+}
+
+function toTimestamp(value) {
+  const timestamp = Date.parse(String(value || "").trim());
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function getInferredAssistantReplies(command, visibleMessages, visibleCommands) {
+  const commandThreadId = String(command?.threadId || "").trim();
+  const commandCreatedAt = toTimestamp(command?.createdAt);
+
+  if (!commandThreadId || !commandCreatedAt) {
+    return [];
+  }
+
+  const nextUserTimestamp = Math.min(
+    ...[
+      ...visibleCommands
+        .filter((entry) => entry?.id !== command?.id)
+        .filter((entry) => String(entry?.threadId || "").trim() === commandThreadId)
+        .map((entry) => toTimestamp(entry?.createdAt))
+        .filter((value) => value > commandCreatedAt),
+      ...visibleMessages
+        .filter((entry) => entry?.role === "user")
+        .filter((entry) => String(entry?.threadId || "").trim() === commandThreadId)
+        .map((entry) => toTimestamp(entry?.createdAt))
+        .filter((value) => value > commandCreatedAt)
+    ]
+  );
+
+  return visibleMessages
+    .filter((message) => message?.role === "assistant")
+    .filter((message) => !String(message?.commandId || "").trim())
+    .filter((message) => String(message?.threadId || "").trim() === commandThreadId)
+    .filter((message) => {
+      const createdAt = toTimestamp(message?.createdAt);
+      if (!createdAt || createdAt < commandCreatedAt) {
+        return false;
+      }
+
+      return !Number.isFinite(nextUserTimestamp) || createdAt < nextUserTimestamp;
+    })
+    .map((message) => ({
+      id: `message:${message.id}`,
+      kind: "message",
+      role: "assistant",
+      text: message.text || "",
+      createdAt: message.createdAt,
+      threadId: message.threadId || "",
+      threadLabel: message.threadLabel || "",
+      message,
+      linkedCommand: command
+    }));
+}
+
+function normalizeEntryText(entry) {
+  return String(entry?.text || "").trim().toLowerCase();
+}
+
+function isTechnicalProbeEntry(entry) {
+  const text = normalizeEntryText(entry);
+
   return (
-    text.includes("dedupe test ignore")
+    text.includes("delivery-probe")
+    || text.includes("local bridge probe")
+    || text.includes("probe reply with ok only")
+    || text.includes("dedupe test ignore")
     || text.includes("codex cloud routing probe ignore")
     || text.includes("test command from site api")
     || text.includes("direct deploy command test")
     || text.includes("ready check command")
   );
+}
+
+function isHiddenSystemEntry(entry) {
+  const threadId = String(entry?.threadId || "").trim().toLowerCase();
+
+  if (threadId === "dedupe-thread") {
+    return true;
+  }
+
+  return isTechnicalProbeEntry(entry);
 }
 
 function isNotificationEntry(entry) {
@@ -860,7 +1186,7 @@ function isNotificationEntry(entry) {
     return false;
   }
 
-  const text = String(entry?.text || "").trim().toLowerCase();
+  const text = normalizeEntryText(entry);
   return text.includes("cloud dispatch недоступен. команда автоматически переведена на локальный bridge.");
 }
 
@@ -890,25 +1216,27 @@ function renderAssistantReplyMarkup(replyEntry) {
   const detailsId = String(message?.id || "").trim();
   const deliveryLabel = getCommandDeliveryLabel(linkedCommand);
   const commandMeta = linkedCommand?.branchName
-    ? `<p>Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
+    ? `<p class="command-answer-meta">Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
     : "";
   const prMeta = linkedCommand?.prUrl
-    ? `<p><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
+    ? `<p class="command-answer-meta"><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
     : "";
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
-        <span>Ответ Codex</span>
+        <span class="command-answer-title">Ответ Codex</span>
         <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
       </summary>
-      <p>${escapeHtml(replyEntry?.text || "")}</p>
-      ${prMeta}
-      ${commandMeta}
-      <div class="command-answer-actions">
-        <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
-          Ответить
-        </button>
+      <div class="command-answer-body">
+        <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
+        ${prMeta}
+        ${commandMeta}
+        <div class="command-answer-actions">
+          <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
+            Ответить
+          </button>
+        </div>
       </div>
     </details>
   `;
@@ -967,7 +1295,7 @@ function bindAssistantReplyInteractions(container, replies) {
 function renderCommands() {
   pruneExpiredAnswerState();
   renderTimelineTabButtons();
-  const showAllMessages = storage.showAllMessages;
+  const showAllMessages = getActiveDispatchMode() === "cloud" ? false : storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
   const visibleCommands = getVisibleTimelineCommands();
   const visibleMessages = state.messages
@@ -1010,6 +1338,20 @@ function renderCommands() {
       items.push(entry);
       assistantRepliesByCommandId.set(commandId, items);
     });
+
+  visibleCommands.forEach((command) => {
+    const commandId = String(command.id || "").trim();
+
+    if (!commandId || assistantRepliesByCommandId.has(commandId)) {
+      return;
+    }
+
+    const inferredReplies = getInferredAssistantReplies(command, visibleMessages, visibleCommands);
+
+    if (inferredReplies.length) {
+      assistantRepliesByCommandId.set(commandId, inferredReplies);
+    }
+  });
 
   const timelineItems = [
     ...visibleCommands
@@ -1116,6 +1458,7 @@ function renderCommands() {
     if (entry.kind === "command") {
       const command = entry.command;
       const failureMessage = getCommandFailureMessage(command);
+      const deliveryStatus = getCommandDeliveryStatus(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
@@ -1127,7 +1470,8 @@ function renderCommands() {
         </div>
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
-        ${failureMessage ? `<div class="command-fallback-note">${escapeHtml(failureMessage)}</div>` : ""}
+        ${failureMessage ? "" : ""}
+        ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
         ${repliesMarkup}
         <div class="command-item-top">
           <span>${formatCommandStage(command)}</span>
@@ -1212,19 +1556,152 @@ function setSubmitProgress(stage = "", tone = "") {
   });
 }
 
+function unlockReplySound() {
+  if (state.audioUnlocked) {
+    return;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    state.audioUnlocked = true;
+    return;
+  }
+
+  try {
+    const context = new AudioContextClass();
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.connect(context.destination);
+    const resumePromise = typeof context.resume === "function" ? context.resume() : Promise.resolve();
+
+    Promise.resolve(resumePromise)
+      .catch(() => {})
+      .finally(() => {
+        state.audioUnlocked = context.state === "running";
+        context.close().catch(() => {});
+      });
+  } catch {
+    // Ignore browsers that block or do not support Web Audio setup here.
+  }
+}
+
+function playReplySound() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return;
+  }
+
+  try {
+    const context = new AudioContextClass();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const resumePromise = typeof context.resume === "function" ? context.resume() : Promise.resolve();
+
+    Promise.resolve(resumePromise)
+      .then(() => {
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(880, context.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(1240, context.currentTime + 0.16);
+        gain.gain.setValueAtTime(0.0001, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.07, context.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
+
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.34);
+        oscillator.addEventListener("ended", () => {
+          context.close().catch(() => {});
+        });
+      })
+      .catch(() => {
+        context.close().catch(() => {});
+      });
+  } catch {
+    // Ignore browsers that do not allow playback in the current state.
+  }
+}
+
+function renderDispatchModeUi() {
+  const isCloud = getActiveDispatchMode() === "cloud";
+  const selectedRepo = getCloudRepoById(storage.selectedCloudRepoId);
+  const cloudRepo = selectedRepo || state.cloudRepos[0] || null;
+  const hasActiveStatus = Boolean(String(commandStatus?.textContent || "").trim());
+  const hasPendingCommand = state.commands.some((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    return status === "queued" || status === "dispatched" || status === "processing";
+  });
+
+  if (isCloud && cloudRepo && !selectedRepo) {
+    storage.selectedCloudRepoId = cloudRepo.id;
+  }
+
+  dispatchModeBridgeButton?.classList.toggle("is-active", !isCloud);
+  dispatchModeCloudButton?.classList.toggle("is-active", isCloud);
+  dispatchModeBridgeButton?.setAttribute("aria-selected", String(!isCloud));
+  dispatchModeCloudButton?.setAttribute("aria-selected", String(isCloud));
+
+  if (commandTargetLabel) {
+    commandTargetLabel.textContent = isCloud ? "Репозиторий GitHub" : "Беседа Codex";
+  }
+
+  if (threadSettingsToggle) {
+    threadSettingsToggle.hidden = isCloud;
+  }
+
+  if (threadSettingsPanel && isCloud) {
+    threadSettingsPanel.hidden = true;
+    threadSettingsToggle?.setAttribute("aria-expanded", "false");
+  }
+
+  if (cloudRepoPanel) {
+    cloudRepoPanel.hidden = !isCloud;
+  }
+
+  if (threadSettingsShowAll) {
+    const showAllWrap = threadSettingsShowAll.closest("label");
+
+    if (showAllWrap) {
+      showAllWrap.hidden = isCloud;
+    }
+  }
+
+  renderThreadCategories();
+  renderThreadSettingsSummary();
+  renderThreadSettingsList();
+  renderCloudRepos();
+  renderCommandThreads();
+
+  if (isCloud && !hasPendingCommand && !hasActiveStatus) {
+    setCommandStatusMessage(
+      cloudRepo
+        ? `Cloud target: ${cloudRepo.nameWithOwner}.`
+        : "Выберите GitHub-репозиторий для отправки через Codex Cloud."
+    );
+  }
+}
+
 function renderCommandThreads() {
   if (!commandThreadSelect) {
     return;
   }
 
-  const options = getAllThreadOptions();
-  const visibleIds = new Set(getSelectedThreadIds());
+  const isCloud = getActiveDispatchMode() === "cloud";
+  const options = isCloud ? getAllCloudRepoOptions() : getAllThreadOptions();
+  const visibleIds = new Set(isCloud ? options.map((option) => option.id) : getSelectedThreadIds());
   const nextOptions = options.filter((option) => visibleIds.has(option.id));
-  const currentValue = String(commandThreadSelect.dataset.pendingValue || commandThreadSelect.value || "").trim();
+  const currentValue = String(
+    commandThreadSelect.dataset.pendingValue
+    || commandThreadSelect.value
+    || (isCloud ? buildCloudThreadId(storage.selectedCloudRepoId) : storage.activeBridgeThreadId)
+    || ""
+  ).trim();
 
   commandThreadSelect.innerHTML = "";
 
-  groupThreadOptions(nextOptions).forEach(({ category, items }) => {
+  groupSelectableOptions(nextOptions).forEach(({ category, items }) => {
     const group = document.createElement("optgroup");
     group.label = category;
 
@@ -1245,6 +1722,12 @@ function renderCommandThreads() {
 
   if (targetValue) {
     commandThreadSelect.value = targetValue;
+  }
+
+  if (isCloud) {
+    storage.selectedCloudRepoId = targetValue.replace(/^cloud:/, "");
+  } else {
+    storage.activeBridgeThreadId = targetValue;
   }
 
   renderThreadSettingsSummary();
@@ -1280,6 +1763,22 @@ async function fetchThreads() {
 
   const data = await response.json();
   state.threads = Array.isArray(data?.threads) ? data.threads : [];
+}
+
+async function fetchCloudRepos() {
+  const response = await fetch(`/api/repos?mode=cloud&_=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load repos: ${response.status}`);
+  }
+
+  const data = await response.json();
+  state.cloudRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
 async function fetchThreadCounts() {
@@ -1336,7 +1835,23 @@ async function fetchMessages() {
   }
 
   const data = await response.json();
+  const previousAssistantIds = new Set(
+    state.messages
+      .filter((message) => message?.role === "assistant")
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean)
+  );
   state.messages = Array.isArray(data?.messages) ? data.messages : [];
+
+  const hasNewAssistantReply = state.hasLoadedMessagesOnce && state.messages.some((message) => (
+    message?.role === "assistant" && !previousAssistantIds.has(String(message.id || "").trim())
+  ));
+
+  if (hasNewAssistantReply) {
+    playReplySound();
+  }
+
+  state.hasLoadedMessagesOnce = true;
 }
 
 async function refreshAll() {
@@ -1345,12 +1860,14 @@ async function refreshAll() {
     fetchCommands(),
     fetchMessages(),
     fetchThreads(),
-    fetchThreadCounts()
+    fetchThreadCounts(),
+    fetchCloudRepos()
   ]);
 
   const statusResult = results[0];
   const commandsError = results[1].status === "rejected" ? results[1].reason : null;
   const messagesError = results[2].status === "rejected" ? results[2].reason : null;
+  const reposError = results[5].status === "rejected" ? results[5].reason : null;
 
   if (statusResult.status === "fulfilled") {
     const status = statusResult.value?.status || {};
@@ -1366,16 +1883,16 @@ async function refreshAll() {
     }
   }
 
-  renderThreadCategories();
-  renderThreadSettingsList();
-  renderCommandThreads();
+  renderDispatchModeUi();
 
   const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
 
-  if ((commandsError || messagesError) && hasCachedData) {
+  if ((commandsError || messagesError || reposError) && hasCachedData) {
     setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
   } else if (commandsError && messagesError) {
     setCommandStatusMessage("Не удалось обновить команды и ответы.", { tone: "error" });
+  } else if (reposError) {
+    setCommandStatusMessage("Не удалось обновить cloud-репозитории.", { tone: "error" });
   } else if (messagesError) {
     setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
   } else if (commandsError) {
@@ -1384,6 +1901,7 @@ async function refreshAll() {
     syncCommandStatusFromState();
   }
 
+  startPolling();
   renderCommands();
 }
 
@@ -1392,9 +1910,18 @@ async function submitCommand(event) {
 
   const text = String(commandInput?.value || "").trim();
   const threadId = getActiveThreadId();
+  const dispatchMode = getActiveDispatchMode();
+  const cloudRepo = getCloudRepoById(storage.selectedCloudRepoId);
+  const fallbackThreadId = String(storage.activeBridgeThreadId || getAllThreadOptions()[0]?.id || "").trim();
+  const fallbackThreadLabel = getThreadDisplayLabel(fallbackThreadId, "");
 
   if (!text && !(commandPhotoInput?.files?.[0])) {
     setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
+    return;
+  }
+
+  if (dispatchMode === "cloud" && !cloudRepo) {
+    setCommandStatusMessage("Для Codex Cloud сначала выберите GitHub-репозиторий.", { tone: "error" });
     return;
   }
 
@@ -1404,9 +1931,24 @@ async function submitCommand(event) {
   const payload = {
     clientId: storage.clientId,
     threadId,
-    threadLabel: getThreadDisplayLabel(threadId, ""),
-    text
+    threadLabel: dispatchMode === "cloud"
+      ? formatCloudRepoLabel(cloudRepo)
+      : getThreadDisplayLabel(threadId, ""),
+    text,
+    dispatchMode: dispatchMode === "cloud" ? "slack-codex-cloud" : "local-bridge",
+    targetExecutionMode: dispatchMode
   };
+
+  if (cloudRepo) {
+    payload.targetRepo = cloudRepo.nameWithOwner;
+    payload.targetRepoUrl = cloudRepo.url;
+    payload.targetContextFiles = Array.isArray(cloudRepo.contextFiles) ? cloudRepo.contextFiles : [];
+  }
+
+  if (dispatchMode === "cloud" && fallbackThreadId) {
+    payload.fallbackThreadId = fallbackThreadId;
+    payload.fallbackThreadLabel = fallbackThreadLabel;
+  }
 
   const photoFile = commandPhotoInput?.files?.[0];
 
@@ -1448,7 +1990,12 @@ function startPolling() {
     window.clearInterval(state.commandPoller);
   }
 
-  state.commandPollerInterval = FAST_POLL_INTERVAL_MS;
+  const hasActiveCommands = state.commands.some((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    return status === "queued" || status === "dispatched" || status === "processing";
+  });
+
+  state.commandPollerInterval = hasActiveCommands ? FAST_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
   state.commandPoller = window.setInterval(async () => {
     if (await ensureLatestClient()) {
       return;
@@ -1459,6 +2006,25 @@ function startPolling() {
 }
 
 function bindEvents() {
+  const primeReplySound = () => {
+    unlockReplySound();
+  };
+
+  document.addEventListener("pointerdown", primeReplySound, { passive: true });
+  document.addEventListener("keydown", primeReplySound, { passive: true });
+
+  dispatchModeBridgeButton?.addEventListener("click", () => {
+    state.dispatchMode = "bridge";
+    storage.dispatchModePreference = "bridge";
+    renderDispatchModeUi();
+  });
+
+  dispatchModeCloudButton?.addEventListener("click", () => {
+    state.dispatchMode = "cloud";
+    storage.dispatchModePreference = "cloud";
+    renderDispatchModeUi();
+  });
+
   refreshButton?.addEventListener("click", async () => {
     if (await ensureLatestClient()) {
       return;
@@ -1475,7 +2041,14 @@ function bindEvents() {
   });
 
   commandThreadSelect?.addEventListener("change", () => {
+    if (getActiveDispatchMode() === "cloud") {
+      storage.selectedCloudRepoId = String(commandThreadSelect.value || "").replace(/^cloud:/, "");
+    } else {
+      storage.activeBridgeThreadId = String(commandThreadSelect.value || "").trim();
+    }
+
     renderThreadSettingsSummary();
+    renderCloudRepos();
     renderCommands();
   });
 
@@ -1543,10 +2116,9 @@ function bindEvents() {
     if (threadSettingsSearch) {
       threadSettingsSearch.value = "";
     }
-    storage.selectedThreadIds = null;
     renderThreadCategories();
-    renderCommandThreads();
     renderThreadSettingsList();
+    setCommandStatusMessage("Фильтры меню сброшены.");
   });
 
   document.addEventListener("visibilitychange", () => {
@@ -1560,11 +2132,21 @@ function bindEvents() {
   window.addEventListener("focus", () => {
     ensureLatestClient().catch(() => {});
   });
+
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) {
+      return;
+    }
+
+    ensureLatestClient().catch(() => {});
+  });
 }
 
 async function boot() {
   if (
     !refreshButton ||
+    !dispatchModeBridgeButton ||
+    !dispatchModeCloudButton ||
     !threadSettingsToggle ||
     !threadSettingsSearch ||
     !threadSettingsSave ||
@@ -1583,6 +2165,7 @@ async function boot() {
     threadSettingsShowAll.checked = storage.showAllMessages;
   }
 
+  state.dispatchMode = storage.dispatchModePreference;
   state.activeTimelineTab = storage.activeTimelineTab;
   renderTimelineTabButtons();
 
@@ -1602,6 +2185,7 @@ async function boot() {
 
   const url = new URL(window.location.href);
   url.searchParams.set("v", BUILD_VERSION);
+  url.searchParams.delete("reload");
   window.history.replaceState({}, "", url.toString());
 }
 

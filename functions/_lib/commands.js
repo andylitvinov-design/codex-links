@@ -8,8 +8,10 @@ import { DISPATCH_MODE_LOCAL, DISPATCH_MODE_SLACK, normalizeDispatchMode } from 
 
 const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
-const STALE_SLACK_DISPATCH_MS = 2 * 60 * 1000;
-const STALE_SLACK_PROCESSING_MS = 3 * 60 * 1000;
+const STALE_LOCAL_QUEUE_MS = 20 * 1000;
+const STALE_SLACK_DISPATCH_MS = 5 * 60 * 1000;
+const STALE_SLACK_PROCESSING_MS = 15 * 60 * 1000;
+const STALE_LOCAL_PROCESSING_MS = 45 * 1000;
 
 function normalizeCommandStatus(rawStatus) {
   const status = String(rawStatus || "").trim().toLowerCase();
@@ -81,6 +83,14 @@ function normalizeThreadLabel(rawThreadLabel, threadId) {
   return value || threadId || "Links";
 }
 
+function normalizeFallbackThreadId(rawThreadId) {
+  return normalizeThreadId(rawThreadId);
+}
+
+function normalizeFallbackThreadLabel(rawThreadLabel, threadId) {
+  return normalizeThreadLabel(rawThreadLabel, threadId);
+}
+
 function normalizeDispatchValue(rawDispatchMode) {
   return normalizeDispatchMode(rawDispatchMode || DISPATCH_MODE_LOCAL);
 }
@@ -89,12 +99,32 @@ function normalizeSlackValue(rawValue) {
   return String(rawValue || "").trim().slice(0, 120);
 }
 
+function normalizeRepoValue(rawValue) {
+  return String(rawValue || "").trim().slice(0, 240).toLowerCase();
+}
+
+function normalizeUrlValue(rawValue) {
+  return String(rawValue || "").trim().slice(0, 400);
+}
+
+function normalizeStringArray(rawValue, maxItems = 8, maxLength = 80) {
+  return [...new Set(
+    (Array.isArray(rawValue) ? rawValue : [])
+      .map((value) => String(value || "").trim().slice(0, maxLength))
+      .filter(Boolean)
+  )].slice(0, maxItems);
+}
+
 function normalizeErrorMessage(rawValue) {
   return String(rawValue || "").trim().slice(0, 500);
 }
 
 function normalizeDateValue(rawValue) {
   return String(rawValue || "").trim().slice(0, 80);
+}
+
+function normalizeExecutionMode(rawValue) {
+  return String(rawValue || "").trim().toLowerCase() === "cloud" ? "cloud" : "bridge";
 }
 
 function isOlderThan(value, maxAgeMs) {
@@ -274,6 +304,8 @@ export function createCommandRecord(input) {
   const clientId = normalizeClientId(input.clientId);
   const threadId = normalizeThreadId(input.threadId);
   const threadLabel = normalizeThreadLabel(input.threadLabel, threadId);
+  const fallbackThreadId = normalizeFallbackThreadId(input.fallbackThreadId);
+  const fallbackThreadLabel = normalizeFallbackThreadLabel(input.fallbackThreadLabel, fallbackThreadId);
   const normalizedPhoto = normalizePhoto(input.photo);
 
   if (normalizedPhoto && !normalizedPhoto.ok) {
@@ -309,6 +341,8 @@ export function createCommandRecord(input) {
       clientId,
       threadId,
       threadLabel,
+      fallbackThreadId,
+      fallbackThreadLabel,
       photo: normalizedPhoto?.value || null,
       createdAt: new Date().toISOString(),
       status: "queued",
@@ -316,6 +350,10 @@ export function createCommandRecord(input) {
       progressUpdatedAt: new Date().toISOString(),
       source: "site",
       dispatchMode: normalizeDispatchValue(input.dispatchMode),
+      targetRepo: normalizeRepoValue(input.targetRepo),
+      targetRepoUrl: normalizeUrlValue(input.targetRepoUrl),
+      targetContextFiles: normalizeStringArray(input.targetContextFiles),
+      targetExecutionMode: normalizeExecutionMode(input.targetExecutionMode),
       slackChannelId: "",
       slackMessageTs: "",
       slackThreadTs: "",
@@ -340,7 +378,13 @@ export async function readCommands(env) {
     .map((entry) => ({
       ...entry,
       status: normalizeCommandStatus(entry.status),
+      fallbackThreadId: normalizeFallbackThreadId(entry.fallbackThreadId),
+      fallbackThreadLabel: normalizeFallbackThreadLabel(entry.fallbackThreadLabel, entry.fallbackThreadId),
       dispatchMode: normalizeDispatchValue(entry.dispatchMode),
+      targetRepo: normalizeRepoValue(entry.targetRepo),
+      targetRepoUrl: normalizeUrlValue(entry.targetRepoUrl),
+      targetContextFiles: normalizeStringArray(entry.targetContextFiles),
+      targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode),
       slackChannelId: normalizeSlackValue(entry.slackChannelId),
       slackMessageTs: normalizeSlackValue(entry.slackMessageTs),
       slackThreadTs: normalizeSlackValue(entry.slackThreadTs),
@@ -368,6 +412,13 @@ export async function insertCommand(env, input) {
 
   if (!normalized.ok) {
     return normalized;
+  }
+
+  if (normalized.value.dispatchMode === DISPATCH_MODE_SLACK && !normalized.value.targetRepo) {
+    return {
+      ok: false,
+      error: "Cloud dispatch requires a target repository."
+    };
   }
 
   const current = await readCommands(env);
@@ -612,6 +663,40 @@ export async function fallbackCommandToLocalBridge(env, input = {}) {
   }));
 }
 
+export async function rerouteCommandToLocalBridge(env, input = {}) {
+  return updateCommand(env, input.id, (command, nowIso) => ({
+    ...command,
+    dispatchMode: DISPATCH_MODE_LOCAL,
+    status: "queued",
+    progressStage: normalizeProgressStage(input.progressStage) || "queued",
+    progressUpdatedAt: nowIso,
+    errorMessage: normalizeErrorMessage(input.errorMessage),
+    slackChannelId: "",
+    slackMessageTs: "",
+    slackThreadTs: "",
+    dispatchedAt: "",
+    processingStartedAt: "",
+    processingLeaseUntil: "",
+    processorId: "",
+    completedAt: ""
+  }));
+}
+
+export async function rerouteCommandToSlack(env, input = {}) {
+  return updateCommand(env, input.id, (command, nowIso) => ({
+    ...command,
+    dispatchMode: DISPATCH_MODE_SLACK,
+    status: "queued",
+    progressStage: normalizeProgressStage(input.progressStage) || "queued",
+    progressUpdatedAt: nowIso,
+    errorMessage: normalizeErrorMessage(input.errorMessage),
+    processingStartedAt: "",
+    processingLeaseUntil: "",
+    processorId: "",
+    completedAt: ""
+  }));
+}
+
 export async function updateCommandProgress(env, input = {}) {
   const id = String(input.id || "").trim();
   const progressStage = normalizeProgressStage(input.progressStage);
@@ -787,7 +872,8 @@ export async function getCommandBySlackThread(env, channelId, threadTs) {
   ) || null;
 }
 
-export async function recoverStaleSlackCommands(env) {
+export async function recoverStaleSlackCommands(env, options = {}) {
+  const fallbackToLocal = Boolean(options.fallbackToLocal);
   const current = await readCommands(env);
   const nowIso = new Date().toISOString();
   let changed = false;
@@ -796,6 +882,11 @@ export async function recoverStaleSlackCommands(env) {
     if (command.dispatchMode !== DISPATCH_MODE_SLACK) {
       return command;
     }
+
+    const canFallbackToLocal = fallbackToLocal && (
+      (String(command.threadId || "").trim() && !String(command.threadId || "").trim().startsWith("cloud:"))
+      || String(command.fallbackThreadId || "").trim()
+    );
 
     if (command.status === "dispatched") {
       const staleSince = command.dispatchedAt || command.createdAt;
@@ -807,12 +898,21 @@ export async function recoverStaleSlackCommands(env) {
       changed = true;
       return {
         ...command,
-        status: "failed",
-        progressStage: "failed",
+        dispatchMode: canFallbackToLocal ? DISPATCH_MODE_LOCAL : command.dispatchMode,
+        status: canFallbackToLocal ? "queued" : "failed",
+        progressStage: canFallbackToLocal ? "queued" : "failed",
         progressUpdatedAt: nowIso,
-        errorMessage: "Codex did not acknowledge the Slack task in time.",
+        errorMessage: canFallbackToLocal
+          ? "Cloud dispatch timeout. Automatically switched to local bridge."
+          : "Codex did not acknowledge the Slack task in time.",
+        slackChannelId: canFallbackToLocal ? "" : command.slackChannelId,
+        slackMessageTs: canFallbackToLocal ? "" : command.slackMessageTs,
+        slackThreadTs: canFallbackToLocal ? "" : command.slackThreadTs,
+        dispatchedAt: canFallbackToLocal ? "" : command.dispatchedAt,
         processorId: "",
-        completedAt: nowIso
+        processingStartedAt: "",
+        processingLeaseUntil: "",
+        completedAt: canFallbackToLocal ? "" : nowIso
       };
     }
 
@@ -826,12 +926,21 @@ export async function recoverStaleSlackCommands(env) {
       changed = true;
       return {
         ...command,
-        status: "failed",
-        progressStage: "failed",
+        dispatchMode: canFallbackToLocal ? DISPATCH_MODE_LOCAL : command.dispatchMode,
+        status: canFallbackToLocal ? "queued" : "failed",
+        progressStage: canFallbackToLocal ? "queued" : "failed",
         progressUpdatedAt: nowIso,
-        errorMessage: "Codex did not send a Slack reply in time.",
+        errorMessage: canFallbackToLocal
+          ? "Cloud reply timeout. Automatically switched to local bridge."
+          : "Codex did not send a Slack reply in time.",
+        slackChannelId: canFallbackToLocal ? "" : command.slackChannelId,
+        slackMessageTs: canFallbackToLocal ? "" : command.slackMessageTs,
+        slackThreadTs: canFallbackToLocal ? "" : command.slackThreadTs,
+        dispatchedAt: canFallbackToLocal ? "" : command.dispatchedAt,
         processorId: "",
-        completedAt: nowIso
+        processingStartedAt: "",
+        processingLeaseUntil: "",
+        completedAt: canFallbackToLocal ? "" : nowIso
       };
     }
 
@@ -843,6 +952,88 @@ export async function recoverStaleSlackCommands(env) {
   }
 
   return changed;
+}
+
+export async function recoverStaleLocalCommands(env, options = {}) {
+  const preferSlack = Boolean(options.preferSlack);
+  const current = await readCommands(env);
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  let changed = false;
+
+  const next = current.map((command) => {
+    if (command.dispatchMode !== DISPATCH_MODE_LOCAL) {
+      return command;
+    }
+
+    const canFallbackToSlack = preferSlack && !command.photo && String(command.targetRepo || "").trim();
+
+    if (command.status === "queued") {
+      if (!isOlderThan(command.progressUpdatedAt || command.createdAt, STALE_LOCAL_QUEUE_MS)) {
+        return command;
+      }
+
+      changed = true;
+      return {
+        ...command,
+        dispatchMode: canFallbackToSlack ? DISPATCH_MODE_SLACK : command.dispatchMode,
+        status: "queued",
+        progressStage: "queued",
+        progressUpdatedAt: nowIso,
+        errorMessage: canFallbackToSlack
+          ? "Local bridge queue timeout. Automatically switched to Codex Cloud."
+          : command.errorMessage,
+        processingStartedAt: "",
+        processingLeaseUntil: "",
+        processorId: "",
+        completedAt: ""
+      };
+    }
+
+    if (command.status !== "processing") {
+      return command;
+    }
+
+    const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
+    const staleSince = command.progressUpdatedAt || command.processingStartedAt || command.createdAt;
+    const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= now;
+    const isHeartbeatStale = isOlderThan(staleSince, STALE_LOCAL_PROCESSING_MS);
+
+    if (!isLeaseExpired && !isHeartbeatStale) {
+      return command;
+    }
+
+    changed = true;
+    return {
+      ...command,
+      dispatchMode: canFallbackToSlack ? DISPATCH_MODE_SLACK : command.dispatchMode,
+      status: "queued",
+      progressStage: "queued",
+      progressUpdatedAt: nowIso,
+      errorMessage: canFallbackToSlack
+        ? "Local bridge timeout. Automatically switched to Codex Cloud."
+        : command.errorMessage,
+      processingStartedAt: "",
+      processingLeaseUntil: "",
+      processorId: "",
+      completedAt: ""
+    };
+  });
+
+  if (changed) {
+    await writeCommands(env, next);
+  }
+
+  return changed;
+}
+
+export async function recoverStaleCommands(env, options = {}) {
+  const [recoveredLocal, recoveredSlack] = await Promise.all([
+    recoverStaleLocalCommands(env, options),
+    recoverStaleSlackCommands(env, options)
+  ]);
+
+  return recoveredLocal || recoveredSlack;
 }
 
 export async function getCommandsForClient(env, clientId) {

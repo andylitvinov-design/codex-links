@@ -47,6 +47,8 @@ async function main() {
 
   const config = {
     COMMAND_DISPATCH_MODE: env.COMMAND_DISPATCH_MODE || "",
+    GITHUB_OWNER: env.GITHUB_OWNER || "",
+    GITHUB_TOKEN: env.GITHUB_TOKEN || "",
     SLACK_BOT_TOKEN: env.SLACK_BOT_TOKEN || "",
     SLACK_SIGNING_SECRET: env.SLACK_SIGNING_SECRET || "",
     SLACK_CODEX_CHANNEL_ID: env.SLACK_CODEX_CHANNEL_ID || "",

@@ -51,6 +51,34 @@ async function callSlackApi(token, method, body = null, query = null) {
   return data;
 }
 
+export async function fetchSlackThreadReplies(env, channel, threadTs) {
+  const token = normalizeText(env?.SLACK_BOT_TOKEN);
+  const normalizedChannel = normalizeText(channel);
+  const normalizedThreadTs = normalizeText(threadTs);
+
+  if (!token || !normalizedChannel || !normalizedThreadTs) {
+    return [];
+  }
+
+  const data = await callSlackApi(token, "conversations.replies", null, {
+    channel: normalizedChannel,
+    ts: normalizedThreadTs,
+    inclusive: true,
+    limit: 30
+  });
+
+  return (Array.isArray(data?.messages) ? data.messages : [])
+    .filter((message) => String(message?.ts || "").trim() && String(message?.thread_ts || message?.ts || "").trim() === normalizedThreadTs)
+    .map((message) => ({
+      ts: normalizeText(message?.ts),
+      threadTs: normalizeText(message?.thread_ts || message?.ts),
+      text: extractSlackMessageText(message),
+      user: normalizeText(message?.user),
+      botId: normalizeText(message?.bot_id),
+      subtype: normalizeText(message?.subtype)
+    }));
+}
+
 async function validateSlackTarget(token, channel, targetUserId) {
   const normalizedTarget = normalizeText(targetUserId);
 
@@ -75,18 +103,30 @@ async function validateSlackTarget(token, channel, targetUserId) {
 
 export function buildSlackCommandPrompt(command, env) {
   const threadLabel = normalizeText(command?.threadLabel) || normalizeText(command?.threadId) || "Links";
+  const targetRepo = normalizeText(command?.targetRepo) || "andylitvinov-design/codex-links";
+  const targetRepoUrl = normalizeText(command?.targetRepoUrl);
+  const contextFiles = Array.isArray(command?.targetContextFiles) && command.targetContextFiles.length
+    ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
+    : ["AGENTS.md", "README.md", "STATE.md"];
   const photoNote = command?.photo
     ? "\n\nФото было приложено в Codex Links, но облачный Slack-trigger v1 пока не пересылает изображение. Если без фото задачу выполнить нельзя, ответь об этом явно."
     : "";
+  const repoUrlLine = targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "";
+  const contextLine = contextFiles.length
+    ? `Start by reading repo root context files in order: ${contextFiles.join(" -> ")}.`
+    : "Start by reading the repo root context files first.";
 
   return [
     `${String(env?.SLACK_CODEX_MENTION || "").trim() || ""}`.trim(),
     "New Codex Links task.",
     "",
-    `Repository: andylitvinov-design/codex-links`,
+    `Repository: ${targetRepo}`,
+    repoUrlLine,
     `Conversation: ${threadLabel}`,
     `Command ID: ${normalizeText(command?.id)}`,
-    "Mode: work in Codex Cloud, create a branch and PR, never push directly to main.",
+    "Mode: work in Codex Cloud only inside the selected repository.",
+    contextLine,
+    "Delivery rule: create a branch and PR, never push directly to main.",
     "",
     "User request:",
     normalizeText(command?.text) || "User sent a photo-only request.",

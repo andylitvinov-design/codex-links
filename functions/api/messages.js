@@ -2,6 +2,29 @@ import { handleOptions, json } from "../_lib/http.js";
 import { replaceMessages, upsertMessages, getMessagesForClient, readMessages } from "../_lib/messages.js";
 import { isAuthorized } from "../_lib/security.js";
 
+function normalizeEntryText(entry) {
+  return String(entry?.text || "").trim().toLowerCase();
+}
+
+function isHiddenPublicMessage(entry) {
+  const text = normalizeEntryText(entry);
+
+  return (
+    text.includes("delivery-probe")
+    || text.includes("local bridge probe")
+    || text.includes("probe reply with ok only")
+    || text.includes("dedupe test ignore")
+    || text.includes("codex cloud routing probe ignore")
+    || text.includes("test command from site api")
+    || text.includes("direct deploy command test")
+    || text.includes("ready check command")
+  );
+}
+
+function filterPublicMessages(messages) {
+  return (Array.isArray(messages) ? messages : []).filter((message) => !isHiddenPublicMessage(message));
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const preflight = handleOptions(request);
@@ -26,12 +49,12 @@ export async function onRequest(context) {
 
     if (scope === "public") {
       const messages = await readMessages(env);
-      return json({ messages });
+      return json({ messages: filterPublicMessages(messages) });
     }
 
     if (clientId) {
       const messages = await getMessagesForClient(env, clientId);
-      return json({ messages });
+      return json({ messages: filterPublicMessages(messages) });
     }
 
     if (!isAuthorized(request, env)) {
