@@ -2279,19 +2279,37 @@ function renderCommandThreads() {
   renderCommands();
 }
 
+async function fetchJsonWithRetry(resource, init = {}, label = "data") {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(resource, init);
+
+      if (!response.ok) {
+        throw new Error(`Failed to load ${label}: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
+      }
+    }
+  }
+
+  throw lastError || new Error(`Failed to load ${label}.`);
+}
+
 async function fetchBridgeStatus() {
-  const response = await fetch(`/api/status?_=${Date.now()}`, {
+  return fetchJsonWithRetry(`/api/status?_=${Date.now()}`, {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load status: ${response.status}`);
-  }
-
-  return response.json();
+  }, "status");
 }
 
 function mergeCommandCollection(commands) {
@@ -2390,18 +2408,12 @@ async function fetchDeliverySnapshot(options = {}) {
   }
   url.searchParams.set("_", String(Date.now()));
 
-  const response = await fetch(url.toString(), {
+  return fetchJsonWithRetry(url.toString(), {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load delivery: ${response.status}`);
-  }
-
-  return response.json();
+  }, "delivery");
 }
 
 function applyDeliverySnapshot(snapshot) {
@@ -2469,18 +2481,12 @@ async function persistCommandVisible(commandId) {
 }
 
 async function fetchMenuRepos() {
-  const response = await fetch(`/api/repos?mode=cloud&_=${Date.now()}`, {
+  const data = await fetchJsonWithRetry(`/api/repos?mode=cloud&_=${Date.now()}`, {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load repos: ${response.status}`);
-  }
-
-  const data = await response.json();
+  }, "repos");
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
@@ -2489,18 +2495,12 @@ async function fetchCommands() {
   url.searchParams.set("scope", "public");
   url.searchParams.set("_", String(Date.now()));
 
-  const response = await fetch(url.toString(), {
+  const data = await fetchJsonWithRetry(url.toString(), {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load commands: ${response.status}`);
-  }
-
-  const data = await response.json();
+  }, "commands");
   mergeCommandCollection(Array.isArray(data?.commands) ? data.commands : []);
 }
 
@@ -2509,18 +2509,12 @@ async function fetchMessages() {
   url.searchParams.set("scope", "public");
   url.searchParams.set("_", String(Date.now()));
 
-  const response = await fetch(url.toString(), {
+  const data = await fetchJsonWithRetry(url.toString(), {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load messages: ${response.status}`);
-  }
-
-  const data = await response.json();
+  }, "messages");
   const previousMessages = [...state.messages];
   mergeMessageCollection(Array.isArray(data?.messages) ? data.messages : []);
   noteNewMessages(previousMessages, state.messages);
@@ -2557,12 +2551,12 @@ async function refreshAll() {
 
   const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
 
-  if ((commandsError || messagesError || reposError) && hasCachedData) {
+  if ((commandsError || messagesError) && hasCachedData) {
     setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
   } else if (commandsError && messagesError) {
     setCommandStatusMessage("Не удалось обновить команды и ответы.", { tone: "error" });
   } else if (reposError) {
-    setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
+    syncCommandStatusFromState();
   } else if (messagesError) {
     setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
   } else if (commandsError) {
