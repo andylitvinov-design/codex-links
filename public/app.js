@@ -19,7 +19,7 @@ const state = {
   audioUnlocked: false
 };
 
-const BUILD_VERSION = "20260417-2345";
+const BUILD_VERSION = "20260417-2358";
 const FAST_POLL_INTERVAL_MS = 3500;
 const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -245,7 +245,7 @@ const threadSettingsToggle = document.querySelector("#thread-settings-toggle");
 const threadSettingsSummary = document.querySelector("#thread-settings-summary");
 const cloudRepoPanel = document.querySelector("#cloud-repo-panel");
 const cloudRepoSummary = document.querySelector("#cloud-repo-summary");
-const cloudRepoList = document.querySelector("#cloud-repo-list");
+const cloudRepoSelect = document.querySelector("#cloud-repo-select");
 const threadSettingsPanel = document.querySelector("#thread-settings-panel");
 const threadSettingsShowAll = document.querySelector("#thread-settings-show-all");
 const threadSettingsSearch = document.querySelector("#thread-settings-search");
@@ -742,34 +742,40 @@ function renderThreadSettingsList() {
 }
 
 function renderCloudRepos() {
-  if (!cloudRepoList || !cloudRepoSummary) {
+  if (!cloudRepoSelect || !cloudRepoSummary) {
     return;
   }
 
   const repos = [...state.cloudRepos];
-  cloudRepoList.innerHTML = "";
+  cloudRepoSelect.innerHTML = "";
   cloudRepoSummary.textContent = repos.length
     ? `Репозиториев: ${repos.length}`
     : "Cloud-репозитории пока не синхронизированы.";
 
+  if (!repos.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Cloud-репозитории не найдены";
+    cloudRepoSelect.appendChild(option);
+    cloudRepoSelect.disabled = true;
+    return;
+  }
+
+  cloudRepoSelect.disabled = false;
+
   repos.forEach((repo) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "cloud-repo-card";
-    card.dataset.active = storage.selectedCloudRepoId === repo.id ? "1" : "0";
-    card.innerHTML = `
-      <div class="cloud-repo-title-row">
-        <span class="cloud-repo-title">${escapeHtml(repo.name || repo.nameWithOwner || repo.id)}</span>
-      </div>
-    `;
-    card.addEventListener("click", () => {
-      storage.selectedCloudRepoId = repo.id;
-      renderDispatchModeUi();
-      renderCommands();
-      setCommandStatusMessage(`Выбран cloud repo: ${repo.nameWithOwner}.`);
-    });
-    cloudRepoList.appendChild(card);
+    const option = document.createElement("option");
+    option.value = repo.id;
+    option.textContent = formatCloudRepoLabel(repo);
+    cloudRepoSelect.appendChild(option);
   });
+
+  const fallbackRepoId = repos[0]?.id || "";
+  const selectedRepoId = repos.some((repo) => repo.id === storage.selectedCloudRepoId)
+    ? storage.selectedCloudRepoId
+    : fallbackRepoId;
+
+  cloudRepoSelect.value = selectedRepoId;
 }
 
 function ensureThreadVisible(threadId) {
@@ -1178,6 +1184,12 @@ function isHiddenSystemEntry(entry) {
 }
 
 function isNotificationEntry(entry) {
+  const threadId = String(entry?.threadId || "").trim().toLowerCase();
+
+  if (threadId === "system-notifications") {
+    return true;
+  }
+
   if (entry?.systemChannel === "notifications") {
     return true;
   }
@@ -1909,31 +1921,42 @@ async function submitCommand(event) {
   event.preventDefault();
 
   const text = String(commandInput?.value || "").trim();
-  const threadId = getActiveThreadId();
-  const dispatchMode = getActiveDispatchMode();
+  const requestedThreadId = getActiveThreadId();
+  const requestedDispatchMode = getActiveDispatchMode();
   const cloudRepo = getCloudRepoById(storage.selectedCloudRepoId);
   const fallbackThreadId = String(storage.activeBridgeThreadId || getAllThreadOptions()[0]?.id || "").trim();
   const fallbackThreadLabel = getThreadDisplayLabel(fallbackThreadId, "");
+  const photoFile = commandPhotoInput?.files?.[0];
+  const forceBridgeForPhoto = requestedDispatchMode === "cloud" && Boolean(photoFile);
+  const dispatchMode = forceBridgeForPhoto ? "bridge" : requestedDispatchMode;
+  const threadId = forceBridgeForPhoto && fallbackThreadId
+    ? fallbackThreadId
+    : requestedThreadId;
+  const threadLabel = dispatchMode === "cloud"
+    ? formatCloudRepoLabel(cloudRepo)
+    : getThreadDisplayLabel(threadId, forceBridgeForPhoto ? fallbackThreadLabel : "");
 
-  if (!text && !(commandPhotoInput?.files?.[0])) {
+  if (!text && !photoFile) {
     setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
     return;
   }
 
-  if (dispatchMode === "cloud" && !cloudRepo) {
+  if (requestedDispatchMode === "cloud" && !cloudRepo) {
     setCommandStatusMessage("Для Codex Cloud сначала выберите GitHub-репозиторий.", { tone: "error" });
     return;
   }
 
-  setCommandStatusMessage("Отправляю сообщение…");
+  if (forceBridgeForPhoto) {
+    setCommandStatusMessage("Cloud пока не поддерживает фото. Отправляю это сообщение через bridge.", { tone: "processing" });
+  } else {
+    setCommandStatusMessage("Отправляю сообщение…");
+  }
   setSubmitProgress("queued", "queued");
 
   const payload = {
     clientId: storage.clientId,
     threadId,
-    threadLabel: dispatchMode === "cloud"
-      ? formatCloudRepoLabel(cloudRepo)
-      : getThreadDisplayLabel(threadId, ""),
+    threadLabel,
     text,
     dispatchMode: dispatchMode === "cloud" ? "slack-codex-cloud" : "local-bridge",
     targetExecutionMode: dispatchMode
@@ -1950,10 +1973,12 @@ async function submitCommand(event) {
     payload.fallbackThreadLabel = fallbackThreadLabel;
   }
 
-  const photoFile = commandPhotoInput?.files?.[0];
-
   if (photoFile) {
-    setPhotoStatusMessage("Подготавливаю фото для отправки…");
+    setPhotoStatusMessage(
+      forceBridgeForPhoto
+        ? "Подготавливаю фото и отправляю через bridge…"
+        : "Подготавливаю фото для отправки…"
+    );
     payload.photo = await preparePhotoPayload(photoFile);
   }
 
@@ -2052,6 +2077,18 @@ function bindEvents() {
     renderCommands();
   });
 
+  cloudRepoSelect?.addEventListener("change", () => {
+    storage.selectedCloudRepoId = String(cloudRepoSelect.value || "").trim();
+    renderDispatchModeUi();
+    renderCommands();
+
+    const repo = getCloudRepoById(storage.selectedCloudRepoId);
+
+    if (repo) {
+      setCommandStatusMessage(`Выбран cloud repo: ${repo.nameWithOwner}.`);
+    }
+  });
+
   timelineTabDialog?.addEventListener("click", () => {
     state.activeTimelineTab = "dialog";
     storage.activeTimelineTab = "dialog";
@@ -2075,7 +2112,10 @@ function bindEvents() {
     const sizeLabel = file.size > 1_000_000
       ? `${(file.size / 1_000_000).toFixed(1)} MB`
       : `${Math.max(1, Math.round(file.size / 1000))} KB`;
-    setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})`);
+    const suffix = getActiveDispatchMode() === "cloud"
+      ? " · для фото будет использован bridge"
+      : "";
+    setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})${suffix}`);
   });
 
   threadSettingsToggle?.addEventListener("click", () => {
