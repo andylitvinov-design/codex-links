@@ -14,7 +14,7 @@ const state = {
   hardReloading: false
 };
 
-const BUILD_VERSION = "20260417-0015";
+const BUILD_VERSION = "20260417-0044";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -789,6 +789,7 @@ function isSystemConversationEntry(entry) {
 
   return (
     text.includes("dedupe test ignore")
+    || text.includes("codex cloud routing probe ignore")
     || text.includes("test command from site api")
     || text.includes("direct deploy command test")
     || text.includes("ready check command")

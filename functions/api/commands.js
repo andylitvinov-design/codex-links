@@ -51,6 +51,76 @@ function serializeCommands(commands) {
   return (Array.isArray(commands) ? commands : []).map((command) => serializeCommand(command));
 }
 
+function shouldRetryCloudFallback(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
+  const dispatchMode = String(command?.dispatchMode || "").trim().toLowerCase();
+  const errorMessage = String(command?.errorMessage || "").trim();
+  const text = String(command?.text || "").trim().toLowerCase();
+
+  if (status !== "queued" || dispatchMode !== DISPATCH_MODE_LOCAL) {
+    return false;
+  }
+
+  if (!errorMessage || !/slack .*falling back to local bridge\./i.test(errorMessage)) {
+    return false;
+  }
+
+  if (!text || text.includes("codex cloud routing probe ignore")) {
+    return false;
+  }
+
+  if (command?.photo) {
+    return false;
+  }
+
+  const updatedAt = Date.parse(String(command?.progressUpdatedAt || command?.createdAt || "").trim());
+
+  if (Number.isNaN(updatedAt) || (Date.now() - updatedAt) < 2 * 60 * 1000) {
+    return false;
+  }
+
+  return true;
+}
+
+async function retryCloudFallbackCommands(env, runtimeConfig) {
+  const dispatchMode = getConfiguredDispatchMode(runtimeConfig);
+
+  if (dispatchMode !== DISPATCH_MODE_SLACK) {
+    return;
+  }
+
+  let current = await readCommands(env);
+  const candidates = current
+    .filter((command) => shouldRetryCloudFallback(command))
+    .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")))
+    .slice(0, 3);
+
+  for (const candidate of candidates) {
+    const nowIso = new Date().toISOString();
+    const next = current.map((command) => {
+      if (command.id !== candidate.id) {
+        return command;
+      }
+
+      return {
+        ...command,
+        dispatchMode: DISPATCH_MODE_SLACK,
+        status: "queued",
+        progressStage: "queued",
+        progressUpdatedAt: nowIso,
+        errorMessage: "",
+        completedAt: ""
+      };
+    });
+
+    await writeCommands(env, next);
+    current = next;
+    const refreshed = next.find((command) => command.id === candidate.id) || candidate;
+    await dispatchCommandIfNeeded(env, refreshed, runtimeConfig);
+    current = await readCommands(env);
+  }
+}
+
 async function fallbackToLocalBridge(env, command, errorMessage) {
   const fallback = await fallbackCommandToLocalBridge(env, {
     id: command.id,
@@ -148,6 +218,8 @@ export async function onRequest(context) {
 
   if (request.method === "GET") {
     await recoverStaleSlackCommands(env);
+    const runtimeConfig = await readRuntimeConfig(env);
+    await retryCloudFallbackCommands(env, runtimeConfig);
     const url = new URL(request.url);
     const commandId = url.searchParams.get("id");
     const clientId = url.searchParams.get("clientId");
