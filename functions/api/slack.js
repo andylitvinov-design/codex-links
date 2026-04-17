@@ -58,7 +58,10 @@ async function markSlackCommandDiagnostic(env, command, input = {}) {
     progressStage: input.progressStage,
     slackReplyReceived: typeof input.slackReplyReceived === "boolean" ? input.slackReplyReceived : command.slackReplyReceived,
     slackReplyThreaded: typeof input.slackReplyThreaded === "boolean" ? input.slackReplyThreaded : command.slackReplyThreaded,
-    slackReplyMatched: typeof input.slackReplyMatched === "boolean" ? input.slackReplyMatched : command.slackReplyMatched,
+    replyMatched: typeof input.replyMatched === "boolean"
+      ? input.replyMatched
+      : (typeof input.slackReplyMatched === "boolean" ? input.slackReplyMatched : command.replyMatched),
+    replyMatchedBy: input.replyMatchedBy || command.replyMatchedBy,
     timeoutPhase: input.timeoutPhase,
     fallbackApplied: typeof input.fallbackApplied === "boolean" ? input.fallbackApplied : command.fallbackApplied,
     fallbackReason: input.fallbackReason,
@@ -68,7 +71,8 @@ async function markSlackCommandDiagnostic(env, command, input = {}) {
     slackThreadTs: String(input.threadTs || command.slackThreadTs || command.slackMessageTs || "").trim(),
     slackMessageTs: String(command.slackMessageTs || "").trim(),
     errorMessage: stringifyCommandError(input.error || {}),
-    processingStartedAt: String(command.processingStartedAt || "").trim()
+    processingStartedAt: String(command.processingStartedAt || "").trim(),
+    firstAckAt: String(command.firstAckAt || "").trim()
   });
 }
 
@@ -85,6 +89,7 @@ async function findLikelyUnthreadedSlackCommand(env, runtimeConfig, event) {
     return command.dispatchMode === DISPATCH_MODE_SLACK
       && command.slackChannelId === channelId
       && (status === "dispatched" || status === "processing")
+      && !command.replyMatched
       && !Number.isNaN(createdAt)
       && !Number.isNaN(dispatchedAt)
       && createdAt <= eventTimestamp
@@ -101,9 +106,9 @@ async function findLikelyUnthreadedSlackCommand(env, runtimeConfig, event) {
   }
 
   const command = [...candidates].sort((left, right) =>
-    Date.parse(String(right?.dispatchedAt || right?.createdAt || "").trim())
-      - Date.parse(String(left?.dispatchedAt || left?.createdAt || "").trim())
-    || Date.parse(String(right?.createdAt || "").trim()) - Date.parse(String(left?.createdAt || "").trim())
+    Date.parse(String(left?.dispatchedAt || left?.createdAt || "").trim())
+      - Date.parse(String(right?.dispatchedAt || right?.createdAt || "").trim())
+    || Date.parse(String(left?.createdAt || "").trim()) - Date.parse(String(right?.createdAt || "").trim())
   )[0];
 
   return { command };
@@ -125,6 +130,7 @@ async function findLikelyThreadedSlackCommand(env, runtimeConfig, event) {
     return command.dispatchMode === DISPATCH_MODE_SLACK
       && command.slackChannelId === channelId
       && (status === "dispatched" || status === "processing")
+      && !command.replyMatched
       && !Number.isNaN(createdAt)
       && createdAt <= eventTimestamp
       && (eventTimestamp - createdAt) <= RECENT_COMMAND_WINDOW_MS;
@@ -139,8 +145,8 @@ async function findLikelyThreadedSlackCommand(env, runtimeConfig, event) {
   }
 
   return [...candidates].sort((left, right) =>
-    Date.parse(String(right?.dispatchedAt || right?.createdAt || "").trim())
-      - Date.parse(String(left?.dispatchedAt || left?.createdAt || "").trim())
+    Date.parse(String(left?.dispatchedAt || left?.createdAt || "").trim())
+      - Date.parse(String(right?.dispatchedAt || right?.createdAt || "").trim())
   )[0] || null;
 }
 
@@ -161,13 +167,13 @@ async function ingestSlackReply(env, command, event, options = {}) {
     dispatchMode: DISPATCH_MODE_SLACK,
     status: classification.status,
     progressStage,
-    actualDispatchMode: "cloud",
+    actualExecutor: "cloud",
     slackReplyReceived: true,
     slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
-    slackReplyMatched: true,
+    replyMatched: true,
+    replyMatchedBy: progressStage === "slack-reply-received-unthreaded" ? "unthreaded-fallback" : "thread",
+    firstAckAt: command.firstAckAt || new Date().toISOString(),
     timeoutPhase: "",
-    fallbackApplied: false,
-    fallbackReason: "",
     lastDiagnosticCode: progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : "",
     lastDiagnosticDetail: progressStage === "slack-reply-received-unthreaded"
       ? "A Codex reply arrived outside the original Slack thread and was reconciled back to the command."
@@ -178,7 +184,8 @@ async function ingestSlackReply(env, command, event, options = {}) {
     prUrl: classification.prUrl,
     branchName: classification.branchName,
     errorMessage: classification.status === "failed" ? text : "",
-    processingStartedAt: classification.status === "processing" ? new Date().toISOString() : ""
+    processingStartedAt: classification.status === "processing" ? new Date().toISOString() : "",
+    resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""
   });
 
   if (text) {
