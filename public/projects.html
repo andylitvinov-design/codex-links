@@ -233,6 +233,69 @@
         color: #aa3d23;
       }
 
+      .audit-list {
+        list-style: none;
+        padding: 0;
+      }
+
+      .audit-list li + li {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+      }
+
+      .audit-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .audit-copy strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .audit-copy code {
+        font-size: 0.92rem;
+      }
+
+      .audit-copy p + p {
+        margin-top: 6px;
+      }
+
+      .audit-status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #f2ede3;
+        color: var(--muted);
+        font-size: 0.84rem;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .audit-status.is-good {
+        background: rgba(46, 123, 103, 0.14);
+        border-color: rgba(46, 123, 103, 0.2);
+        color: var(--accent);
+      }
+
+      .audit-status.is-warn {
+        background: rgba(151, 106, 22, 0.12);
+        border-color: rgba(151, 106, 22, 0.18);
+        color: #8a6115;
+      }
+
+      .audit-status.is-risk {
+        background: rgba(170, 61, 35, 0.12);
+        border-color: rgba(170, 61, 35, 0.18);
+        color: #aa3d23;
+      }
+
       @media (max-width: 720px) {
         .project-head {
           flex-direction: column;
@@ -244,6 +307,10 @@
 
         .analysis-pill {
           justify-self: start;
+        }
+
+        .audit-row {
+          flex-direction: column;
         }
       }
     </style>
@@ -265,11 +332,78 @@
       <section class="panel">
         <h1>Живые ссылки Codex</h1>
         <p>Простой перечень live URL и рабочих входов в проекты. Здесь собраны и публичные адреса, и прямые локальные entry points через project HTTP service, если отдельный production deploy ещё не поднят.</p>
-        <p class="meta">Проверено: 15 апреля 2026</p>
+        <p class="meta">Проверено: 16 апреля 2026</p>
         <p class="meta">Справа от каждого пункта выводится quick-scan балл анализа страницы по внутренней метрике `overall / 100`.</p>
         <a class="back-link" href="https://codex-links.pages.dev" target="_blank" rel="noopener">Открыть проект codex-links</a>
         <br />
         <a class="back-link" href="https://brain-management.pages.dev/" target="_blank" rel="noopener">Открыть основной hub</a>
+      </section>
+
+      <section class="panel">
+        <div class="section-label">Repo Audit</div>
+        <p>Каноническое правило для Codex: один проектный набор документов `README.md` + `STATE.md` должен вести на один GitHub repo root. Ниже показаны только проверенные связи из текущего workspace.</p>
+        <ul class="audit-list">
+          <li>
+            <div class="audit-row">
+              <div class="audit-copy">
+                <strong>codex-links</strong>
+                <p><code>README.md</code> + <code>STATE.md</code> в `links/`</p>
+                <p><a href="https://github.com/andylitvinov-design/codex-links" target="_blank" rel="noopener">github.com/andylitvinov-design/codex-links</a></p>
+              </div>
+              <span class="audit-status is-good">dedicated repo</span>
+            </div>
+          </li>
+          <li>
+            <div class="audit-row">
+              <div class="audit-copy">
+                <strong>artefacts</strong>
+                <p><code>README.md</code> + <code>STATE.md</code> в `artefacts/`</p>
+                <p><a href="https://github.com/andylitvinov-design/artefacts" target="_blank" rel="noopener">github.com/andylitvinov-design/artefacts</a></p>
+              </div>
+              <span class="audit-status is-good">dedicated repo</span>
+            </div>
+          </li>
+          <li>
+            <div class="audit-row">
+              <div class="audit-copy">
+                <strong>sales</strong>
+                <p><code>README.md</code> + <code>STATE.md</code> в `active-projects-ops/sales/`</p>
+                <p><a href="https://github.com/andylitvinov-design/active-projects-ops" target="_blank" rel="noopener">github.com/andylitvinov-design/active-projects-ops</a></p>
+              </div>
+              <span class="audit-status is-warn">shared repo</span>
+            </div>
+          </li>
+          <li>
+            <div class="audit-row">
+              <div class="audit-copy">
+                <strong>ezohata</strong>
+                <p><code>README.md</code> + <code>STATE.md</code> в `active-projects-ops/ezohata/`</p>
+                <p><a href="https://github.com/andylitvinov-design/active-projects-ops" target="_blank" rel="noopener">github.com/andylitvinov-design/active-projects-ops</a></p>
+              </div>
+              <span class="audit-status is-warn">shared repo</span>
+            </div>
+          </li>
+          <li>
+            <div class="audit-row">
+              <div class="audit-copy">
+                <strong>system-optimization</strong>
+                <p><code>README.md</code> + <code>STATE.md</code> в `active-projects-ops/system-optimization/`</p>
+                <p><a href="https://github.com/andylitvinov-design/active-projects-ops" target="_blank" rel="noopener">github.com/andylitvinov-design/active-projects-ops</a></p>
+              </div>
+              <span class="audit-status is-warn">shared repo</span>
+            </div>
+          </li>
+          <li>
+            <div class="audit-row">
+              <div class="audit-copy">
+                <strong>Неподтверждённые repo-связки</strong>
+                <p>`Advice`, `Brain Management`, `Alchemist`, `Sales PsiMaster`, `Books`</p>
+                <p>В `links` для них есть live URL, но рядом в текущем workspace не найден отдельный проверенный GitHub repo.</p>
+              </div>
+              <span class="audit-status is-risk">repo not verified</span>
+            </div>
+          </li>
+        </ul>
       </section>
 
       <section class="panel">

@@ -8,6 +8,7 @@ import {
   getCommandsForClient,
   insertCommand,
   listCommandThreads,
+  recoverStaleSlackCommands,
   requeueCommand,
   readCommands,
   updateCommandProgress,
@@ -99,11 +100,11 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     };
   }
 
-  if (!String(command?.text || "").trim()) {
+  if (command?.photo) {
     const fallbackCommand = await fallbackToLocalBridge(
       env,
       command,
-      "Cloud Slack dispatch v1 does not support photo-only requests yet. Falling back to local bridge."
+      "Cloud Slack dispatch v1 does not support photo attachments yet. Falling back to local bridge."
     );
 
     return {
@@ -161,6 +162,7 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
+    await recoverStaleSlackCommands(env);
     const url = new URL(request.url);
     const commandId = url.searchParams.get("id");
     const clientId = url.searchParams.get("clientId");
@@ -319,6 +321,7 @@ export async function onRequest(context) {
   }
 
   const runtimeConfig = await readRuntimeConfig(env);
+  await recoverStaleSlackCommands(env);
   const created = await insertCommand(env, {
     ...(payload || {}),
     dispatchMode: payload?.dispatchMode || getConfiguredDispatchMode(runtimeConfig)

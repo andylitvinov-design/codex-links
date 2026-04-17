@@ -9,7 +9,9 @@
     "kv:seed": "node scripts/seed-demo.mjs",
     "cloud:check": "node scripts/check-cloud-setup.mjs",
     "cloud:install-secrets": "zsh scripts/install-pages-secrets.sh",
-    "cloud:save-config": "node scripts/save-cloud-config.mjs"
+    "cloud:save-config": "node scripts/save-cloud-config.mjs",
+    "smoke:release": "node scripts/smoke-release.mjs",
+    "rollback:prepare": "node scripts/revert-last-good.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.82.2"

@@ -19,6 +19,33 @@ This repo no longer treats the local Mac bridge as the primary execution path. I
 - Ingests Slack thread replies through `/api/slack`
 - Mirrors assistant replies and PR links back into the mobile timeline
 
+## Project To Repo Alignment
+
+Rule for this workspace:
+
+- one Codex project folder with its own `README.md` + `STATE.md` should map to one GitHub repository root
+- shared repos across several independent Codex project documents should be treated as transitional, not canonical
+
+Verified on `2026-04-16`:
+
+| Codex project docs | GitHub repo | Status |
+| --- | --- | --- |
+| `links/README.md` + `links/STATE.md` | `andylitvinov-design/codex-links` | dedicated |
+| `artefacts/README.md` + `artefacts/STATE.md` | `andylitvinov-design/artefacts` | dedicated |
+| `active-projects-ops/sales/README.md` + `STATE.md` | `andylitvinov-design/active-projects-ops` | shared repo, not 1:1 |
+| `active-projects-ops/ezohata/README.md` + `STATE.md` | `andylitvinov-design/active-projects-ops` | shared repo, not 1:1 |
+| `active-projects-ops/system-optimization/README.md` + `STATE.md` | `andylitvinov-design/active-projects-ops` | shared repo, not 1:1 |
+
+Still unverified from the current `links` inventory:
+
+- `Advice`
+- `Brain Management`
+- `Alchemist`
+- `Sales PsiMaster`
+- `Books`
+
+For these projects, `links` currently has live URLs but no verified GitHub repo mapping in the nearby workspace.
+
 ## Command Lifecycle
 
 Production statuses:
@@ -96,6 +123,25 @@ npm run dev
 
 ## Deploy
 
+Production flow is now fixed as:
+
+- `branch -> PR -> merge -> Pages deploy`
+- `main` is the only production branch
+- ChatGPT/Codex changes are complete only after a commit or PR exists and the deploy status is known
+
+Expected platform setup for this repo:
+
+- GitHub repo `andylitvinov-design/codex-links` connected to Cloudflare Pages project `codex-links`
+- PR preview deployments enabled
+- production deploys only from `main`
+
+Emergency rollback flow:
+
+- Git rollback: `node scripts/revert-last-good.mjs --commit <bad-commit-sha> --push`
+- Platform rollback: redeploy the previous known-good Cloudflare Pages deployment, then merge the revert PR
+
+Manual `npm run deploy` remains available as an operator fallback, not as the normal release path.
+
 ```bash
 npm run deploy
 ```
@@ -165,3 +211,4 @@ The handler verifies Slack signatures, maps thread replies back to the originati
 
 - Photo-only cloud requests are intentionally blocked in v1. Text commands are the first-class path for Slack-triggered Codex Cloud execution.
 - The local bridge scripts remain in the repo as manual fallback tooling, but they are no longer the primary production architecture.
+- `codex-links` should now be treated as done only when GitHub has the branch or PR and Cloudflare has a corresponding deploy status.

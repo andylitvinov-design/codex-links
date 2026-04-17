@@ -1,4 +1,5 @@
 import { handleOptions, json } from "../_lib/http.js";
+import { recoverStaleSlackCommands } from "../_lib/commands.js";
 import { deriveBridgeStatusFromCommands, readBridgeStatus, refreshBridgeStatusFromCommands, writeBridgeStatus } from "../_lib/status.js";
 import { isAuthorized } from "../_lib/security.js";
 
@@ -11,6 +12,7 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
+    await recoverStaleSlackCommands(env);
     const status = await deriveBridgeStatusFromCommands(env);
     return json({ status });
   }

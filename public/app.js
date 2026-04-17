@@ -20,7 +20,7 @@ const state = {
   }
 };
 
-const BUILD_VERSION = "20260416-0115";
+const BUILD_VERSION = "20260416-2148";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -200,6 +200,111 @@ const threadSettingsList = document.querySelector("#thread-settings-list");
 const threadSettingsSave = document.querySelector("#thread-settings-save");
 const threadSettingsSelectAll = document.querySelector("#thread-settings-select-all");
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
+
+function estimateDataUrlBytes(dataUrl) {
+  const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
+
+  if (!match) {
+    return 0;
+  }
+
+  const base64 = match[1];
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Не удалось прочитать фото."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageFromUrl(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Не удалось подготовить фото."));
+    image.src = url;
+  });
+}
+
+async function buildResizedPhotoData(file) {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await loadImageFromUrl(objectUrl);
+    const longestSide = Math.max(image.naturalWidth || 0, image.naturalHeight || 0) || 1;
+    const scale = Math.min(1, MAX_PHOTO_DIMENSION / longestSide);
+    const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+    const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Браузер не смог подготовить фото.");
+    }
+
+    context.drawImage(image, 0, 0, width, height);
+
+    let quality = 0.86;
+    let dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+    while (estimateDataUrlBytes(dataUrl) > MAX_PHOTO_UPLOAD_BYTES && quality > 0.45) {
+      quality -= 0.08;
+      dataUrl = canvas.toDataURL("image/jpeg", quality);
+    }
+
+    if (estimateDataUrlBytes(dataUrl) > MAX_PHOTO_UPLOAD_BYTES) {
+      throw new Error("Фото слишком большое даже после сжатия. Выберите другое изображение.");
+    }
+
+    return {
+      dataUrl,
+      contentType: "image/jpeg",
+      size: estimateDataUrlBytes(dataUrl)
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function preparePhotoPayload(file) {
+  if (!file) {
+    return null;
+  }
+
+  if (!String(file.type || "").toLowerCase().startsWith("image/")) {
+    throw new Error("Можно отправить только изображение.");
+  }
+
+  if (file.size > MAX_PHOTO_FILE_SIZE) {
+    throw new Error("Фото больше 4.5 MB. Уменьшите файл и попробуйте снова.");
+  }
+
+  if (file.size <= MAX_PHOTO_UPLOAD_BYTES) {
+    const dataUrl = await readFileAsDataUrl(file);
+    return {
+      fileName: file.name,
+      contentType: String(file.type || "image/jpeg").toLowerCase(),
+      size: file.size,
+      dataUrl
+    };
+  }
+
+  const resized = await buildResizedPhotoData(file);
+  return {
+    fileName: file.name,
+    contentType: resized.contentType,
+    size: resized.size,
+    dataUrl: resized.dataUrl
+  };
+}
 
 function formatDate(value) {
   try {
@@ -1224,11 +1329,8 @@ async function submitCommand(event) {
   const photoFile = commandPhotoInput?.files?.[0];
 
   if (photoFile) {
-    payload.photo = {
-      name: photoFile.name,
-      type: photoFile.type,
-      size: photoFile.size
-    };
+    setPhotoStatusMessage("Подготавливаю фото для отправки…");
+    payload.photo = await preparePhotoPayload(photoFile);
   }
 
   const response = await fetch("/api/commands", {
@@ -1301,7 +1403,10 @@ function bindEvents() {
       return;
     }
 
-    setPhotoStatusMessage(`Выбрано фото: ${file.name}`);
+    const sizeLabel = file.size > 1_000_000
+      ? `${(file.size / 1_000_000).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(file.size / 1000))} KB`;
+    setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})`);
   });
 
   threadSettingsToggle?.addEventListener("click", () => {
