@@ -44,8 +44,71 @@ function normalizeRepoId(value) {
   return normalizeText(value, 240).toLowerCase();
 }
 
+function normalizeCategory(value) {
+  return normalizeText(value, 120);
+}
+
 function normalizeNameWithOwner(value, repoId) {
   return normalizeText(value, 240) || repoId;
+}
+
+function deriveRepoCategory(workspacePath, nameWithOwner) {
+  const normalizedWorkspacePath = normalizeWorkspacePath(workspacePath);
+
+  if (normalizedWorkspacePath) {
+    const parts = normalizedWorkspacePath.split("/").filter(Boolean);
+    const projectsIndex = parts.findIndex((part) => part === "projects");
+
+    if (projectsIndex >= 0 && parts[projectsIndex + 1] === "MYPROJECTS" && parts[projectsIndex + 2]) {
+      return normalizeCategory(parts[projectsIndex + 2]);
+    }
+  }
+
+  const owner = normalizeText(String(nameWithOwner || "").split("/")[0], 120);
+  return owner || "Other";
+}
+
+function buildRepoDisplayLabel(repo) {
+  const category = normalizeCategory(repo?.category);
+  const name = normalizeText(repo?.name, 160);
+  const nameWithOwner = normalizeText(repo?.nameWithOwner, 240);
+
+  if (category && name) {
+    return `${category} / ${name}`;
+  }
+
+  return nameWithOwner || name;
+}
+
+function normalizeMenuRepoItem(input) {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const repoId = normalizeRepoId(input.repoId || input.id || input.nameWithOwner);
+  const nameWithOwner = normalizeNameWithOwner(input.nameWithOwner, repoId);
+  const name = normalizeText(input.name, 160) || String(nameWithOwner || "").split("/").pop() || repoId;
+  const workspacePath = normalizeWorkspacePath(input.workspacePath);
+  const category = deriveRepoCategory(workspacePath, nameWithOwner);
+
+  if (!repoId || !nameWithOwner || !name) {
+    return null;
+  }
+
+  return {
+    id: repoId,
+    repoId,
+    name,
+    nameWithOwner,
+    url: normalizeUrl(input.url),
+    updatedAt: normalizeIsoDate(input.updatedAt),
+    isPrivate: normalizeBoolean(input.isPrivate),
+    contextReady: normalizeBoolean(input.contextReady),
+    contextFiles: normalizeContextFiles(input.contextFiles),
+    workspacePath,
+    category,
+    displayLabel: buildRepoDisplayLabel({ category, name, nameWithOwner })
+  };
 }
 
 function normalizeRepoManifestEntry(input) {
@@ -249,8 +312,9 @@ export async function listEligibleCloudRepos(env) {
         return null;
       }
 
-      return {
+      return normalizeMenuRepoItem({
         id: repo.id,
+        repoId: repo.id,
         name: repo.name,
         nameWithOwner: repo.nameWithOwner,
         url: repo.url,
@@ -258,14 +322,14 @@ export async function listEligibleCloudRepos(env) {
         isPrivate: repo.isPrivate,
         contextReady: manifestEntry.contextReady,
         contextFiles: manifestEntry.contextFiles,
-        workspacePath: manifestEntry.workspacePath,
-        sortLabel: `${repo.nameWithOwner} · ${repo.updatedAt || ""}`
-      };
+        workspacePath: manifestEntry.workspacePath
+      });
     })
     .filter(Boolean)
     .sort((left, right) =>
       String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""))
-      || left.nameWithOwner.localeCompare(right.nameWithOwner, "en")
+      || left.category.localeCompare(right.category, "ru")
+      || left.displayLabel.localeCompare(right.displayLabel, "ru")
     );
 
   return {

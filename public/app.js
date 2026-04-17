@@ -1,9 +1,7 @@
 const state = {
   commands: [],
   messages: [],
-  threads: [],
-  cloudRepos: [],
-  threadMessageCounts: {},
+  menuRepos: [],
   activeThreadCategories: [],
   activeTimelineTab: "dialog",
   dispatchMode: "bridge",
@@ -19,7 +17,7 @@ const state = {
   audioUnlocked: false
 };
 
-const BUILD_VERSION = "20260418-0001";
+const BUILD_VERSION = "20260418-0002";
 const FAST_POLL_INTERVAL_MS = 3500;
 const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -122,11 +120,14 @@ const storage = {
     return value;
   },
 
-  get selectedThreadIds() {
-    let raw = safeLocalStorageGet("codex-links-selected-thread-ids");
+  get selectedMenuRepoIds() {
+    let raw = safeLocalStorageGet("codex-links-selected-menu-repos");
 
     if (raw === null) {
-      raw = readCookie("codex-links-selected-thread-ids") || null;
+      raw = readCookie("codex-links-selected-menu-repos")
+        || safeLocalStorageGet("codex-links-selected-thread-ids")
+        || readCookie("codex-links-selected-thread-ids")
+        || null;
     }
 
     if (raw === null) {
@@ -135,18 +136,18 @@ const storage = {
 
     try {
       const value = JSON.parse(raw || "[]");
-      safeLocalStorageSet("codex-links-selected-thread-ids", JSON.stringify(value));
-      writeCookie("codex-links-selected-thread-ids", JSON.stringify(value));
+      safeLocalStorageSet("codex-links-selected-menu-repos", JSON.stringify(value));
+      writeCookie("codex-links-selected-menu-repos", JSON.stringify(value));
       return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
     } catch {
       return [];
     }
   },
 
-  set selectedThreadIds(value) {
+  set selectedMenuRepoIds(value) {
     if (value === null) {
-      safeLocalStorageRemove("codex-links-selected-thread-ids");
-      removeCookie("codex-links-selected-thread-ids");
+      safeLocalStorageRemove("codex-links-selected-menu-repos");
+      removeCookie("codex-links-selected-menu-repos");
       return;
     }
 
@@ -155,8 +156,8 @@ const storage = {
       : [];
 
     const serialized = JSON.stringify(normalized);
-    safeLocalStorageSet("codex-links-selected-thread-ids", serialized);
-    writeCookie("codex-links-selected-thread-ids", serialized);
+    safeLocalStorageSet("codex-links-selected-menu-repos", serialized);
+    writeCookie("codex-links-selected-menu-repos", serialized);
   },
 
   get showAllMessages() {
@@ -192,40 +193,27 @@ const storage = {
     writeCookie("codex-links-dispatch-mode", normalized);
   },
 
-  get selectedCloudRepoId() {
-    const raw = safeLocalStorageGet("codex-links-selected-cloud-repo") ?? readCookie("codex-links-selected-cloud-repo");
-    return String(raw || "").trim().toLowerCase();
+  get selectedRepoId() {
+    const raw = safeLocalStorageGet("codex-links-selected-repo")
+      ?? readCookie("codex-links-selected-repo")
+      ?? safeLocalStorageGet("codex-links-selected-cloud-repo")
+      ?? readCookie("codex-links-selected-cloud-repo")
+      ?? safeLocalStorageGet("codex-links-active-bridge-thread")
+      ?? readCookie("codex-links-active-bridge-thread");
+    return String(raw || "").trim().toLowerCase().replace(/^cloud:/, "");
   },
 
-  set selectedCloudRepoId(value) {
+  set selectedRepoId(value) {
     const normalized = String(value || "").trim().toLowerCase();
 
     if (!normalized) {
-      safeLocalStorageRemove("codex-links-selected-cloud-repo");
-      removeCookie("codex-links-selected-cloud-repo");
+      safeLocalStorageRemove("codex-links-selected-repo");
+      removeCookie("codex-links-selected-repo");
       return;
     }
 
-    safeLocalStorageSet("codex-links-selected-cloud-repo", normalized);
-    writeCookie("codex-links-selected-cloud-repo", normalized);
-  },
-
-  get activeBridgeThreadId() {
-    const raw = safeLocalStorageGet("codex-links-active-bridge-thread") ?? readCookie("codex-links-active-bridge-thread");
-    return String(raw || "").trim();
-  },
-
-  set activeBridgeThreadId(value) {
-    const normalized = String(value || "").trim();
-
-    if (!normalized) {
-      safeLocalStorageRemove("codex-links-active-bridge-thread");
-      removeCookie("codex-links-active-bridge-thread");
-      return;
-    }
-
-    safeLocalStorageSet("codex-links-active-bridge-thread", normalized);
-    writeCookie("codex-links-active-bridge-thread", normalized);
+    safeLocalStorageSet("codex-links-selected-repo", normalized);
+    writeCookie("codex-links-selected-repo", normalized);
   }
 };
 
@@ -244,9 +232,6 @@ const commandTimeline = document.querySelector("#command-timeline");
 const submitProgress = document.querySelector("#submit-progress");
 const threadSettingsToggle = document.querySelector("#thread-settings-toggle");
 const threadSettingsSummary = document.querySelector("#thread-settings-summary");
-const cloudRepoPanel = document.querySelector("#cloud-repo-panel");
-const cloudRepoSummary = document.querySelector("#cloud-repo-summary");
-const cloudRepoSelect = document.querySelector("#cloud-repo-select");
 const threadSettingsPanel = document.querySelector("#thread-settings-panel");
 const threadSettingsShowAll = document.querySelector("#thread-settings-show-all");
 const threadSettingsSearch = document.querySelector("#thread-settings-search");
@@ -416,20 +401,35 @@ function getActiveDispatchMode() {
   return state.dispatchMode === "cloud" ? "cloud" : "bridge";
 }
 
-function buildCloudThreadId(repoId) {
-  const normalized = String(repoId || "").trim().toLowerCase();
-  return normalized ? `cloud:${normalized}` : "";
+function normalizeRepoSelectionId(value) {
+  return String(value || "").trim().toLowerCase().replace(/^cloud:/, "");
 }
 
-function getCloudRepoById(repoId) {
-  const normalized = String(repoId || "").trim().toLowerCase();
-  return state.cloudRepos.find((repo) => String(repo?.id || "").trim().toLowerCase() === normalized) || null;
+function isSameThreadTarget(left, right) {
+  const normalizedLeft = String(left || "").trim();
+  const normalizedRight = String(right || "").trim();
+
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  return normalizeRepoSelectionId(normalizedLeft) === normalizeRepoSelectionId(normalizedRight);
 }
 
-function formatCloudRepoLabel(repo) {
+function getMenuRepoById(repoId) {
+  const normalized = normalizeRepoSelectionId(repoId);
+  return state.menuRepos.find((repo) => normalizeRepoSelectionId(repo?.id) === normalized) || null;
+}
+
+function formatMenuRepoLabel(repo) {
+  const displayLabel = String(repo?.displayLabel || "").trim();
+  const nameWithOwner = String(repo?.nameWithOwner || "").trim();
   const name = String(repo?.name || "").trim();
-  const owner = String(repo?.nameWithOwner || "").trim();
-  return name || owner;
+  return displayLabel || nameWithOwner || name;
 }
 
 function compareBuildVersions(left, right) {
@@ -509,66 +509,36 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function formatThreadOptionLabel(thread) {
-  const label = String(thread?.label || "").trim();
-  const category = String(thread?.category || "").trim();
-  const count = Math.max(0, Number(thread?.messageCount || 0));
-  const suffix = count ? ` · ${count}` : "";
-  return category ? `${category} / ${label}${suffix}` : `${label}${suffix}`;
-}
-
-function getAllThreadOptions() {
+function getAllMenuOptions() {
   return [...new Map(
-    state.threads
-      .map((thread) => {
-        const id = String(thread?.id || "").trim();
-        const label = escapeThreadLabel(thread?.label || "").trim();
-        const displayLabel = formatThreadOptionLabel(thread);
-        const category = String(thread?.category || "").trim();
-        const messageCount = Math.max(0, Number(thread?.messageCount || 0));
-        const createdAt = Math.max(0, Number(thread?.createdAt || 0));
-        const updatedAt = Math.max(0, Number(thread?.updatedAt || 0));
+    state.menuRepos
+      .map((repo) => {
+        const id = normalizeRepoSelectionId(repo?.id);
+        const repoId = normalizeRepoSelectionId(repo?.repoId || repo?.id);
+        const label = escapeThreadLabel(repo?.nameWithOwner || repo?.name || "").trim();
+        const displayLabel = formatMenuRepoLabel(repo);
+        const category = String(repo?.category || "").trim() || "Other";
+        const updatedAt = Number(new Date(repo?.updatedAt || 0)) || 0;
 
-        if (!id || !label || !displayLabel) {
+        if (!id || !repoId || !label || !displayLabel) {
           return null;
         }
 
         return [id, {
           id,
+          repoId,
           label,
           displayLabel,
           category,
-          messageCount,
-          createdAt,
           updatedAt
         }];
       })
       .filter(Boolean)
   ).values()].sort((left, right) =>
     left.category.localeCompare(right.category, "ru")
-    || (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+    || (right.updatedAt || 0) - (left.updatedAt || 0)
     || left.displayLabel.localeCompare(right.displayLabel, "ru")
   );
-}
-
-function getAllCloudRepoOptions() {
-  return state.cloudRepos.map((repo) => ({
-    id: buildCloudThreadId(repo.id),
-    repoId: String(repo.id || "").trim().toLowerCase(),
-    label: String(repo.name || "").trim(),
-    displayLabel: formatCloudRepoLabel(repo),
-    category: "GitHub",
-    updatedAt: Number(new Date(repo.updatedAt || 0)) || 0
-  })).sort((left, right) =>
-    (right.updatedAt || 0) - (left.updatedAt || 0)
-    || left.displayLabel.localeCompare(right.displayLabel, "ru")
-  );
-}
-
-function getSelectableOptions() {
-  return getActiveDispatchMode() === "cloud"
-    ? getAllCloudRepoOptions()
-    : getAllThreadOptions();
 }
 
 function groupSelectableOptions(options) {
@@ -583,63 +553,57 @@ function groupSelectableOptions(options) {
     .map(([category, items]) => ({
       category,
       items: items.sort((left, right) =>
-        (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+        (right.updatedAt || 0) - (left.updatedAt || 0)
         || left.displayLabel.localeCompare(right.displayLabel, "ru")
       )
     }));
 }
 
 function getActiveThreadId() {
-  if (getActiveDispatchMode() === "cloud") {
-    return buildCloudThreadId(storage.selectedCloudRepoId);
-  }
-
-  return String(commandThreadSelect?.value || storage.activeBridgeThreadId || "").trim();
+  return normalizeRepoSelectionId(commandThreadSelect?.value || storage.selectedRepoId || "");
 }
 
-function getSelectedThreadIds() {
-  const stored = storage.selectedThreadIds;
+function getSelectedMenuRepoIds() {
+  const availableIds = new Set(getAllMenuOptions().map((option) => option.id));
+  const stored = storage.selectedMenuRepoIds
+    .map((item) => normalizeRepoSelectionId(item))
+    .filter((item) => Boolean(item) && availableIds.has(item));
 
   if (stored.length) {
     return stored;
   }
 
-  return getAllThreadOptions().map((option) => option.id);
+  return [...availableIds];
 }
 
-function getFilteredBridgeThreadOptions() {
+function getFilteredMenuOptions() {
   const activeCategories = new Set(state.activeThreadCategories);
-  const selectedThreadIds = new Set(getSelectedThreadIds());
+  const selectedRepoIds = new Set(getSelectedMenuRepoIds());
 
-  return getAllThreadOptions().filter((option) => {
+  return getAllMenuOptions().filter((option) => {
     if (activeCategories.size && !activeCategories.has(option.category)) {
       return false;
     }
 
-    return selectedThreadIds.has(option.id);
+    return selectedRepoIds.has(option.id);
   });
 }
 
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
-  const normalizedId = String(threadId || "").trim();
+  const normalizedId = normalizeRepoSelectionId(threadId);
 
   if (!normalizedId) {
     return fallbackLabel;
   }
 
-  if (normalizedId.startsWith("cloud:")) {
-    const cloudRepo = getCloudRepoById(normalizedId.slice("cloud:".length));
-    return cloudRepo ? formatCloudRepoLabel(cloudRepo) : fallbackLabel;
-  }
-
-  const match = state.threads.find((thread) => String(thread?.id || "").trim() === normalizedId);
-  return match ? formatThreadOptionLabel(match) : fallbackLabel;
+  const match = getMenuRepoById(normalizedId);
+  return match ? formatMenuRepoLabel(match) : fallbackLabel;
 }
 
 function getAllCategories() {
   return [...new Set(
-    state.threads
-      .map((thread) => String(thread?.category || "").trim())
+    state.menuRepos
+      .map((repo) => String(repo?.category || "").trim())
       .filter(Boolean)
   )].sort((left, right) => left.localeCompare(right, "ru"));
 }
@@ -649,18 +613,12 @@ function renderThreadCategories() {
     return;
   }
 
-  if (getActiveDispatchMode() === "cloud") {
-    threadCategoriesList.innerHTML = "";
-    threadCategoriesSummary.textContent = "В cloud-режиме вместо категорий показываются репозитории GitHub.";
-    return;
-  }
-
   threadCategoriesList.innerHTML = "";
   const categories = getAllCategories();
-  const totalThreads = getAllThreadOptions().length;
+  const totalRepos = getAllMenuOptions().length;
 
   threadCategoriesSummary.textContent = categories.length
-    ? `Категорий: ${categories.length} · чатов: ${totalThreads}`
+    ? `Категорий: ${categories.length} · репозиториев: ${totalRepos}`
     : "Категории не найдены.";
 
   categories.forEach((category) => {
@@ -691,36 +649,28 @@ function renderThreadSettingsSummary() {
     return;
   }
 
-  if (getActiveDispatchMode() === "cloud") {
-    const repo = getCloudRepoById(storage.selectedCloudRepoId);
-    threadSettingsSummary.textContent = repo
-      ? `Cloud target: ${formatCloudRepoLabel(repo)}.`
-      : "Выберите GitHub-репозиторий для Codex Cloud.";
-    return;
-  }
-
   if (storage.showAllMessages) {
-    threadSettingsSummary.textContent = "Показываются все чаты.";
+    threadSettingsSummary.textContent = "Показываются все репозитории.";
     return;
   }
 
-  const filteredOptions = getFilteredBridgeThreadOptions();
+  const filteredOptions = getFilteredMenuOptions();
 
   if (state.activeThreadCategories.length) {
     if (!filteredOptions.length) {
-      threadSettingsSummary.textContent = "В выбранных категориях нет включённых чатов.";
+      threadSettingsSummary.textContent = "В выбранных категориях нет включённых репозиториев.";
       return;
     }
 
-    threadSettingsSummary.textContent = `Категории: ${state.activeThreadCategories.join(", ")} · чатов в поле: ${filteredOptions.length}.`;
+    threadSettingsSummary.textContent = `Категории: ${state.activeThreadCategories.join(", ")} · репозиториев в меню: ${filteredOptions.length}.`;
     return;
   }
 
   const activeThreadId = getActiveThreadId();
-  const activeThread = state.threads.find((thread) => String(thread?.id || "").trim() === activeThreadId);
-  threadSettingsSummary.textContent = activeThread
-    ? `Показывается чат: ${formatThreadOptionLabel(activeThread)}.`
-    : "Показываются все чаты.";
+  const activeRepo = getMenuRepoById(activeThreadId);
+  threadSettingsSummary.textContent = activeRepo
+    ? `Выбран репозиторий: ${formatMenuRepoLabel(activeRepo)}.`
+    : "Выберите GitHub-репозиторий.";
 }
 
 function renderThreadSettingsList() {
@@ -728,15 +678,10 @@ function renderThreadSettingsList() {
     return;
   }
 
-  if (getActiveDispatchMode() === "cloud") {
-    threadSettingsList.innerHTML = "";
-    return;
-  }
-
   const search = String(threadSettingsSearch?.value || "").trim().toLowerCase();
   const activeCategories = new Set(state.activeThreadCategories);
-  const selectedThreadIds = new Set(getSelectedThreadIds());
-  const options = getAllThreadOptions().filter((option) => {
+  const selectedRepoIds = new Set(getSelectedMenuRepoIds());
+  const options = getAllMenuOptions().filter((option) => {
     const haystack = `${option.displayLabel} ${option.category}`.toLowerCase();
 
     if (search && !haystack.includes(search)) {
@@ -768,9 +713,9 @@ function renderThreadSettingsList() {
 
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = selectedThreadIds.has(option.id);
+      checkbox.checked = selectedRepoIds.has(option.id);
       checkbox.addEventListener("change", () => {
-        const next = new Set(getSelectedThreadIds());
+        const next = new Set(getSelectedMenuRepoIds());
 
         if (checkbox.checked) {
           next.add(option.id);
@@ -778,14 +723,14 @@ function renderThreadSettingsList() {
           next.delete(option.id);
         }
 
-        storage.selectedThreadIds = [...next];
+        storage.selectedMenuRepoIds = [...next];
         renderCommandThreads();
         renderThreadSettingsList();
         renderCommands();
         setCommandStatusMessage(
           checkbox.checked
-            ? `Чат добавлен в поле Беседа Codex: ${option.displayLabel}.`
-            : `Чат убран из поля Беседа Codex: ${option.displayLabel}.`
+            ? `Репозиторий добавлен в меню: ${option.displayLabel}.`
+            : `Репозиторий убран из меню: ${option.displayLabel}.`
         );
       });
 
@@ -800,83 +745,35 @@ function renderThreadSettingsList() {
   });
 }
 
-function renderCloudRepos() {
-  if (!cloudRepoSelect || !cloudRepoSummary) {
-    return;
-  }
-
-  const repos = [...state.cloudRepos];
-  cloudRepoSelect.innerHTML = "";
-  cloudRepoSummary.textContent = repos.length
-    ? `Репозиториев: ${repos.length}`
-    : "Cloud-репозитории пока не синхронизированы.";
-
-  if (!repos.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Cloud-репозитории не найдены";
-    cloudRepoSelect.appendChild(option);
-    cloudRepoSelect.disabled = true;
-    return;
-  }
-
-  cloudRepoSelect.disabled = false;
-
-  repos.forEach((repo) => {
-    const option = document.createElement("option");
-    option.value = repo.id;
-    option.textContent = formatCloudRepoLabel(repo);
-    cloudRepoSelect.appendChild(option);
-  });
-
-  const fallbackRepoId = repos[0]?.id || "";
-  const selectedRepoId = repos.some((repo) => repo.id === storage.selectedCloudRepoId)
-    ? storage.selectedCloudRepoId
-    : fallbackRepoId;
-
-  cloudRepoSelect.value = selectedRepoId;
-}
-
 function ensureThreadVisible(threadId) {
-  const normalizedId = String(threadId || "").trim();
+  const normalizedId = normalizeRepoSelectionId(threadId);
 
   if (!normalizedId) {
     return false;
   }
 
-  const isCloudThread = normalizedId.startsWith("cloud:");
-  const allOptionIds = isCloudThread
-    ? getAllCloudRepoOptions().map((option) => option.id)
-    : getAllThreadOptions().map((option) => option.id);
+  const allOptionIds = getAllMenuOptions().map((option) => option.id);
 
   if (!allOptionIds.includes(normalizedId)) {
     return false;
   }
 
-  if (isCloudThread) {
-    storage.selectedCloudRepoId = normalizedId.slice("cloud:".length);
-    return true;
+  const selectedRepoIds = getSelectedMenuRepoIds();
+
+  if (!selectedRepoIds.includes(normalizedId)) {
+    storage.selectedMenuRepoIds = [...selectedRepoIds, normalizedId];
   }
 
-  const selectedThreadIds = storage.selectedThreadIds;
-
-  if (Array.isArray(selectedThreadIds) && !selectedThreadIds.includes(normalizedId)) {
-    storage.selectedThreadIds = [...selectedThreadIds, normalizedId];
-  }
-
+  storage.selectedRepoId = normalizedId;
   return true;
 }
 
 function activateReplyThread(threadId) {
-  const normalizedId = String(threadId || "").trim();
+  const normalizedId = normalizeRepoSelectionId(threadId);
 
   if (!ensureThreadVisible(normalizedId)) {
     return false;
   }
-
-  state.dispatchMode = normalizedId.startsWith("cloud:") ? "cloud" : "bridge";
-  storage.dispatchModePreference = state.dispatchMode;
-  renderDispatchModeUi();
 
   if (commandThreadSelect) {
     commandThreadSelect.dataset.pendingValue = normalizedId;
@@ -1027,11 +924,11 @@ function getCommandDeliveryStatus(command) {
 }
 
 function getVisibleTimelineCommands() {
-  const showAllMessages = getActiveDispatchMode() === "cloud" ? false : storage.showAllMessages;
+  const showAllMessages = storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
 
   return state.commands
-    .filter((command) => !activeThreadId || command.threadId === activeThreadId)
+    .filter((command) => !activeThreadId || isSameThreadTarget(command.threadId, activeThreadId))
     .filter((command) => !isHiddenSystemEntry(command))
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
 }
@@ -1220,13 +1117,13 @@ function getInferredAssistantReplies(command, visibleMessages, visibleCommands) 
   const nextUserTimestamp = Math.min(
     ...[
       ...visibleCommands
-        .filter((entry) => entry?.id !== command?.id)
-        .filter((entry) => String(entry?.threadId || "").trim() === commandThreadId)
-        .map((entry) => toTimestamp(entry?.createdAt))
-        .filter((value) => value > commandCreatedAt),
+      .filter((entry) => entry?.id !== command?.id)
+      .filter((entry) => isSameThreadTarget(entry?.threadId, commandThreadId))
+      .map((entry) => toTimestamp(entry?.createdAt))
+      .filter((value) => value > commandCreatedAt),
       ...visibleMessages
         .filter((entry) => entry?.role === "user")
-        .filter((entry) => String(entry?.threadId || "").trim() === commandThreadId)
+        .filter((entry) => isSameThreadTarget(entry?.threadId, commandThreadId))
         .map((entry) => toTimestamp(entry?.createdAt))
         .filter((value) => value > commandCreatedAt)
     ]
@@ -1235,7 +1132,7 @@ function getInferredAssistantReplies(command, visibleMessages, visibleCommands) 
   return visibleMessages
     .filter((message) => message?.role === "assistant")
     .filter((message) => !String(message?.commandId || "").trim())
-    .filter((message) => String(message?.threadId || "").trim() === commandThreadId)
+    .filter((message) => isSameThreadTarget(message?.threadId, commandThreadId))
     .filter((message) => {
       const createdAt = toTimestamp(message?.createdAt);
       if (!createdAt || createdAt < commandCreatedAt) {
@@ -1410,11 +1307,11 @@ function bindAssistantReplyInteractions(container, replies) {
 function renderCommands() {
   pruneExpiredAnswerState();
   renderTimelineTabButtons();
-  const showAllMessages = getActiveDispatchMode() === "cloud" ? false : storage.showAllMessages;
+  const showAllMessages = storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
   const visibleCommands = getVisibleTimelineCommands();
   const visibleMessages = state.messages
-    .filter((message) => !activeThreadId || message.threadId === activeThreadId)
+    .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
     .filter((message) => !isHiddenSystemEntry(message))
     .filter((message) => !isNotificationEntry(message));
 
@@ -1509,7 +1406,7 @@ function renderCommands() {
   const notificationItems = [
     getReleaseNotificationEntry(),
     ...state.messages
-      .filter((message) => !activeThreadId || message.threadId === activeThreadId)
+      .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
       .filter((message) => isNotificationEntry(message))
       .map((message) => ({
         id: `notification:${message.id}`,
@@ -1758,16 +1655,16 @@ function playReplySound() {
 
 function renderDispatchModeUi() {
   const isCloud = getActiveDispatchMode() === "cloud";
-  const selectedRepo = getCloudRepoById(storage.selectedCloudRepoId);
-  const cloudRepo = selectedRepo || state.cloudRepos[0] || null;
+  const selectedRepo = getMenuRepoById(storage.selectedRepoId);
+  const activeRepo = selectedRepo || state.menuRepos[0] || null;
   const hasActiveStatus = Boolean(String(commandStatus?.textContent || "").trim());
   const hasPendingCommand = state.commands.some((command) => {
     const status = String(command?.status || "").trim().toLowerCase();
     return status === "queued" || status === "dispatched" || status === "processing";
   });
 
-  if (isCloud && cloudRepo && !selectedRepo) {
-    storage.selectedCloudRepoId = cloudRepo.id;
+  if (activeRepo && !selectedRepo) {
+    storage.selectedRepoId = activeRepo.id;
   }
 
   dispatchModeBridgeButton?.classList.toggle("is-active", !isCloud);
@@ -1776,41 +1673,19 @@ function renderDispatchModeUi() {
   dispatchModeCloudButton?.setAttribute("aria-selected", String(isCloud));
 
   if (commandTargetLabel) {
-    commandTargetLabel.textContent = isCloud ? "Репозиторий GitHub" : "Беседа Codex";
-  }
-
-  if (threadSettingsToggle) {
-    threadSettingsToggle.hidden = isCloud;
-  }
-
-  if (threadSettingsPanel && isCloud) {
-    threadSettingsPanel.hidden = true;
-    threadSettingsToggle?.setAttribute("aria-expanded", "false");
-  }
-
-  if (cloudRepoPanel) {
-    cloudRepoPanel.hidden = !isCloud;
-  }
-
-  if (threadSettingsShowAll) {
-    const showAllWrap = threadSettingsShowAll.closest("label");
-
-    if (showAllWrap) {
-      showAllWrap.hidden = isCloud;
-    }
+    commandTargetLabel.textContent = "Репозиторий GitHub";
   }
 
   renderThreadCategories();
   renderThreadSettingsSummary();
   renderThreadSettingsList();
-  renderCloudRepos();
   renderCommandThreads();
 
-  if (isCloud && !hasPendingCommand && !hasActiveStatus) {
+  if (!hasPendingCommand && !hasActiveStatus) {
     setCommandStatusMessage(
-      cloudRepo
-        ? `Cloud target: ${cloudRepo.nameWithOwner}.`
-        : "Выберите GitHub-репозиторий для отправки через Codex Cloud."
+      activeRepo
+        ? `Репозиторий: ${activeRepo.nameWithOwner} · отправка через ${isCloud ? "cloud" : "bridge"}.`
+        : "Выберите GitHub-репозиторий."
     );
   }
 }
@@ -1820,17 +1695,29 @@ function renderCommandThreads() {
     return;
   }
 
-  const isCloud = getActiveDispatchMode() === "cloud";
-  const options = isCloud ? getAllCloudRepoOptions() : getAllThreadOptions();
-  const nextOptions = isCloud ? options : getFilteredBridgeThreadOptions();
+  const nextOptions = getFilteredMenuOptions();
   const currentValue = String(
     commandThreadSelect.dataset.pendingValue
     || commandThreadSelect.value
-    || (isCloud ? buildCloudThreadId(storage.selectedCloudRepoId) : storage.activeBridgeThreadId)
+    || storage.selectedRepoId
     || ""
   ).trim();
 
   commandThreadSelect.innerHTML = "";
+
+  if (!nextOptions.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "GitHub-репозитории не найдены";
+    commandThreadSelect.appendChild(option);
+    commandThreadSelect.disabled = true;
+    storage.selectedRepoId = "";
+    renderThreadSettingsSummary();
+    renderCommands();
+    return;
+  }
+
+  commandThreadSelect.disabled = false;
 
   groupSelectableOptions(nextOptions).forEach(({ category, items }) => {
     const group = document.createElement("optgroup");
@@ -1855,11 +1742,7 @@ function renderCommandThreads() {
     commandThreadSelect.value = targetValue;
   }
 
-  if (isCloud) {
-    storage.selectedCloudRepoId = targetValue.replace(/^cloud:/, "");
-  } else {
-    storage.activeBridgeThreadId = targetValue;
-  }
+  storage.selectedRepoId = targetValue;
 
   renderThreadSettingsSummary();
   renderCommands();
@@ -1880,23 +1763,7 @@ async function fetchBridgeStatus() {
   return response.json();
 }
 
-async function fetchThreads() {
-  const response = await fetch(`/api/threads?_=${Date.now()}`, {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load threads: ${response.status}`);
-  }
-
-  const data = await response.json();
-  state.threads = Array.isArray(data?.threads) ? data.threads : [];
-}
-
-async function fetchCloudRepos() {
+async function fetchMenuRepos() {
   const response = await fetch(`/api/repos?mode=cloud&_=${Date.now()}`, {
     cache: "no-store",
     headers: {
@@ -1909,24 +1776,7 @@ async function fetchCloudRepos() {
   }
 
   const data = await response.json();
-  state.cloudRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
-}
-
-async function fetchThreadCounts() {
-  const response = await fetch(`/thread-counts.json?_=${Date.now()}`, {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    state.threadMessageCounts = {};
-    return;
-  }
-
-  const data = await response.json();
-  state.threadMessageCounts = data && typeof data === "object" ? data : {};
+  state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
 async function fetchCommands() {
@@ -1990,15 +1840,13 @@ async function refreshAll() {
     fetchBridgeStatus(),
     fetchCommands(),
     fetchMessages(),
-    fetchThreads(),
-    fetchThreadCounts(),
-    fetchCloudRepos()
+    fetchMenuRepos()
   ]);
 
   const statusResult = results[0];
   const commandsError = results[1].status === "rejected" ? results[1].reason : null;
   const messagesError = results[2].status === "rejected" ? results[2].reason : null;
-  const reposError = results[5].status === "rejected" ? results[5].reason : null;
+  const reposError = results[3].status === "rejected" ? results[3].reason : null;
 
   if (statusResult.status === "fulfilled") {
     const status = statusResult.value?.status || {};
@@ -2023,7 +1871,7 @@ async function refreshAll() {
   } else if (commandsError && messagesError) {
     setCommandStatusMessage("Не удалось обновить команды и ответы.", { tone: "error" });
   } else if (reposError) {
-    setCommandStatusMessage("Не удалось обновить cloud-репозитории.", { tone: "error" });
+    setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
   } else if (messagesError) {
     setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
   } else if (commandsError) {
@@ -2042,27 +1890,23 @@ async function submitCommand(event) {
   const text = String(commandInput?.value || "").trim();
   const requestedThreadId = getActiveThreadId();
   const requestedDispatchMode = getActiveDispatchMode();
-  const cloudRepo = getCloudRepoById(storage.selectedCloudRepoId);
-  const fallbackThreadId = String(storage.activeBridgeThreadId || getAllThreadOptions()[0]?.id || "").trim();
-  const fallbackThreadLabel = getThreadDisplayLabel(fallbackThreadId, "");
+  const activeRepo = getMenuRepoById(requestedThreadId);
+  const fallbackThreadId = requestedThreadId;
+  const fallbackThreadLabel = activeRepo ? formatMenuRepoLabel(activeRepo) : getThreadDisplayLabel(fallbackThreadId, "");
   const photoFile = commandPhotoInput?.files?.[0];
   const requestedCloudMode = requestedDispatchMode === "cloud";
   const forceBridgeForPhoto = requestedDispatchMode === "cloud" && Boolean(photoFile);
   const dispatchMode = forceBridgeForPhoto ? "bridge" : requestedDispatchMode;
-  const threadId = forceBridgeForPhoto && fallbackThreadId
-    ? fallbackThreadId
-    : requestedThreadId;
-  const threadLabel = dispatchMode === "cloud"
-    ? formatCloudRepoLabel(cloudRepo)
-    : getThreadDisplayLabel(threadId, forceBridgeForPhoto ? fallbackThreadLabel : "");
+  const threadId = requestedThreadId;
+  const threadLabel = activeRepo?.nameWithOwner || fallbackThreadLabel;
 
   if (!text && !photoFile) {
     setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
     return;
   }
 
-  if (requestedCloudMode && !cloudRepo) {
-    setCommandStatusMessage("Для Codex Cloud сначала выберите GitHub-репозиторий.", { tone: "error" });
+  if (!activeRepo) {
+    setCommandStatusMessage("Сначала выберите GitHub-репозиторий.", { tone: "error" });
     return;
   }
 
@@ -2082,13 +1926,11 @@ async function submitCommand(event) {
     targetExecutionMode: dispatchMode
   };
 
-  if (requestedCloudMode && cloudRepo) {
-    payload.targetRepo = cloudRepo.nameWithOwner;
-    payload.targetRepoUrl = cloudRepo.url;
-    payload.targetContextFiles = Array.isArray(cloudRepo.contextFiles) ? cloudRepo.contextFiles : [];
-  }
+  payload.targetRepo = activeRepo.nameWithOwner;
+  payload.targetRepoUrl = activeRepo.url;
+  payload.targetContextFiles = Array.isArray(activeRepo.contextFiles) ? activeRepo.contextFiles : [];
 
-  if (requestedCloudMode && fallbackThreadId) {
+  if (fallbackThreadId) {
     payload.fallbackThreadId = fallbackThreadId;
     payload.fallbackThreadLabel = fallbackThreadLabel;
   }
@@ -2182,27 +2024,9 @@ function bindEvents() {
   });
 
   commandThreadSelect?.addEventListener("change", () => {
-    if (getActiveDispatchMode() === "cloud") {
-      storage.selectedCloudRepoId = String(commandThreadSelect.value || "").replace(/^cloud:/, "");
-    } else {
-      storage.activeBridgeThreadId = String(commandThreadSelect.value || "").trim();
-    }
-
+    storage.selectedRepoId = normalizeRepoSelectionId(commandThreadSelect.value);
     renderThreadSettingsSummary();
-    renderCloudRepos();
     renderCommands();
-  });
-
-  cloudRepoSelect?.addEventListener("change", () => {
-    storage.selectedCloudRepoId = String(cloudRepoSelect.value || "").trim();
-    renderDispatchModeUi();
-    renderCommands();
-
-    const repo = getCloudRepoById(storage.selectedCloudRepoId);
-
-    if (repo) {
-      setCommandStatusMessage(`Выбран cloud repo: ${repo.nameWithOwner}.`);
-    }
   });
 
   timelineTabDialog?.addEventListener("click", () => {
@@ -2268,12 +2092,12 @@ function bindEvents() {
 
   threadSettingsSelectAll?.addEventListener("click", () => {
     const visibleOptions = state.activeThreadCategories.length
-      ? getAllThreadOptions().filter((option) => state.activeThreadCategories.includes(option.category))
-      : getAllThreadOptions();
-    storage.selectedThreadIds = visibleOptions.map((option) => option.id);
+      ? getAllMenuOptions().filter((option) => state.activeThreadCategories.includes(option.category))
+      : getAllMenuOptions();
+    storage.selectedMenuRepoIds = visibleOptions.map((option) => option.id);
     renderCommandThreads();
     renderThreadSettingsList();
-    setCommandStatusMessage("В поле Беседа добавлены чаты из текущих категорий.");
+    setCommandStatusMessage("В меню добавлены репозитории из текущих категорий.");
   });
 
   threadSettingsClear?.addEventListener("click", () => {
