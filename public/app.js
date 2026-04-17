@@ -14,7 +14,7 @@ const state = {
   hardReloading: false
 };
 
-const BUILD_VERSION = "20260417-0044";
+const BUILD_VERSION = "20260417-0057";
 const FAST_POLL_INTERVAL_MS = 6000;
 const IDLE_POLL_INTERVAL_MS = 20000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
