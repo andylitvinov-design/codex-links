@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260416-2318" />
+    <link rel="stylesheet" href="/styles.css?v=20260416-2332" />
   </head>
   <body>
     <main class="page">
@@ -50,12 +50,12 @@
             </div>
             <div class="thread-settings-inline-row">
               <span id="thread-settings-summary" class="form-status">Показываются все чаты.</span>
-              <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
-                <input id="thread-settings-show-all" type="checkbox" />
-                <span>Все</span>
-              </label>
             </div>
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
+              <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
+                <input id="thread-settings-show-all" type="checkbox" />
+                <span>Показывать все чаты</span>
+              </label>
               <label>
                 <span class="field-label">Поиск по чатам</span>
                 <input id="thread-settings-search" type="search" placeholder="Название категории или чата" />
@@ -80,7 +80,7 @@
             </label>
             <p id="command-photo-status" class="form-status command-photo-status">Фото не выбрано.</p>
             <div class="command-compose-row">
-              <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex"></textarea>
+              <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true"></textarea>
               <button class="button button-send-icon" type="submit" aria-label="Отправить в Codex" title="Отправить в Codex">
                 <span aria-hidden="true">▶</span>
               </button>
@@ -104,6 +104,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260416-2318"></script>
+    <script type="module" src="/app.js?v=20260416-2332"></script>
   </body>
 </html>
