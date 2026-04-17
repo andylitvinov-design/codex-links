@@ -11,13 +11,12 @@ import {
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
 
-function shouldTrackSlackEvent(event, runtimeConfig) {
-  const expectedChannel = String(runtimeConfig?.SLACK_CODEX_CHANNEL_ID || "").trim();
+function shouldTrackSlackEvent(event) {
   const channel = String(event?.channel || "").trim();
   const threadTs = String(event?.thread_ts || "").trim();
   const ts = String(event?.ts || "").trim();
 
-  if (!expectedChannel || channel !== expectedChannel) {
+  if (!channel) {
     return false;
   }
 
@@ -44,8 +43,8 @@ export async function onRequest(context) {
     return json({ error: "Method not allowed." }, { status: 405 });
   }
 
-  const runtimeConfig = await readRuntimeConfig(env);
   const rawBody = await request.text();
+  const runtimeConfig = await readRuntimeConfig(env);
   const verified = await verifySlackRequestSignature(request, rawBody, runtimeConfig);
 
   if (!verified) {
@@ -70,7 +69,7 @@ export async function onRequest(context) {
 
   const event = payload.event;
 
-  if (!shouldTrackSlackEvent(event, runtimeConfig)) {
+  if (!shouldTrackSlackEvent(event)) {
     return json({ ok: true });
   }
 

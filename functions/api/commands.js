@@ -62,7 +62,6 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
     dispatchMode: DISPATCH_MODE_LOCAL,
     executorLabel: getDispatchModeLabel(DISPATCH_MODE_LOCAL),
     bridgeOnline: true,
-    state: "idle",
     lastRunAt: new Date().toISOString(),
     lastError: errorMessage
   });
@@ -79,7 +78,6 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       dispatchMode,
       executorLabel: getDispatchModeLabel(dispatchMode),
       bridgeOnline: true,
-      state: "idle",
       lastRunAt: new Date().toISOString()
     });
     return {
@@ -116,7 +114,6 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       dispatchMode,
       executorLabel: getDispatchModeLabel(dispatchMode),
       bridgeOnline: true,
-      state: "idle",
       lastRunAt: new Date().toISOString(),
       lastDispatchAt: new Date().toISOString(),
       lastError: ""
