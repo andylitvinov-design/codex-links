@@ -23,6 +23,7 @@ import {
   DISPATCH_MODE_SLACK,
   getConfiguredDispatchMode,
   getDispatchModeLabel,
+  isCloudDispatchConfigured,
   isSlackDispatchConfigured,
   getSlackCodexMention
 } from "../_lib/dispatch.js";
@@ -42,6 +43,36 @@ import {
 } from "../_lib/delivery.js";
 
 const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
+
+function resolveRequestedDispatchMode(payload, runtimeConfig) {
+  const requestedExecutor = String(
+    payload?.targetExecutionMode
+    || payload?.requestedExecutor
+    || payload?.requestedMode
+    || ""
+  ).trim().toLowerCase();
+  const requestedDispatchMode = String(payload?.dispatchMode || "").trim().toLowerCase();
+
+  if (requestedDispatchMode === DISPATCH_MODE_LOCAL || requestedExecutor === "bridge") {
+    return DISPATCH_MODE_LOCAL;
+  }
+
+  if (requestedDispatchMode === DISPATCH_MODE_SLACK) {
+    return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
+  }
+
+  if (requestedExecutor === "cloud" || requestedDispatchMode === DISPATCH_MODE_CLOUD) {
+    if (isSlackDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_SLACK;
+    }
+
+    if (isCloudDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_CLOUD;
+    }
+  }
+
+  return getConfiguredDispatchMode(runtimeConfig);
+}
 
 function normalizeEntryText(entry) {
   return String(entry?.text || "").trim().toLowerCase();
@@ -324,9 +355,14 @@ function canFallbackToLocalBridge(command) {
 
 function canFallbackToCloud(command, runtimeConfig) {
   return Number(command?.fallbackCount || 0) < 1
-    && !command?.photo
     && Boolean(String(command?.targetRepo || "").trim())
-    && (String(runtimeConfig?.OPENAI_API_KEY || "").trim().length > 0);
+    && (
+      isSlackDispatchConfigured(runtimeConfig)
+      || (
+        !command?.photo
+        && isCloudDispatchConfigured(runtimeConfig)
+      )
+    );
 }
 
 async function markCloudCommandFailed(env, command, commandError) {
@@ -591,7 +627,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     return command;
   }
 
-  const waitMs = command.dispatchMode === DISPATCH_MODE_SLACK ? 5_000 : 3_000;
+  const waitMs = command.dispatchMode === DISPATCH_MODE_SLACK ? 25_000 : 15_000;
   await sleep(waitMs);
   command = await getCommandById(env, commandId);
 
@@ -616,7 +652,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
       return fallbackToLocalBridge(env, command, {
         code: "fallback_to_bridge",
         stage: "fallback-to-bridge",
-        message: "Direct cloud execution did not acknowledge the task in time. Switched to local bridge.",
+        message: "Cloud via Slack did not acknowledge the task in time. Switched to local bridge.",
         detail: "No first executor acknowledgement was observed within the fast cloud first-ack window.",
         fallback: "local-bridge"
       });
@@ -631,7 +667,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
       errorMessage: stringifyCommandError({
         code: "cloud_first_ack_timeout",
         stage: "cloud-first-ack-timeout",
-        message: "Direct cloud execution did not acknowledge the task in time.",
+        message: "Cloud via Slack did not acknowledge the task in time.",
         detail: "No first executor acknowledgement was observed within the fast cloud first-ack window."
       })
     });
@@ -650,7 +686,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
       errorMessage: stringifyCommandError({
         code: "fallback_to_cloud",
         stage: "switched-to-cloud",
-        message: "Local bridge did not claim the command in time. Switched to direct cloud execution.",
+        message: "Local bridge did not claim the command in time. Switched to cloud execution.",
         detail: "The local bridge did not claim the command before the fast claim timeout.",
         fallback: "cloud"
       })
@@ -931,8 +967,7 @@ export async function onRequest(context) {
   }
 
   const runtimeConfig = await readRuntimeConfig(env);
-  const dispatchMode = getConfiguredDispatchMode(runtimeConfig);
-  const requestedDispatchMode = payload?.dispatchMode || dispatchMode;
+  const requestedDispatchMode = resolveRequestedDispatchMode(payload, runtimeConfig);
   const manifestTarget = resolveProjectDispatchTarget({
     threadId: payload?.threadId,
     projectId: payload?.projectId,

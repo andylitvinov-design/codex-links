@@ -81,7 +81,7 @@ export async function readBridgeStatus(env) {
   if (!status.dispatchMode || (
     configuredDispatchMode === DISPATCH_MODE_CLOUD
     && isCloudDispatchConfigured(runtimeConfig)
-    && status.dispatchMode !== DISPATCH_MODE_CLOUD
+    && status.dispatchMode === DISPATCH_MODE_LOCAL
   )) {
     status.dispatchMode = configuredDispatchMode;
   }
@@ -93,7 +93,7 @@ export async function readBridgeStatus(env) {
     status.executorLabel = getDispatchModeLabel(status.dispatchMode);
   }
 
-  if (!raw && status.dispatchMode === DISPATCH_MODE_CLOUD) {
+  if (!raw && (status.dispatchMode === DISPATCH_MODE_CLOUD || status.dispatchMode === DISPATCH_MODE_SLACK)) {
     status.bridgeOnline = true;
     status.state = "idle";
   }
