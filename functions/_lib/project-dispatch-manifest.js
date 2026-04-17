@@ -202,7 +202,9 @@ export function resolveProjectDispatchTarget(input = {}) {
   const effectiveWorkspacePath = providedWorkspacePath || project?.workspacePath || "";
   const effectiveContextFiles = providedContextFiles.length ? providedContextFiles : (project?.contextFiles || []);
 
-  if (dispatchMode === "cloud" && !effectiveTargetRepo) {
+  const needsCloudRepo = dispatchMode === "cloud" || dispatchMode === "slack-codex-cloud";
+
+  if (needsCloudRepo && !effectiveTargetRepo) {
     return {
       ok: false,
       error: `Project ${projectLabel} is bridge-only until a manifest-backed GitHub repository is confirmed.`

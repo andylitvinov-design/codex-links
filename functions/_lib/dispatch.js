@@ -1,7 +1,7 @@
 export const DISPATCH_MODE_LOCAL = "local-bridge";
 export const DISPATCH_MODE_CLOUD = "cloud";
 export const LEGACY_DISPATCH_MODE_SLACK = "slack-codex-cloud";
-export const DISPATCH_MODE_SLACK = DISPATCH_MODE_CLOUD;
+export const DISPATCH_MODE_SLACK = LEGACY_DISPATCH_MODE_SLACK;
 
 function hasOpenAiKey(env) {
   return Boolean(String(env?.OPENAI_API_KEY || "").trim());
@@ -18,7 +18,11 @@ function hasSlackChannel(env) {
 export function normalizeDispatchMode(rawMode) {
   const mode = String(rawMode || "").trim().toLowerCase();
 
-  if (mode === DISPATCH_MODE_CLOUD || mode === LEGACY_DISPATCH_MODE_SLACK) {
+  if (mode === DISPATCH_MODE_SLACK || mode === LEGACY_DISPATCH_MODE_SLACK) {
+    return DISPATCH_MODE_SLACK;
+  }
+
+  if (mode === DISPATCH_MODE_CLOUD) {
     return DISPATCH_MODE_CLOUD;
   }
 
@@ -41,6 +45,10 @@ export function getConfiguredDispatchMode(env) {
   const explicit = normalizeDispatchMode(env?.COMMAND_DISPATCH_MODE);
 
   if (String(env?.COMMAND_DISPATCH_MODE || "").trim()) {
+    if (explicit === DISPATCH_MODE_SLACK) {
+      return isSlackDispatchConfigured(env) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
+    }
+
     if (explicit === DISPATCH_MODE_CLOUD) {
       return isCloudDispatchConfigured(env) ? DISPATCH_MODE_CLOUD : DISPATCH_MODE_LOCAL;
     }
@@ -56,9 +64,17 @@ export function getConfiguredDispatchMode(env) {
 }
 
 export function getDispatchModeLabel(mode) {
-  return normalizeDispatchMode(mode) === DISPATCH_MODE_CLOUD
-    ? "Direct OpenAI cloud"
-    : "Local bridge";
+  const normalized = normalizeDispatchMode(mode);
+
+  if (normalized === DISPATCH_MODE_SLACK) {
+    return "Codex Cloud via Slack";
+  }
+
+  if (normalized === DISPATCH_MODE_CLOUD) {
+    return "Direct OpenAI cloud";
+  }
+
+  return "Local bridge";
 }
 
 export function getSlackCodexMention(env) {

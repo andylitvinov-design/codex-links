@@ -9,6 +9,7 @@ const TARGET_WORKSPACE_PATH = process.env.CODEX_LINKS_SMOKE_WORKSPACE_PATH || "/
 const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"]
 const FALLBACK_THREAD_ID = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_ID || ""
 const FALLBACK_THREAD_LABEL = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_LABEL || ""
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || ""
 const clientId = `smoke-${Date.now()}`
 const text = "delivery-probe: reply with OK only"
 const pollStartedAt = Date.now()
@@ -28,6 +29,34 @@ async function fetchAssistantReplies(commandId) {
         String(message?.commandId || "").trim() === String(commandId || "").trim()
         && String(message?.role || "").trim() === "assistant"
       )
+    : []
+}
+
+async function fetchSlackThreadReplies(channelId, threadTs) {
+  if (!SLACK_BOT_TOKEN || !channelId || !threadTs) {
+    return []
+  }
+
+  const url = new URL("https://slack.com/api/conversations.replies")
+  url.searchParams.set("channel", channelId)
+  url.searchParams.set("ts", threadTs)
+  url.searchParams.set("inclusive", "true")
+  url.searchParams.set("limit", "100")
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+      accept: "application/json"
+    }
+  })
+  const data = await response.json().catch(() => ({}))
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(`Slack replies fetch failed: ${String(data?.error || response.status).trim()}`)
+  }
+
+  return Array.isArray(data?.messages)
+    ? data.messages.filter((message) => String(message?.ts || "").trim() !== String(threadTs || "").trim())
     : []
 }
 
@@ -76,12 +105,6 @@ function assertDirectCloudState(command, label) {
 
   if (String(command?.status || "").trim().toLowerCase() === "answered" && String(command?.actualExecutor || "").trim() !== "cloud") {
     throw new Error(`${label}: expected actualExecutor=cloud on answered command, got ${String(command?.actualExecutor || "").trim() || "empty"}.`)
-  }
-
-  if (String(command?.status || "").trim().toLowerCase() === "answered") {
-    if (String(command?.slackChannelId || "").trim() || String(command?.slackThreadTs || "").trim() || String(command?.slackMessageTs || "").trim()) {
-      throw new Error(`${label}: direct cloud answered command unexpectedly contains Slack thread metadata.`)
-    }
   }
 }
 
@@ -144,6 +167,22 @@ async function pollCommand(id) {
         return command
       }
 
+      if (
+        String(command?.slackChannelId || "").trim()
+        && String(command?.slackThreadTs || command?.slackMessageTs || "").trim()
+        && SLACK_BOT_TOKEN
+      ) {
+        const replies = await fetchSlackThreadReplies(
+          String(command.slackChannelId || "").trim(),
+          String(command.slackThreadTs || command.slackMessageTs || "").trim()
+        )
+        const matched = replies.find((reply) => /(^|\b)OK(\b|$)/i.test(String(reply?.text || "").trim()))
+
+        if (matched) {
+          return command
+        }
+      }
+
       if (status === "acked") {
         const replies = await fetchAssistantReplies(command.id)
 
@@ -174,7 +213,8 @@ async function main() {
     executorVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstAckMs ?? null),
     firstReplyVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstReplyMs ?? null),
     doneMs: Date.now() - pollStartedAt,
-    stage: answered?.deliveryStage || answered?.progressStage || answered?.status || "unknown"
+    stage: answered?.deliveryStage || answered?.progressStage || answered?.status || "unknown",
+    dispatchMode: String(answered?.dispatchMode || "").trim() || "unknown"
   }
   console.log(JSON.stringify({ latencyReport: report }, null, 2))
   console.log(`Smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`)

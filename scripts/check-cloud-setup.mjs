@@ -6,10 +6,10 @@ const DEV_VARS_PATH = path.join(ROOT, ".dev.vars");
 const PROD_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
 const REQUIRED = [
   "LINKS_WRITE_TOKEN",
-  "COMMAND_DISPATCH_MODE",
-  "OPENAI_API_KEY"
+  "COMMAND_DISPATCH_MODE"
 ];
 const OPTIONAL = [
+  "OPENAI_API_KEY",
   "GITHUB_OWNER",
   "GITHUB_TOKEN",
   "SLACK_BOT_TOKEN",
@@ -105,6 +105,13 @@ async function main() {
   console.log("");
 
   const missing = REQUIRED.filter((key) => !String(merged[key] || "").trim());
+  const hasOpenAiKey = Boolean(String(merged.OPENAI_API_KEY || "").trim());
+  const hasSlackRoute = Boolean(String(merged.SLACK_BOT_TOKEN || "").trim()) && Boolean(String(merged.SLACK_CODEX_CHANNEL_ID || "").trim());
+  const hasCloudRoute = hasOpenAiKey || hasSlackRoute;
+
+  if (!hasCloudRoute) {
+    missing.push("OPENAI_API_KEY or Slack cloud route");
+  }
 
   if (missing.length) {
     console.log("Missing local values:");
@@ -132,10 +139,6 @@ async function main() {
   console.log(`- bridgeOnline: ${status.bridgeOnline ? "true" : "false"}`);
   console.log(`- state: ${status.state || "unknown"}`);
   console.log(`- lastError: ${status.lastError || "none"}`);
-
-  if (status.dispatchMode !== "cloud") {
-    process.exitCode = 1;
-  }
 
   if (missing.length) {
     process.exitCode = 1;

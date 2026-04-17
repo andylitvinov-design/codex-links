@@ -22,7 +22,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-2355";
+const BUILD_VERSION = "20260417-1910";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -898,7 +898,7 @@ function formatProgressStage(progressStage, status) {
   const mapped = {
     created: "Команда создана",
     dispatching: "Отправляется исполнителю",
-    sent: "Отправлено в cloud API",
+    sent: "Отправлено в cloud",
     accepted: "Исполнитель подтвердил задачу",
     processing: "Исполнитель работает",
     "switched-to-bridge": "Переведено на bridge",
@@ -959,7 +959,7 @@ function getCommandDiagnosticMessage(command) {
   const diagnosticCode = String(command?.lastDiagnosticCode || "").trim().toLowerCase();
 
   if (diagnosticCode === "cloud_photo_not_supported") {
-    return "Cloud пока поддерживает только текстовые команды. Для фото выберите bridge.";
+    return "Direct OpenAI cloud пока поддерживает только текстовые команды. Для фото используйте bridge или cloud via Slack.";
   }
 
   if (diagnosticCode === "openai_api_key_missing") {
@@ -1252,7 +1252,7 @@ function getCommandFailureMessage(command) {
   }
 
   if (/cloud photo commands are not supported yet/i.test(message) || /cloud_photo_not_supported/i.test(message)) {
-    return "Cloud пока поддерживает только текст. Для фото используйте bridge.";
+    return "Direct OpenAI cloud пока поддерживает только текст. Для фото используйте bridge или cloud via Slack.";
   }
 
   return message;
@@ -2625,7 +2625,7 @@ async function submitCommand(event) {
 
   setCommandStatusMessage(
     dispatchMode === "cloud"
-      ? "Отправляю через cloud API…"
+      ? "Отправляю через cloud…"
       : "Отправляю через bridge…"
   );
   setSubmitProgress("queued", "queued");
