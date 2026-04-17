@@ -5,11 +5,21 @@ Cloudflare Pages inbox for links and Codex tasks, with production execution rout
 ## Current Architecture
 
 - Public UI and API: Cloudflare Pages
-- Production executor: `Codex Cloud via Slack`
-- Fallback executor: local bridge on Mac
+- Primary executor: `Codex Cloud via Slack`
+- Secondary executor: local bridge on Mac
 - Source repo for Codex Cloud: `andylitvinov-design/codex-links`
 
-This repo no longer treats the local Mac bridge as the primary execution path. If Slack + Codex Cloud are configured, tasks are dispatched from `POST /api/commands` directly into Slack, where `@Codex` can run them in the cloud and reply back into the app.
+Delivery pipeline is intentionally narrow:
+
+- `UI -> POST /api/commands -> create command -> dispatch once -> executor ack/result -> ingest -> UI`
+
+Operational rules now are:
+
+- `POST /api/commands` creates and dispatches only the new command
+- `GET /api/commands` and `GET /api/status` are read-only
+- Slack webhook `/api/slack` is the primary cloud reply ingestion path
+- fallback is one-shot only; no `cloud -> bridge -> cloud` or `bridge -> cloud -> bridge`
+- stale timeout recovery and backup Slack sync moved out of hot paths into admin maintenance
 
 ## What The App Does
 
@@ -18,6 +28,29 @@ This repo no longer treats the local Mac bridge as the primary execution path. I
 - Dispatches commands to Slack for Codex Cloud execution
 - Ingests Slack thread replies through `/api/slack`
 - Mirrors assistant replies and PR links back into the mobile timeline
+
+## Delivery Maintenance
+
+Admin maintenance endpoint:
+
+- `POST /api/admin/commands-maintenance`
+
+This endpoint is authorized-only and is the place for:
+
+- stale timeout evaluation
+- one-shot fallback application
+- optional backup Slack reply sync
+- redispatch of commands that were switched to cloud during maintenance
+
+Normal UI polling must not depend on this endpoint.
+
+## Saved Audit Notes
+
+Latest saved context-routing summary:
+
+- repo copy: [docs/project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+- static online copy after deploy: `/project-context-audit-2026-04-17.md`
+- weekly error and findings log: [docs/weekly-errors-and-findings-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/weekly-errors-and-findings-2026-04-17.md)
 
 ## Project To Repo Alignment
 
@@ -59,6 +92,18 @@ Production statuses:
 - `processing`
 - `answered`
 - `failed`
+
+Normalized delivery fields stored on commands:
+
+- `requestedExecutor`
+- `actualExecutor`
+- `fallbackCount`
+- `fallbackReason`
+- `firstAckAt`
+- `resultAt`
+- `replyMatched`
+- `replyMatchedBy`
+- `timeoutPhase`
 
 Legacy status:
 

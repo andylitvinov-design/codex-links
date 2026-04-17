@@ -17,7 +17,7 @@ const state = {
   audioUnlocked: false
 };
 
-const BUILD_VERSION = "20260418-0002";
+const BUILD_VERSION = "20260418-0215";
 const FAST_POLL_INTERVAL_MS = 3500;
 const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -220,6 +220,7 @@ const storage = {
 const refreshButton = document.querySelector("#refresh-button");
 const dispatchModeBridgeButton = document.querySelector("#dispatch-mode-bridge");
 const dispatchModeCloudButton = document.querySelector("#dispatch-mode-cloud");
+const projectNav = document.querySelector("#project-nav");
 const commandForm = document.querySelector("#command-form");
 const commandTargetLabel = document.querySelector("#command-target-label");
 const commandThreadSelect = document.querySelector("#command-thread-select");
@@ -425,11 +426,32 @@ function getMenuRepoById(repoId) {
   return state.menuRepos.find((repo) => normalizeRepoSelectionId(repo?.id) === normalized) || null;
 }
 
+function isCloudReadyRepo(repo) {
+  return Boolean(repo?.cloudReady) && Boolean(String(repo?.targetRepo || "").trim());
+}
+
 function formatMenuRepoLabel(repo) {
   const displayLabel = String(repo?.displayLabel || "").trim();
+  const label = String(repo?.label || "").trim();
   const nameWithOwner = String(repo?.nameWithOwner || "").trim();
   const name = String(repo?.name || "").trim();
-  return displayLabel || nameWithOwner || name;
+  return displayLabel || label || name || nameWithOwner;
+}
+
+function getProjectCategory(repo) {
+  return String(repo?.group || repo?.category || "").trim() || "other";
+}
+
+function getProjectStatusLabel(repo) {
+  return isCloudReadyRepo(repo) ? "cloud-ready" : "bridge-only";
+}
+
+function formatProjectPath(repo) {
+  if (!repo) {
+    return "";
+  }
+
+  return `${getProjectCategory(repo)} / ${formatMenuRepoLabel(repo)}`;
 }
 
 function compareBuildVersions(left, right) {
@@ -515,9 +537,9 @@ function getAllMenuOptions() {
       .map((repo) => {
         const id = normalizeRepoSelectionId(repo?.id);
         const repoId = normalizeRepoSelectionId(repo?.repoId || repo?.id);
-        const label = escapeThreadLabel(repo?.nameWithOwner || repo?.name || "").trim();
+        const label = escapeThreadLabel(repo?.label || repo?.displayLabel || repo?.name || repo?.id || "").trim();
         const displayLabel = formatMenuRepoLabel(repo);
-        const category = String(repo?.category || "").trim() || "Other";
+        const category = getProjectCategory(repo);
         const updatedAt = Number(new Date(repo?.updatedAt || 0)) || 0;
 
         if (!id || !repoId || !label || !displayLabel) {
@@ -530,7 +552,11 @@ function getAllMenuOptions() {
           label,
           displayLabel,
           category,
-          updatedAt
+          updatedAt,
+          cloudReady: isCloudReadyRepo(repo),
+          targetRepo: String(repo?.targetRepo || "").trim(),
+          workspacePath: String(repo?.workspacePath || "").trim(),
+          statusLabel: getProjectStatusLabel(repo)
         }];
       })
       .filter(Boolean)
@@ -603,9 +629,18 @@ function getThreadDisplayLabel(threadId, fallbackLabel = "") {
 function getAllCategories() {
   return [...new Set(
     state.menuRepos
-      .map((repo) => String(repo?.category || "").trim())
+      .map((repo) => getProjectCategory(repo))
       .filter(Boolean)
   )].sort((left, right) => left.localeCompare(right, "ru"));
+}
+
+function renderProjectNav() {
+  if (!projectNav) {
+    return;
+  }
+
+  const activeRepo = getMenuRepoById(getActiveThreadId()) || state.menuRepos[0] || null;
+  projectNav.dataset.status = activeRepo ? getProjectStatusLabel(activeRepo) : "";
 }
 
 function renderThreadCategories() {
@@ -618,7 +653,7 @@ function renderThreadCategories() {
   const totalRepos = getAllMenuOptions().length;
 
   threadCategoriesSummary.textContent = categories.length
-    ? `Категорий: ${categories.length} · репозиториев: ${totalRepos}`
+    ? `Групп: ${categories.length} · проектов: ${totalRepos}`
     : "Категории не найдены.";
 
   categories.forEach((category) => {
@@ -650,7 +685,7 @@ function renderThreadSettingsSummary() {
   }
 
   if (storage.showAllMessages) {
-    threadSettingsSummary.textContent = "Показываются все репозитории.";
+    threadSettingsSummary.textContent = "Показываются все проекты.";
     return;
   }
 
@@ -658,19 +693,19 @@ function renderThreadSettingsSummary() {
 
   if (state.activeThreadCategories.length) {
     if (!filteredOptions.length) {
-      threadSettingsSummary.textContent = "В выбранных категориях нет включённых репозиториев.";
+      threadSettingsSummary.textContent = "В выбранных группах нет включённых проектов.";
       return;
     }
 
-    threadSettingsSummary.textContent = `Категории: ${state.activeThreadCategories.join(", ")} · репозиториев в меню: ${filteredOptions.length}.`;
+    threadSettingsSummary.textContent = `Группы: ${state.activeThreadCategories.join(", ")} · проектов в меню: ${filteredOptions.length}.`;
     return;
   }
 
   const activeThreadId = getActiveThreadId();
   const activeRepo = getMenuRepoById(activeThreadId);
   threadSettingsSummary.textContent = activeRepo
-    ? `Выбран репозиторий: ${formatMenuRepoLabel(activeRepo)}.`
-    : "Выберите GitHub-репозиторий.";
+    ? `Выбран проект: ${formatProjectPath(activeRepo)} · ${getProjectStatusLabel(activeRepo)}.`
+    : "Выберите проект.";
 }
 
 function renderThreadSettingsList() {
@@ -729,13 +764,21 @@ function renderThreadSettingsList() {
         renderCommands();
         setCommandStatusMessage(
           checkbox.checked
-            ? `Репозиторий добавлен в меню: ${option.displayLabel}.`
-            : `Репозиторий убран из меню: ${option.displayLabel}.`
+            ? `Проект добавлен в меню: ${option.displayLabel}.`
+            : `Проект убран из меню: ${option.displayLabel}.`
         );
       });
 
       const text = document.createElement("span");
-      text.textContent = option.displayLabel;
+      text.className = "thread-settings-copy";
+      text.innerHTML = `
+        <strong>${escapeHtml(option.displayLabel)}</strong>
+        <span class="thread-settings-meta">
+          <span>${escapeHtml(category)}</span>
+          <span class="thread-status-badge" data-status="${escapeHtml(option.statusLabel)}">${escapeHtml(option.statusLabel)}</span>
+          ${option.targetRepo ? `<code>${escapeHtml(option.targetRepo)}</code>` : ""}
+        </span>
+      `;
 
       row.append(checkbox, text);
       section.appendChild(row);
@@ -794,6 +837,8 @@ function formatProgressStage(progressStage, status) {
   const stage = String(progressStage || "").trim();
   const mapped = {
     "sending-to-slack": "Готовлю отправку в Slack",
+    "switched-to-bridge": "Переведено на bridge",
+    "switched-to-cloud": "Переведено в Codex Cloud",
     "sent-to-slack": "Команда отправлена в Slack",
     "slack-dispatch-failed": "Slack dispatch не удался",
     "fallback-to-bridge": "Переведено на bridge",
@@ -850,6 +895,46 @@ function parseCommandErrorDetails(command) {
   }
 }
 
+function getCommandDiagnosticMessage(command) {
+  const fallbackReason = String(command?.fallbackReason || "").trim().toLowerCase();
+  const timeoutPhase = String(command?.timeoutPhase || "").trim().toLowerCase();
+  const diagnosticCode = String(command?.lastDiagnosticCode || "").trim().toLowerCase();
+
+  if (diagnosticCode === "slack_webhook_unauthorized") {
+    return "Slack webhook отклонён: подпись запроса не прошла проверку.";
+  }
+
+  if (diagnosticCode === "slack_reply_unmatched" || fallbackReason === "reply arrived but command not matched") {
+    return "Reply от Codex пришёл, но не сматчился с командой.";
+  }
+
+  if (diagnosticCode === "slack_reply_unthreaded" || fallbackReason === "reply arrived but not threaded") {
+    return "Reply от Codex пришёл вне thread.";
+  }
+
+  if (fallbackReason === "codex cloud did not acknowledge in time" || timeoutPhase === "first-ack-timeout") {
+    return "Codex Cloud не подтвердил задачу вовремя.";
+  }
+
+  if (fallbackReason === "timeout exceeded before first progress reply" || timeoutPhase === "first-reply-timeout") {
+    return "Codex Cloud не прислал первый reply вовремя.";
+  }
+
+  if (fallbackReason === "codex did not respond" || timeoutPhase === "processing-timeout" || timeoutPhase === "result-timeout") {
+    return "Codex Cloud перестал отвечать в Slack thread.";
+  }
+
+  if (fallbackReason === "local bridge did not claim the command in time" || timeoutPhase === "claim-timeout") {
+    return "Bridge не забрал сообщение из очереди вовремя.";
+  }
+
+  if (fallbackReason === "local bridge stopped heartbeating") {
+    return "Bridge перестал heartbeat’ить во время обработки.";
+  }
+
+  return "";
+}
+
 function formatCommandStage(command) {
   if (hasAssistantReply(command?.id, command)) {
     const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
@@ -862,64 +947,115 @@ function formatCommandStage(command) {
   return relative ? `${label} · ${relative}` : label;
 }
 
+function getCommandRequestedExecutor(command) {
+  const value = String(command?.requestedExecutor || command?.requestedMode || command?.targetExecutionMode || "").trim().toLowerCase();
+  return value === "cloud" ? "cloud" : "bridge";
+}
+
+function getCommandActualExecutor(command) {
+  const value = String(command?.actualExecutor || command?.actualDispatchMode || "").trim().toLowerCase();
+
+  if (value === "cloud" || value === "bridge") {
+    return value;
+  }
+
+  return String(command?.dispatchMode || "").trim() === "local-bridge" ? "bridge" : "cloud";
+}
+
+function getCommandLifecycleState(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
+  const stage = String(command?.progressStage || "").trim().toLowerCase();
+
+  if (status === "failed") {
+    return "failed";
+  }
+
+  if (status === "answered" || status === "acked" || hasAssistantReply(command?.id, command)) {
+    return "done";
+  }
+
+  if (stage === "switched-to-bridge") {
+    return "switched-to-bridge";
+  }
+
+  if (stage === "switched-to-cloud") {
+    return "switched-to-cloud";
+  }
+
+  if (status === "dispatched" || stage === "sent-to-slack") {
+    return "sent";
+  }
+
+  if (status === "processing" || status === "queued") {
+    return "processing";
+  }
+
+  return "processing";
+}
+
 function getCommandDeliveryStatus(command) {
   if (hasAssistantReply(command?.id, command)) {
     return null;
   }
 
-  const status = String(command?.status || "").trim().toLowerCase();
-  const stage = String(command?.progressStage || "").trim().toLowerCase();
+  const lifecycleState = getCommandLifecycleState(command);
   const errorMessage = String(command?.errorMessage || "").trim();
   const errorDetails = parseCommandErrorDetails(command);
+  const deliveryLabel = getCommandActualExecutor(command);
+  const diagnosticMessage = getCommandDiagnosticMessage(command);
 
-  if (status === "failed") {
+  const withDeliveryLabel = (text) => {
+    const normalized = String(text || "").trim();
+
+    if (!normalized) {
+      return "";
+    }
+
+    return `${normalized} · ${deliveryLabel}`;
+  };
+
+  if (lifecycleState === "failed") {
     return {
       tone: "error",
-      text: getCommandFailureMessage(command)
+      text: withDeliveryLabel(diagnosticMessage || getCommandFailureMessage(command))
     };
   }
 
-  const stageTextByKey = {
-    queued: "В очереди на отправку",
-    claimed: "Команда принята в работу",
-    "preparing-input": "Подготавливаю сообщение",
-    "sending-to-codex": "Отправляю в Codex",
-    dispatched: "Отправляю в Codex",
-    processing: "Codex обрабатывает запрос",
-    "waiting-for-codex": "Жду ответ Codex",
-    "reading-codex-reply": "Читаю ответ Codex",
-    "saving-reply": "Сохраняю ответ",
-    answered: "Ответ сохранён",
-    acked: "Ответ сохранён"
+  const transportTextByKey = {
+    sent: "Отправлено",
+    processing: "Обрабатывается",
+    "switched-to-bridge": "Переведено на bridge",
+    "switched-to-cloud": "Переведено в Codex Cloud",
+    done: "Ответ сохранён"
   };
 
-  const text = stageTextByKey[stage] || stageTextByKey[status] || "";
+  const text = transportTextByKey[lifecycleState] || "";
 
   if (!text) {
     return null;
   }
 
-  if (status === "answered" || status === "acked" || stage === "answered" || stage === "acked") {
+  if (lifecycleState === "done") {
     return null;
   }
 
   if (errorDetails?.code === "fallback_to_bridge" || /automatically switched to local bridge/i.test(errorMessage)) {
     return {
       tone: "queued",
-      text: errorDetails?.message || "Cloud не ответил вовремя. Автоматически перевёл задачу на bridge."
+      text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || "Cloud не ответил вовремя. Автоматически перевёл задачу на bridge.")
     };
   }
 
   if (errorDetails?.code === "fallback_to_cloud" || /automatically switched to codex cloud/i.test(errorMessage)) {
     return {
       tone: "queued",
-      text: errorDetails?.message || "Bridge задержался. Автоматически перевёл задачу в Codex Cloud."
+      text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || "Bridge задержался. Автоматически перевёл задачу в Codex Cloud.")
     };
   }
 
   return {
     tone: errorDetails ? "error" : "delivery",
-    text: errorDetails?.message || text
+    text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || text)
   };
 }
 
@@ -935,12 +1071,11 @@ function getVisibleTimelineCommands() {
 
 function syncCommandStatusFromState() {
   const activeCommand = getVisibleTimelineCommands().find((command) => {
-    const status = String(command?.status || "").trim().toLowerCase();
     if (hasAssistantReply(command?.id, command)) {
       return false;
     }
 
-    return status === "queued" || status === "dispatched" || status === "processing";
+    return ["sent", "processing", "switched-to-bridge", "switched-to-cloud"].includes(getCommandLifecycleState(command));
   });
 
   if (!activeCommand) {
@@ -949,19 +1084,60 @@ function syncCommandStatusFromState() {
     return;
   }
 
-  const status = String(activeCommand?.status || "").trim().toLowerCase();
-  const isProcessing = status === "processing" || status === "dispatched";
+  const lifecycleState = getCommandLifecycleState(activeCommand);
+  const isProcessing = ["sent", "processing", "switched-to-bridge", "switched-to-cloud"].includes(lifecycleState);
   const tone = isProcessing ? "processing" : "queued";
-  const message = isProcessing
-    ? "Обработка…"
-    : "Сообщение в очереди…";
+  const deliveryLabel = getCommandActualExecutor(activeCommand);
+  const message = lifecycleState === "sent"
+    ? `Отправлено через ${deliveryLabel}…`
+    : lifecycleState === "switched-to-bridge"
+      ? "Перевёл задачу на bridge…"
+      : lifecycleState === "switched-to-cloud"
+        ? "Перевёл задачу в Codex Cloud…"
+        : isProcessing
+          ? `Обработка через ${deliveryLabel}…`
+          : `Сообщение в очереди (${deliveryLabel})…`;
 
   setCommandStatusMessage(message, { tone });
   setSubmitProgress(isProcessing ? "processing" : "queued", tone);
 }
 
 function getCommandDeliveryLabel(command) {
-  return String(command?.dispatchMode || "").trim() === "local-bridge" ? "bridge" : "cloud";
+  return getCommandActualExecutor(command);
+}
+
+function getCommandProjectPath(command) {
+  const projectCategory = String(command?.projectCategory || "").trim();
+  const projectLabel = String(command?.projectLabel || command?.threadLabel || "").trim();
+
+  if (projectCategory && projectLabel) {
+    return `${projectCategory} / ${projectLabel}`;
+  }
+
+  return projectLabel;
+}
+
+function renderCommandContextMarkup(command) {
+  if (!command) {
+    return "";
+  }
+
+  const projectPath = getCommandProjectPath(command);
+  const targetRepo = String(command?.targetRepo || "").trim();
+  const statusLabel = targetRepo ? "cloud-ready" : "bridge-only";
+  const requestedExecutor = getCommandRequestedExecutor(command);
+  const actualExecutor = getCommandActualExecutor(command);
+  const fallbackReason = String(command?.fallbackReason || "").trim();
+  const parts = [
+    projectPath ? `<span>${escapeHtml(projectPath)}</span>` : "",
+    `<span class="command-context-badge" data-status="${escapeHtml(statusLabel)}">${escapeHtml(statusLabel)}</span>`,
+    targetRepo ? `<code>${escapeHtml(targetRepo)}</code>` : "",
+    `<span>requested: ${escapeHtml(requestedExecutor)}</span>`,
+    `<span>actual: ${escapeHtml(actualExecutor)}</span>`,
+    fallbackReason ? `<span>fallback: ${escapeHtml(fallbackReason)}</span>` : ""
+  ].filter(Boolean);
+
+  return parts.length ? `<div class="command-context">${parts.join("")}</div>` : "";
 }
 
 function getCommandFailureMessage(command) {
@@ -971,6 +1147,11 @@ function getCommandFailureMessage(command) {
 
   const message = String(command?.errorMessage || "").trim();
   const details = parseCommandErrorDetails(command);
+  const diagnosticMessage = getCommandDiagnosticMessage(command);
+
+  if (diagnosticMessage) {
+    return diagnosticMessage;
+  }
 
   if (details?.message) {
     return details.detail ? `${details.message} ${details.detail}`.trim() : details.message;
@@ -1000,8 +1181,12 @@ function getCommandFailureMessage(command) {
     return "Bridge задержался, задача переведена в Codex Cloud.";
   }
 
+  if (/slack photo upload failed/i.test(message)) {
+    return "Cloud не смог загрузить фото в Slack thread, задача переведена на bridge.";
+  }
+
   if (/photo attachments yet/i.test(message)) {
-    return "Cloud пока не поддерживает фото. Для изображения используйте bridge.";
+    return "Cloud пока не пересылал фото и задача была переведена на bridge.";
   }
 
   return message;
@@ -1021,7 +1206,14 @@ function buildTimelineSignature(items, context = {}) {
       threadLabel: entry.threadLabel,
       status: entry.status || "",
       progressStage: entry.progressStage || "",
+      projectCategory: entry.command?.projectCategory || entry.linkedCommand?.projectCategory || "",
+      projectLabel: entry.command?.projectLabel || entry.linkedCommand?.projectLabel || "",
+      targetRepo: entry.command?.targetRepo || entry.linkedCommand?.targetRepo || "",
       commandError: entry.command?.errorMessage || "",
+      requestedExecutor: entry.command?.requestedExecutor || "",
+      actualExecutor: entry.command?.actualExecutor || "",
+      fallbackReason: entry.command?.fallbackReason || "",
+      fallbackCount: entry.command?.fallbackCount || 0,
       commandPrUrl: entry.command?.prUrl || "",
       commandBranch: entry.command?.branchName || "",
       linkedCommandId: entry.linkedCommand?.id || entry.message?.commandId || "",
@@ -1084,6 +1276,56 @@ async function parseJsonResponse(response) {
   }
 }
 
+function canRetryCommand(command) {
+  return Boolean(String(command?.text || "").trim()) && !command?.photo;
+}
+
+function buildRetryPayload(command, executor) {
+  return {
+    clientId: storage.clientId,
+    threadId: String(command?.threadId || "").trim(),
+    threadLabel: String(command?.threadLabel || "").trim(),
+    text: String(command?.text || "").trim(),
+    dispatchMode: executor === "cloud" ? "slack-codex-cloud" : "local-bridge",
+    targetExecutionMode: executor,
+    targetRepo: String(command?.targetRepo || "").trim(),
+    targetRepoUrl: String(command?.targetRepoUrl || "").trim(),
+    targetContextFiles: Array.isArray(command?.targetContextFiles) ? command.targetContextFiles : [],
+    targetWorkspacePath: String(command?.targetWorkspacePath || "").trim(),
+    projectId: String(command?.projectId || "").trim(),
+    projectLabel: String(command?.projectLabel || "").trim(),
+    projectCategory: String(command?.projectCategory || "").trim(),
+    fallbackThreadId: String(command?.fallbackThreadId || "").trim(),
+    fallbackThreadLabel: String(command?.fallbackThreadLabel || "").trim()
+  };
+}
+
+async function retryCommandWithExecutor(commandId, executor) {
+  const command = state.commands.find((entry) => String(entry?.id || "").trim() === String(commandId || "").trim());
+
+  if (!command || !canRetryCommand(command)) {
+    setCommandStatusMessage("Эту команду нельзя повторить автоматически.", { tone: "error" });
+    return;
+  }
+
+  setCommandStatusMessage(`Повторяю через ${executor}…`, { tone: "processing" });
+  const response = await fetch("/api/commands", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json"
+    },
+    body: JSON.stringify(buildRetryPayload(command, executor))
+  });
+  const result = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(String(result?.error || "").trim() || `Не удалось повторить сообщение (HTTP ${response.status}).`);
+  }
+
+  await refreshAll();
+}
+
 function hasAssistantReply(commandId, command = null) {
   const normalizedId = String(commandId || "").trim();
   const directReplyExists = normalizedId
@@ -1104,6 +1346,55 @@ function hasAssistantReply(commandId, command = null) {
 function toTimestamp(value) {
   const timestamp = Date.parse(String(value || "").trim());
   return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function isTerminalAssistantReplyText(text) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return false;
+  }
+
+  if (/\b(error|failed|failure|unable|blocked|need access|permission denied|could not|can'?t complete)\b/i.test(value)) {
+    return true;
+  }
+
+  if (
+    /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/i.test(value)
+    || /\b(pr ready|pull request|opened pr|created pr|implemented|completed|finished|done|готово|исправил|сделал)\b/i.test(value)
+  ) {
+    return true;
+  }
+
+  return !/\b(checking|investigating|looking into|working on|reading|starting|preparing|waiting|running|processing|analyzing|analysing|searching|syncing|opening|reviewing|triaging|debugging|retrying|dispatching|queue(?:d)?|queued|in progress|wip|thinking)\b/i.test(value)
+    && !/(проверяю|смотрю|изучаю|читаю|готовлю|запускаю|жду|обрабатываю|анализирую|ищу|синхронизирую|открываю|разбираю|дебажу|повторяю|в очереди|в работе|работаю)/i.test(value);
+}
+
+function collapseAssistantReplies(replies) {
+  const normalizedReplies = Array.isArray(replies) ? replies : [];
+
+  if (!normalizedReplies.length) {
+    return [];
+  }
+
+  const latestBySignature = new Map();
+  normalizedReplies.forEach((reply) => {
+    const text = String(reply?.text || "").trim();
+    const prUrl = String(reply?.linkedCommand?.prUrl || "").trim();
+    const branchName = String(reply?.linkedCommand?.branchName || "").trim();
+    const signature = `${text.toLowerCase()}::${prUrl}::${branchName}`;
+    const existing = latestBySignature.get(signature);
+
+    if (!existing || toTimestamp(reply?.createdAt) >= toTimestamp(existing?.createdAt)) {
+      latestBySignature.set(signature, reply);
+    }
+  });
+
+  const uniqueReplies = [...latestBySignature.values()]
+    .sort((left, right) => toTimestamp(right?.createdAt) - toTimestamp(left?.createdAt));
+  const terminalReply = uniqueReplies.find((reply) => isTerminalAssistantReplyText(reply?.text || ""));
+
+  return terminalReply ? [terminalReply] : uniqueReplies.slice(0, 1);
 }
 
 function getInferredAssistantReplies(command, visibleMessages, visibleCommands) {
@@ -1158,11 +1449,47 @@ function normalizeEntryText(entry) {
   return String(entry?.text || "").trim().toLowerCase();
 }
 
+function isHiddenJunkFeedText(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  const allowedTokens = new Set(["photo", "repro", "ignore", "test", "probe"]);
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^(?:photo|repro|ignore)(?:\s+(?:photo|repro|ignore))*$/i.test(normalized)) {
+    return true;
+  }
+
+  const tokens = normalized
+    .replace(/[^a-z\s]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  return tokens.length > 0
+    && tokens.length <= 6
+    && tokens.every((token) => allowedTokens.has(token))
+    && tokens.includes("ignore")
+    && (tokens.includes("photo") || tokens.includes("repro"));
+}
+
 function isTechnicalProbeEntry(entry) {
   const text = normalizeEntryText(entry);
+  const isProductionVerificationProbe = text.includes("production")
+    && (
+      text.includes("verification")
+      || text.includes("route check")
+      || text.includes(" ping")
+    )
+    && (
+      text.includes("ignore if seen")
+      || text.includes("reply with ok only")
+    );
 
   return (
-    text.includes("delivery-probe")
+    isHiddenJunkFeedText(text)
+    || isProductionVerificationProbe
+    || text.includes("delivery-probe")
     || text.includes("local bridge probe")
     || text.includes("probe reply with ok only")
     || text.includes("dedupe test ignore")
@@ -1202,6 +1529,12 @@ function isNotificationEntry(entry) {
   return text.includes("cloud dispatch недоступен. команда автоматически переведена на локальный bridge.");
 }
 
+function isCodexDialogMessage(entry) {
+  return entry?.role === "assistant"
+    && !isHiddenSystemEntry(entry)
+    && !isNotificationEntry(entry);
+}
+
 function getReleaseNotificationEntry() {
   return {
     id: `release:${BUILD_VERSION}`,
@@ -1227,6 +1560,7 @@ function renderAssistantReplyMarkup(replyEntry) {
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
   const deliveryLabel = getCommandDeliveryLabel(linkedCommand);
+  const contextMeta = renderCommandContextMarkup(linkedCommand);
   const commandMeta = linkedCommand?.branchName
     ? `<p class="command-answer-meta">Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
     : "";
@@ -1241,6 +1575,7 @@ function renderAssistantReplyMarkup(replyEntry) {
         <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
       </summary>
       <div class="command-answer-body">
+        ${contextMeta}
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
         ${prMeta}
         ${commandMeta}
@@ -1302,6 +1637,17 @@ function bindAssistantReplyInteractions(container, replies) {
       setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, reply?.threadLabel || "")}`);
     });
   });
+
+  container.querySelectorAll(".command-retry-link").forEach((button) => {
+    button.addEventListener("click", () => {
+      const commandId = String(button.dataset.commandId || "").trim();
+      const executor = String(button.dataset.executor || "").trim() === "cloud" ? "cloud" : "bridge";
+
+      retryCommandWithExecutor(commandId, executor).catch((error) => {
+        setCommandStatusMessage(String(error?.message || "Не удалось повторить сообщение."), { tone: "error" });
+      });
+    });
+  });
 }
 
 function renderCommands() {
@@ -1348,7 +1694,7 @@ function renderCommands() {
       };
       const items = assistantRepliesByCommandId.get(commandId) || [];
       items.push(entry);
-      assistantRepliesByCommandId.set(commandId, items);
+      assistantRepliesByCommandId.set(commandId, collapseAssistantReplies(items));
     });
 
   visibleCommands.forEach((command) => {
@@ -1361,7 +1707,7 @@ function renderCommands() {
     const inferredReplies = getInferredAssistantReplies(command, visibleMessages, visibleCommands);
 
     if (inferredReplies.length) {
-      assistantRepliesByCommandId.set(commandId, inferredReplies);
+      assistantRepliesByCommandId.set(commandId, collapseAssistantReplies(inferredReplies));
     }
   });
 
@@ -1471,19 +1817,33 @@ function renderCommands() {
       const command = entry.command;
       const failureMessage = getCommandFailureMessage(command);
       const deliveryStatus = getCommandDeliveryStatus(command);
+      const contextMarkup = renderCommandContextMarkup(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
+      const showRetryActions = canRetryCommand(command);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
+      const retryActionsMarkup = showRetryActions ? `
+        <div class="command-answer-actions">
+          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="bridge">
+            Повторить через bridge
+          </button>
+          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="cloud">
+            Повторить через cloud
+          </button>
+        </div>
+      ` : "";
 
       element.innerHTML = `
         <div class="command-item-top">
           <strong>Вы</strong>
           <time>${formatDate(entry.createdAt)}</time>
         </div>
+        ${contextMarkup}
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
         ${failureMessage ? "" : ""}
         ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
+        ${retryActionsMarkup}
         ${repliesMarkup}
         <div class="command-item-top">
           <span>${formatCommandStage(command)}</span>
@@ -1501,9 +1861,10 @@ function renderCommands() {
     const statusLabel = isAssistant
       ? (linkedCommand?.prUrl ? "PR готов" : "Ответ получен")
       : "Сообщение в истории";
+    const contextMarkup = renderCommandContextMarkup(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
-      : `<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
+      : `${contextMarkup}<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
 
     element.innerHTML = `
       <div class="command-item-top">
@@ -1673,9 +2034,10 @@ function renderDispatchModeUi() {
   dispatchModeCloudButton?.setAttribute("aria-selected", String(isCloud));
 
   if (commandTargetLabel) {
-    commandTargetLabel.textContent = "Репозиторий GitHub";
+    commandTargetLabel.textContent = "Проект";
   }
 
+  renderProjectNav();
   renderThreadCategories();
   renderThreadSettingsSummary();
   renderThreadSettingsList();
@@ -1684,8 +2046,10 @@ function renderDispatchModeUi() {
   if (!hasPendingCommand && !hasActiveStatus) {
     setCommandStatusMessage(
       activeRepo
-        ? `Репозиторий: ${activeRepo.nameWithOwner} · отправка через ${isCloud ? "cloud" : "bridge"}.`
-        : "Выберите GitHub-репозиторий."
+        ? isCloud && !isCloudReadyRepo(activeRepo)
+          ? `Проект: ${formatProjectPath(activeRepo)} · bridge-only, manifest GitHub repo ещё не подтверждён.`
+          : `Проект: ${formatProjectPath(activeRepo)} · ${getProjectStatusLabel(activeRepo)} · отправка через ${isCloud ? "cloud" : "bridge"}.`
+        : "Выберите проект."
     );
   }
 }
@@ -1708,7 +2072,7 @@ function renderCommandThreads() {
   if (!nextOptions.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "GitHub-репозитории не найдены";
+    option.textContent = "Проекты не найдены";
     commandThreadSelect.appendChild(option);
     commandThreadSelect.disabled = true;
     storage.selectedRepoId = "";
@@ -1726,7 +2090,7 @@ function renderCommandThreads() {
     items.forEach((option) => {
       const element = document.createElement("option");
       element.value = option.id;
-      element.textContent = option.displayLabel;
+      element.textContent = `${option.displayLabel} · ${option.statusLabel}`;
       group.appendChild(element);
     });
 
@@ -1816,19 +2180,28 @@ async function fetchMessages() {
   }
 
   const data = await response.json();
-  const previousAssistantIds = new Set(
+  const previousCodexReplyIds = new Set(
     state.messages
-      .filter((message) => message?.role === "assistant")
+      .filter((message) => isCodexDialogMessage(message))
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean)
+  );
+  const previousNotificationIds = new Set(
+    state.messages
+      .filter((message) => isNotificationEntry(message))
       .map((message) => String(message.id || "").trim())
       .filter(Boolean)
   );
   state.messages = Array.isArray(data?.messages) ? data.messages : [];
 
-  const hasNewAssistantReply = state.hasLoadedMessagesOnce && state.messages.some((message) => (
-    message?.role === "assistant" && !previousAssistantIds.has(String(message.id || "").trim())
+  const hasNewCodexReply = state.hasLoadedMessagesOnce && state.messages.some((message) => (
+    isCodexDialogMessage(message) && !previousCodexReplyIds.has(String(message.id || "").trim())
+  ));
+  const hasNewNotification = state.hasLoadedMessagesOnce && state.messages.some((message) => (
+    isNotificationEntry(message) && !previousNotificationIds.has(String(message.id || "").trim())
   ));
 
-  if (hasNewAssistantReply) {
+  if (hasNewCodexReply || hasNewNotification) {
     playReplySound();
   }
 
@@ -1895,10 +2268,9 @@ async function submitCommand(event) {
   const fallbackThreadLabel = activeRepo ? formatMenuRepoLabel(activeRepo) : getThreadDisplayLabel(fallbackThreadId, "");
   const photoFile = commandPhotoInput?.files?.[0];
   const requestedCloudMode = requestedDispatchMode === "cloud";
-  const forceBridgeForPhoto = requestedDispatchMode === "cloud" && Boolean(photoFile);
-  const dispatchMode = forceBridgeForPhoto ? "bridge" : requestedDispatchMode;
+  const dispatchMode = requestedDispatchMode;
   const threadId = requestedThreadId;
-  const threadLabel = activeRepo?.nameWithOwner || fallbackThreadLabel;
+  const threadLabel = activeRepo?.label || fallbackThreadLabel;
 
   if (!text && !photoFile) {
     setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
@@ -1906,15 +2278,26 @@ async function submitCommand(event) {
   }
 
   if (!activeRepo) {
-    setCommandStatusMessage("Сначала выберите GitHub-репозиторий.", { tone: "error" });
+    setCommandStatusMessage("Сначала выберите проект.", { tone: "error" });
     return;
   }
 
-  if (forceBridgeForPhoto) {
-    setCommandStatusMessage("Cloud пока не поддерживает фото. Отправляю это сообщение через bridge.", { tone: "processing" });
-  } else {
-    setCommandStatusMessage("Отправляю сообщение…");
+  if (requestedCloudMode && !isCloudReadyRepo(activeRepo)) {
+    setCommandStatusMessage(`Проект ${formatProjectPath(activeRepo)} сейчас bridge-only. Cloud недоступен без manifest-backed GitHub repo.`, { tone: "error" });
+    return;
   }
+
+  if (requestedCloudMode && photoFile) {
+    setPhotoStatusMessage("Фото отправлю через Cloud в Slack thread.");
+  }
+
+  setCommandStatusMessage(
+    requestedCloudMode && photoFile
+      ? "Отправляю фото через cloud в Slack thread…"
+      : dispatchMode === "cloud"
+        ? "Отправляю через cloud…"
+        : "Отправляю через bridge…"
+  );
   setSubmitProgress("queued", "queued");
 
   const payload = {
@@ -1926,9 +2309,13 @@ async function submitCommand(event) {
     targetExecutionMode: dispatchMode
   };
 
-  payload.targetRepo = activeRepo.nameWithOwner;
-  payload.targetRepoUrl = activeRepo.url;
+  payload.targetRepo = String(activeRepo.targetRepo || "").trim();
+  payload.targetRepoUrl = String(activeRepo.targetRepoUrl || "").trim();
   payload.targetContextFiles = Array.isArray(activeRepo.contextFiles) ? activeRepo.contextFiles : [];
+  payload.targetWorkspacePath = String(activeRepo.workspacePath || "").trim();
+  payload.projectId = String(activeRepo.id || "").trim();
+  payload.projectLabel = String(activeRepo.label || "").trim();
+  payload.projectCategory = getProjectCategory(activeRepo);
 
   if (fallbackThreadId) {
     payload.fallbackThreadId = fallbackThreadId;
@@ -1936,11 +2323,7 @@ async function submitCommand(event) {
   }
 
   if (photoFile) {
-    setPhotoStatusMessage(
-      forceBridgeForPhoto
-        ? "Подготавливаю фото и отправляю через bridge…"
-        : "Подготавливаю фото для отправки…"
-    );
+    setPhotoStatusMessage("Подготавливаю фото для отправки…");
     payload.photo = await preparePhotoPayload(photoFile);
   }
 
@@ -1964,7 +2347,14 @@ async function submitCommand(event) {
   clearSelectedPhoto();
 
   setSubmitProgress("processing", "processing");
-  setCommandStatusMessage(dispatchMode === "cloud" ? "Команда отправлена в Slack…" : "Обработка…", { tone: "processing" });
+  setCommandStatusMessage(
+    requestedCloudMode && photoFile
+      ? "Фото отправлено в Slack thread, жду Codex Cloud…"
+      : dispatchMode === "cloud"
+      ? "Отправлено в Slack, жду Codex Cloud…"
+      : "Обработка через bridge…",
+    { tone: "processing" }
+  );
   await refreshAll();
 }
 
@@ -2003,6 +2393,16 @@ function bindEvents() {
   });
 
   dispatchModeCloudButton?.addEventListener("click", () => {
+    const activeRepo = getMenuRepoById(storage.selectedRepoId) || state.menuRepos[0] || null;
+
+    if (activeRepo && !isCloudReadyRepo(activeRepo)) {
+      state.dispatchMode = "bridge";
+      storage.dispatchModePreference = "bridge";
+      renderDispatchModeUi();
+      setCommandStatusMessage(`Проект ${formatProjectPath(activeRepo)} сейчас bridge-only. Cloud недоступен без manifest-backed GitHub repo.`, { tone: "error" });
+      return;
+    }
+
     state.dispatchMode = "cloud";
     storage.dispatchModePreference = "cloud";
     renderDispatchModeUi();
@@ -2025,6 +2425,16 @@ function bindEvents() {
 
   commandThreadSelect?.addEventListener("change", () => {
     storage.selectedRepoId = normalizeRepoSelectionId(commandThreadSelect.value);
+
+    const activeRepo = getMenuRepoById(storage.selectedRepoId);
+
+    if (state.dispatchMode === "cloud" && activeRepo && !isCloudReadyRepo(activeRepo)) {
+      state.dispatchMode = "bridge";
+      storage.dispatchModePreference = "bridge";
+      setCommandStatusMessage(`Проект ${formatProjectPath(activeRepo)} bridge-only. Переключаю на bridge.`, { tone: "error" });
+    }
+
+    renderDispatchModeUi();
     renderThreadSettingsSummary();
     renderCommands();
   });

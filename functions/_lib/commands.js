@@ -9,11 +9,17 @@ import { parseCommandError, stringifyCommandError } from "./command-debug.js";
 
 const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
-const STALE_LOCAL_QUEUE_MS = 20 * 1000;
-const STALE_SLACK_DISPATCH_MS = 5 * 60 * 1000;
-const STALE_SLACK_SILENT_MS = 45 * 1000;
-const STALE_SLACK_PROCESSING_MS = 90 * 1000;
-const STALE_LOCAL_PROCESSING_MS = 45 * 1000;
+const CLOUD_FIRST_ACK_TIMEOUT_MS = 30 * 1000;
+const CLOUD_RESULT_TIMEOUT_MS = 180 * 1000;
+const BRIDGE_CLAIM_TIMEOUT_MS = 15 * 1000;
+const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
+
+export const COMMAND_TIMEOUTS = {
+  cloudFirstAckMs: CLOUD_FIRST_ACK_TIMEOUT_MS,
+  cloudResultMs: CLOUD_RESULT_TIMEOUT_MS,
+  bridgeClaimMs: BRIDGE_CLAIM_TIMEOUT_MS,
+  bridgeResultMs: BRIDGE_RESULT_TIMEOUT_MS
+};
 
 function normalizeCommandStatus(rawStatus) {
   const status = String(rawStatus || "").trim().toLowerCase();
@@ -109,6 +115,10 @@ function normalizeUrlValue(rawValue) {
   return String(rawValue || "").trim().slice(0, 400);
 }
 
+function normalizeWorkspacePathValue(rawValue) {
+  return String(rawValue || "").trim().slice(0, 500);
+}
+
 function normalizeStringArray(rawValue, maxItems = 8, maxLength = 80) {
   return [...new Set(
     (Array.isArray(rawValue) ? rawValue : [])
@@ -129,6 +139,98 @@ function normalizeDateValue(rawValue) {
 
 function normalizeExecutionMode(rawValue) {
   return String(rawValue || "").trim().toLowerCase() === "cloud" ? "cloud" : "bridge";
+}
+
+function normalizeReplyMatchedBy(rawValue) {
+  const value = String(rawValue || "").trim().toLowerCase();
+
+  if (value === "thread" || value === "unthreaded-fallback" || value === "manual-sync") {
+    return value;
+  }
+
+  return "";
+}
+
+function dispatchModeToExecutionMode(rawValue) {
+  return normalizeDispatchValue(rawValue) === DISPATCH_MODE_SLACK ? "cloud" : "bridge";
+}
+
+function normalizeBooleanValue(rawValue, fallback = false) {
+  return typeof rawValue === "boolean" ? rawValue : fallback;
+}
+
+function normalizeDiagnosticText(rawValue, max = 240) {
+  return String(rawValue || "").trim().slice(0, max);
+}
+
+function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispatchMode || command?.dispatchMode) {
+  const actualDispatchMode = dispatchModeToExecutionMode(dispatchMode);
+  const requestedExecutor = normalizeExecutionMode(
+    input.requestedExecutor
+      || input.requestedMode
+      || command?.requestedExecutor
+      || command?.requestedMode
+      || command?.targetExecutionMode
+  );
+  const actualExecutor = normalizeExecutionMode(
+    input.actualExecutor
+      || input.actualDispatchMode
+      || command?.actualExecutor
+      || command?.actualDispatchMode
+      || actualDispatchMode
+  );
+  const replyMatched = normalizeBooleanValue(
+    Object.prototype.hasOwnProperty.call(input, "replyMatched") ? input.replyMatched : input.slackReplyMatched,
+    Boolean(command?.replyMatched ?? command?.slackReplyMatched)
+  );
+  const fallbackCount = Math.max(
+    0,
+    Math.min(
+      1,
+      Number.isFinite(Number(input.fallbackCount))
+        ? Number(input.fallbackCount)
+        : Number(command?.fallbackCount || 0)
+    )
+  );
+
+  return {
+    requestedExecutor,
+    requestedMode: requestedExecutor,
+    actualExecutor,
+    actualDispatchMode: actualExecutor,
+    slackDispatchAttempted: normalizeBooleanValue(input.slackDispatchAttempted, Boolean(command?.slackDispatchAttempted)),
+    slackDispatchSucceeded: normalizeBooleanValue(input.slackDispatchSucceeded, Boolean(command?.slackDispatchSucceeded)),
+    slackReplyReceived: normalizeBooleanValue(input.slackReplyReceived, Boolean(command?.slackReplyReceived)),
+    slackReplyThreaded: normalizeBooleanValue(input.slackReplyThreaded, Boolean(command?.slackReplyThreaded)),
+    replyMatched,
+    slackReplyMatched: replyMatched,
+    replyMatchedBy: normalizeReplyMatchedBy(
+      Object.prototype.hasOwnProperty.call(input, "replyMatchedBy") ? input.replyMatchedBy : command?.replyMatchedBy
+    ),
+    fallbackCount,
+    timeoutPhase: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command?.timeoutPhase,
+      80
+    ),
+    fallbackApplied: normalizeBooleanValue(input.fallbackApplied, Boolean(command?.fallbackApplied)),
+    fallbackReason: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "fallbackReason") ? input.fallbackReason : command?.fallbackReason
+    ),
+    lastDiagnosticCode: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "lastDiagnosticCode") ? input.lastDiagnosticCode : command?.lastDiagnosticCode,
+      80
+    ),
+    lastDiagnosticDetail: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "lastDiagnosticDetail") ? input.lastDiagnosticDetail : command?.lastDiagnosticDetail,
+      500
+    ),
+    firstAckAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "firstAckAt") ? input.firstAckAt : command?.firstAckAt
+    ),
+    resultAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "resultAt") ? input.resultAt : command?.resultAt
+    )
+  };
 }
 
 function isOlderThan(value, maxAgeMs) {
@@ -295,6 +397,7 @@ function markCommandAcked(command, nowIso) {
     ...command,
     status: "acked",
     ackedAt: nowIso,
+    resultAt: command.resultAt || nowIso,
     progressStage: "acked",
     progressUpdatedAt: nowIso,
     processingStartedAt: "",
@@ -354,10 +457,33 @@ export function createCommandRecord(input) {
       progressUpdatedAt: new Date().toISOString(),
       source: "site",
       dispatchMode: normalizeDispatchValue(input.dispatchMode),
+      projectId: normalizeThreadId(input.projectId || input.threadId),
+      projectLabel: normalizeThreadLabel(input.projectLabel || input.threadLabel, input.threadId),
+      projectCategory: normalizeDiagnosticText(input.projectCategory, 120),
       targetRepo: normalizeRepoValue(input.targetRepo),
       targetRepoUrl: normalizeUrlValue(input.targetRepoUrl),
       targetContextFiles: normalizeStringArray(input.targetContextFiles),
+      targetWorkspacePath: normalizeWorkspacePathValue(input.targetWorkspacePath),
       targetExecutionMode: normalizeExecutionMode(input.targetExecutionMode),
+      requestedExecutor: normalizeExecutionMode(input.targetExecutionMode || input.dispatchMode),
+      requestedMode: normalizeExecutionMode(input.targetExecutionMode || input.dispatchMode),
+      actualExecutor: dispatchModeToExecutionMode(input.dispatchMode),
+      actualDispatchMode: dispatchModeToExecutionMode(input.dispatchMode),
+      slackDispatchAttempted: false,
+      slackDispatchSucceeded: false,
+      slackReplyReceived: false,
+      slackReplyThreaded: false,
+      replyMatched: false,
+      slackReplyMatched: false,
+      replyMatchedBy: "",
+      fallbackCount: 0,
+      timeoutPhase: "",
+      fallbackApplied: false,
+      fallbackReason: "",
+      lastDiagnosticCode: "",
+      lastDiagnosticDetail: "",
+      firstAckAt: "",
+      resultAt: "",
       slackChannelId: "",
       slackMessageTs: "",
       slackThreadTs: "",
@@ -385,10 +511,33 @@ export async function readCommands(env) {
       fallbackThreadId: normalizeFallbackThreadId(entry.fallbackThreadId),
       fallbackThreadLabel: normalizeFallbackThreadLabel(entry.fallbackThreadLabel, entry.fallbackThreadId),
       dispatchMode: normalizeDispatchValue(entry.dispatchMode),
+      projectId: normalizeThreadId(entry.projectId || entry.threadId),
+      projectLabel: normalizeThreadLabel(entry.projectLabel || entry.threadLabel, entry.threadId),
+      projectCategory: normalizeDiagnosticText(entry.projectCategory, 120),
       targetRepo: normalizeRepoValue(entry.targetRepo),
       targetRepoUrl: normalizeUrlValue(entry.targetRepoUrl),
       targetContextFiles: normalizeStringArray(entry.targetContextFiles),
+      targetWorkspacePath: normalizeWorkspacePathValue(entry.targetWorkspacePath),
       targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode),
+      requestedExecutor: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
+      requestedMode: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
+      actualExecutor: normalizeExecutionMode(entry.actualExecutor || entry.actualDispatchMode || dispatchModeToExecutionMode(entry.dispatchMode)),
+      actualDispatchMode: normalizeExecutionMode(entry.actualExecutor || entry.actualDispatchMode || dispatchModeToExecutionMode(entry.dispatchMode)),
+      slackDispatchAttempted: normalizeBooleanValue(entry.slackDispatchAttempted),
+      slackDispatchSucceeded: normalizeBooleanValue(entry.slackDispatchSucceeded),
+      slackReplyReceived: normalizeBooleanValue(entry.slackReplyReceived),
+      slackReplyThreaded: normalizeBooleanValue(entry.slackReplyThreaded),
+      replyMatched: normalizeBooleanValue(entry.replyMatched, normalizeBooleanValue(entry.slackReplyMatched)),
+      slackReplyMatched: normalizeBooleanValue(entry.replyMatched, normalizeBooleanValue(entry.slackReplyMatched)),
+      replyMatchedBy: normalizeReplyMatchedBy(entry.replyMatchedBy),
+      fallbackCount: Math.max(0, Math.min(1, Number(entry.fallbackCount || 0))),
+      timeoutPhase: normalizeDiagnosticText(entry.timeoutPhase, 80),
+      fallbackApplied: normalizeBooleanValue(entry.fallbackApplied),
+      fallbackReason: normalizeDiagnosticText(entry.fallbackReason),
+      lastDiagnosticCode: normalizeDiagnosticText(entry.lastDiagnosticCode, 80),
+      lastDiagnosticDetail: normalizeDiagnosticText(entry.lastDiagnosticDetail, 500),
+      firstAckAt: normalizeDateValue(entry.firstAckAt),
+      resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
       slackChannelId: normalizeSlackValue(entry.slackChannelId),
       slackMessageTs: normalizeSlackValue(entry.slackMessageTs),
       slackThreadTs: normalizeSlackValue(entry.slackThreadTs),
@@ -587,6 +736,9 @@ export async function claimNextCommand(env, input = {}) {
     status: "processing",
     progressStage: "claimed",
     progressUpdatedAt: nowIso,
+    firstAckAt: next[nextIndex].firstAckAt || nowIso,
+    actualExecutor: "bridge",
+    actualDispatchMode: "bridge",
     processingStartedAt: nowIso,
     processingLeaseUntil: leaseUntil,
     processorId
@@ -651,6 +803,15 @@ export async function requeueCommand(env, id) {
 export async function fallbackCommandToLocalBridge(env, input = {}) {
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: "bridge",
+      fallbackApplied: true,
+      fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
+      fallbackReason: input.fallbackReason || command.fallbackReason,
+      timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
+    }, DISPATCH_MODE_LOCAL),
     dispatchMode: DISPATCH_MODE_LOCAL,
     status: "queued",
     progressStage: normalizeProgressStage(input.progressStage) || "queued",
@@ -660,6 +821,8 @@ export async function fallbackCommandToLocalBridge(env, input = {}) {
     slackThreadTs: "",
     errorMessage: normalizeErrorMessage(input.errorMessage),
     dispatchedAt: "",
+    firstAckAt: "",
+    resultAt: "",
     processingStartedAt: "",
     processingLeaseUntil: "",
     processorId: "",
@@ -670,6 +833,15 @@ export async function fallbackCommandToLocalBridge(env, input = {}) {
 export async function rerouteCommandToLocalBridge(env, input = {}) {
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: "bridge",
+      fallbackApplied: true,
+      fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
+      fallbackReason: input.fallbackReason || command.fallbackReason,
+      timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
+    }, DISPATCH_MODE_LOCAL),
     dispatchMode: DISPATCH_MODE_LOCAL,
     status: "queued",
     progressStage: normalizeProgressStage(input.progressStage) || "queued",
@@ -679,6 +851,8 @@ export async function rerouteCommandToLocalBridge(env, input = {}) {
     slackMessageTs: "",
     slackThreadTs: "",
     dispatchedAt: "",
+    firstAckAt: "",
+    resultAt: "",
     processingStartedAt: "",
     processingLeaseUntil: "",
     processorId: "",
@@ -689,11 +863,26 @@ export async function rerouteCommandToLocalBridge(env, input = {}) {
 export async function rerouteCommandToSlack(env, input = {}) {
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: "cloud",
+      timeoutPhase: "",
+      fallbackApplied: true,
+      fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
+      fallbackReason: input.fallbackReason || command.fallbackReason,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
+    }, DISPATCH_MODE_SLACK),
     dispatchMode: DISPATCH_MODE_SLACK,
     status: "queued",
     progressStage: normalizeProgressStage(input.progressStage) || "queued",
     progressUpdatedAt: nowIso,
     errorMessage: normalizeErrorMessage(input.errorMessage),
+    slackChannelId: "",
+    slackMessageTs: "",
+    slackThreadTs: "",
+    dispatchedAt: "",
+    firstAckAt: "",
+    resultAt: "",
     processingStartedAt: "",
     processingLeaseUntil: "",
     processorId: "",
@@ -795,11 +984,19 @@ async function updateCommand(env, id, updater) {
 }
 
 export async function markCommandDispatched(env, input = {}) {
+  const dispatchMode = normalizeDispatchValue(input.dispatchMode);
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
-    dispatchMode: normalizeDispatchValue(input.dispatchMode || command.dispatchMode),
-    status: "processing",
-    progressStage: normalizeProgressStage(input.progressStage) || "processing",
+    ...mergeCommandDebugState(command, {
+      actualExecutor: dispatchModeToExecutionMode(dispatchMode),
+      slackDispatchAttempted: true,
+      slackDispatchSucceeded: dispatchMode === DISPATCH_MODE_SLACK,
+      timeoutPhase: "",
+      resultAt: ""
+    }, dispatchMode),
+    dispatchMode,
+    status: dispatchMode === DISPATCH_MODE_SLACK ? "dispatched" : "processing",
+    progressStage: normalizeProgressStage(input.progressStage) || (dispatchMode === DISPATCH_MODE_SLACK ? "sent-to-slack" : "processing"),
     progressUpdatedAt: nowIso,
     slackChannelId: normalizeSlackValue(input.slackChannelId),
     slackMessageTs: normalizeSlackValue(input.slackMessageTs),
@@ -808,18 +1005,34 @@ export async function markCommandDispatched(env, input = {}) {
     errorMessage: "",
     processorId: "",
     processingStartedAt: "",
-    processingLeaseUntil: ""
+    processingLeaseUntil: "",
+    completedAt: ""
   }));
 }
 
 export async function markCommandAnswered(env, input = {}) {
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: input.actualExecutor || input.actualDispatchMode || command.actualExecutor || command.actualDispatchMode,
+      slackReplyReceived: typeof input.slackReplyReceived === "boolean" ? input.slackReplyReceived : command.slackReplyReceived,
+      slackReplyThreaded: typeof input.slackReplyThreaded === "boolean" ? input.slackReplyThreaded : command.slackReplyThreaded,
+      replyMatched: typeof input.replyMatched === "boolean"
+        ? input.replyMatched
+        : (typeof input.slackReplyMatched === "boolean" ? input.slackReplyMatched : command.replyMatched),
+      replyMatchedBy: input.replyMatchedBy || command.replyMatchedBy,
+      firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt || nowIso,
+      resultAt: normalizeDateValue(input.resultAt) || nowIso,
+      timeoutPhase: "",
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
+    }, input.dispatchMode || command.dispatchMode),
     status: "answered",
     progressStage: normalizeProgressStage(input.progressStage) || "answered",
     progressUpdatedAt: nowIso,
     prUrl: String(input.prUrl || command.prUrl || "").trim(),
     branchName: normalizeSlackValue(input.branchName || command.branchName),
+    resultAt: normalizeDateValue(input.resultAt) || nowIso,
     completedAt: normalizeDateValue(input.completedAt) || nowIso,
     errorMessage: ""
   }));
@@ -828,10 +1041,22 @@ export async function markCommandAnswered(env, input = {}) {
 export async function markCommandFailed(env, input = {}) {
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: input.actualExecutor || input.actualDispatchMode || command.actualExecutor || command.actualDispatchMode,
+      firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt,
+      resultAt: normalizeDateValue(input.resultAt) || nowIso,
+      timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
+      fallbackApplied: typeof input.fallbackApplied === "boolean" ? input.fallbackApplied : command.fallbackApplied,
+      fallbackCount: Object.prototype.hasOwnProperty.call(input, "fallbackCount") ? input.fallbackCount : command.fallbackCount,
+      fallbackReason: input.fallbackReason || command.fallbackReason,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
+    }, input.dispatchMode || command.dispatchMode),
     status: "failed",
     progressStage: normalizeProgressStage(input.progressStage) || "failed",
     progressUpdatedAt: nowIso,
     errorMessage: normalizeErrorMessage(input.errorMessage),
+    resultAt: normalizeDateValue(input.resultAt) || nowIso,
     completedAt: normalizeDateValue(input.completedAt) || nowIso
   }));
 }
@@ -841,6 +1066,7 @@ export async function upsertCommandDispatchState(env, input = {}) {
 
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
+    ...mergeCommandDebugState(command, input, input.dispatchMode || command.dispatchMode),
     dispatchMode: normalizeDispatchValue(input.dispatchMode || command.dispatchMode),
     status: nextStatus,
     progressStage: normalizeProgressStage(input.progressStage) || nextStatus,
@@ -852,6 +1078,12 @@ export async function upsertCommandDispatchState(env, input = {}) {
     branchName: normalizeSlackValue(input.branchName || command.branchName),
     errorMessage: normalizeErrorMessage(input.errorMessage || (nextStatus === "failed" ? command.errorMessage : "")),
     dispatchedAt: normalizeDateValue(input.dispatchedAt || command.dispatchedAt),
+    firstAckAt: nextStatus === "processing" || nextStatus === "answered" || nextStatus === "failed"
+      ? (normalizeDateValue(input.firstAckAt) || command.firstAckAt || nowIso)
+      : command.firstAckAt,
+    resultAt: nextStatus === "answered" || nextStatus === "failed"
+      ? (normalizeDateValue(input.resultAt) || command.resultAt || nowIso)
+      : command.resultAt,
     processingStartedAt: nextStatus === "processing"
       ? (normalizeDateValue(input.processingStartedAt) || command.processingStartedAt || nowIso)
       : command.processingStartedAt,
@@ -876,210 +1108,310 @@ export async function getCommandBySlackThread(env, channelId, threadTs) {
   ) || null;
 }
 
-export async function recoverStaleSlackCommands(env, options = {}) {
-  const fallbackToLocal = Boolean(options.fallbackToLocal);
-  const current = await readCommands(env);
-  const nowIso = new Date().toISOString();
-  let changed = false;
-
-  const next = current.map((command) => {
-    if (command.dispatchMode !== DISPATCH_MODE_SLACK) {
-      return command;
-    }
-
-    const canFallbackToLocal = fallbackToLocal && (
-      (
-        (String(command.threadId || "").trim() && !String(command.threadId || "").trim().startsWith("cloud:"))
-        || String(command.fallbackThreadId || "").trim()
-      )
-    );
-
-    if (command.status === "dispatched") {
-      const staleSince = command.dispatchedAt || command.createdAt;
-
-      if (!isOlderThan(staleSince, STALE_SLACK_DISPATCH_MS)) {
-        return command;
-      }
-
-      changed = true;
-      return {
-        ...command,
-        dispatchMode: canFallbackToLocal ? DISPATCH_MODE_LOCAL : command.dispatchMode,
-        status: canFallbackToLocal ? "queued" : "failed",
-        progressStage: canFallbackToLocal ? "queued" : "failed",
-        progressUpdatedAt: nowIso,
-        errorMessage: canFallbackToLocal
-          ? stringifyCommandError({
-              code: "fallback_to_bridge",
-              stage: "fallback-to-bridge",
-              message: "Cloud dispatch timeout. Automatically switched to local bridge.",
-              detail: "Slack task was posted, but Codex Cloud did not acknowledge it in time.",
-              fallback: "local-bridge"
-            })
-          : stringifyCommandError({
-              code: "slack_dispatch_timeout",
-              stage: "slack-dispatch-timeout",
-              message: "Codex did not acknowledge the Slack task in time.",
-              detail: "No Codex Cloud acknowledgement was observed for the Slack-dispatched command."
-            }),
-        slackChannelId: canFallbackToLocal ? "" : command.slackChannelId,
-        slackMessageTs: canFallbackToLocal ? "" : command.slackMessageTs,
-        slackThreadTs: canFallbackToLocal ? "" : command.slackThreadTs,
-        dispatchedAt: canFallbackToLocal ? "" : command.dispatchedAt,
-        processorId: "",
-        processingStartedAt: "",
-        processingLeaseUntil: "",
-        completedAt: canFallbackToLocal ? "" : nowIso
-      };
-    }
-
-    if (command.status === "processing") {
-      const hasSlackReply = Boolean(String(command.processingStartedAt || "").trim());
-      const staleSince = hasSlackReply
-        ? (command.progressUpdatedAt || command.processingStartedAt || command.dispatchedAt || command.createdAt)
-        : (command.dispatchedAt || command.createdAt);
-      const staleWindowMs = hasSlackReply ? STALE_SLACK_PROCESSING_MS : STALE_SLACK_SILENT_MS;
-
-      if (!isOlderThan(staleSince, staleWindowMs)) {
-        return command;
-      }
-
-      changed = true;
-      return {
-        ...command,
-        dispatchMode: canFallbackToLocal ? DISPATCH_MODE_LOCAL : command.dispatchMode,
-        status: canFallbackToLocal ? "queued" : "failed",
-        progressStage: canFallbackToLocal ? "queued" : "failed",
-        progressUpdatedAt: nowIso,
-        errorMessage: canFallbackToLocal
-          ? stringifyCommandError({
-              code: "fallback_to_bridge",
-              stage: "fallback-to-bridge",
-              message: "Cloud reply timeout. Automatically switched to local bridge.",
-              detail: "Slack dispatch succeeded, but no threaded Codex reply arrived in time.",
-              fallback: "local-bridge"
-            })
-          : stringifyCommandError({
-              code: "slack_reply_timeout",
-              stage: "slack-reply-timeout",
-              message: "Codex did not send a Slack reply in time.",
-              detail: "Slack dispatch succeeded, but no threaded Codex reply was linked back to the command."
-            }),
-        slackChannelId: canFallbackToLocal ? "" : command.slackChannelId,
-        slackMessageTs: canFallbackToLocal ? "" : command.slackMessageTs,
-        slackThreadTs: canFallbackToLocal ? "" : command.slackThreadTs,
-        dispatchedAt: canFallbackToLocal ? "" : command.dispatchedAt,
-        processorId: "",
-        processingStartedAt: "",
-        processingLeaseUntil: "",
-        completedAt: canFallbackToLocal ? "" : nowIso
-      };
-    }
-
-    return command;
-  });
-
-  if (changed) {
-    await writeCommands(env, next);
-  }
-
-  return changed;
+function canFallbackToLocal(command, options = {}) {
+  return Boolean(options.fallbackToLocal) && Number(command?.fallbackCount || 0) < 1 && (
+    (String(command?.threadId || "").trim() && !String(command?.threadId || "").trim().startsWith("cloud:"))
+    || String(command?.fallbackThreadId || "").trim()
+  );
 }
 
-export async function recoverStaleLocalCommands(env, options = {}) {
-  const preferSlack = Boolean(options.preferSlack);
+function canFallbackToSlack(command, options = {}) {
+  return Boolean(options.preferSlack)
+    && Number(command?.fallbackCount || 0) < 1
+    && !command?.photo
+    && Boolean(String(command?.targetRepo || "").trim());
+}
+
+function createFallbackState(command, nextDispatchMode, nowIso, input = {}) {
+  const nextExecutor = dispatchModeToExecutionMode(nextDispatchMode);
+
+  return {
+    ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: nextExecutor,
+      fallbackApplied: true,
+      fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
+      fallbackReason: input.fallbackReason || command.fallbackReason,
+      timeoutPhase: input.timeoutPhase || command.timeoutPhase,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      firstAckAt: "",
+      resultAt: ""
+    }, nextDispatchMode),
+    dispatchMode: nextDispatchMode,
+    status: "queued",
+    progressStage: input.progressStage || (nextDispatchMode === DISPATCH_MODE_SLACK ? "switched-to-cloud" : "switched-to-bridge"),
+    progressUpdatedAt: nowIso,
+    errorMessage: normalizeErrorMessage(input.errorMessage),
+    slackChannelId: "",
+    slackMessageTs: "",
+    slackThreadTs: "",
+    dispatchedAt: "",
+    firstAckAt: "",
+    resultAt: "",
+    processingStartedAt: "",
+    processingLeaseUntil: "",
+    processorId: "",
+    completedAt: ""
+  };
+}
+
+function createFailedMaintenanceState(command, nowIso, input = {}) {
+  return {
+    ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: input.actualExecutor || command.actualExecutor || dispatchModeToExecutionMode(command.dispatchMode),
+      timeoutPhase: input.timeoutPhase || command.timeoutPhase,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      resultAt: nowIso
+    }, command.dispatchMode),
+    status: "failed",
+    progressStage: input.progressStage || "failed",
+    progressUpdatedAt: nowIso,
+    errorMessage: normalizeErrorMessage(input.errorMessage),
+    resultAt: nowIso,
+    completedAt: nowIso
+  };
+}
+
+function evaluateCloudMaintenance(command, nowIso, options = {}) {
+  if (command.dispatchMode !== DISPATCH_MODE_SLACK) {
+    return command;
+  }
+
+  const fallbackAllowed = canFallbackToLocal(command, options);
+
+  if (command.status === "dispatched") {
+    const staleSince = command.dispatchedAt || command.createdAt;
+
+    if (!isOlderThan(staleSince, CLOUD_FIRST_ACK_TIMEOUT_MS)) {
+      return command;
+    }
+
+    if (fallbackAllowed) {
+      return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+        progressStage: "switched-to-bridge",
+        timeoutPhase: "first-ack-timeout",
+        fallbackReason: "codex cloud did not acknowledge in time",
+        lastDiagnosticCode: "cloud_first_ack_timeout",
+        lastDiagnosticDetail: "Slack task was posted, but Codex Cloud did not acknowledge it before the first-ack timeout.",
+        errorMessage: stringifyCommandError({
+          code: "fallback_to_bridge",
+          stage: "switched-to-bridge",
+          message: "Codex Cloud did not acknowledge the task in time. Switched to local bridge.",
+          detail: "Slack task was posted, but Codex Cloud did not acknowledge it before the first-ack timeout.",
+          fallback: "local-bridge"
+        })
+      });
+    }
+
+    return createFailedMaintenanceState(command, nowIso, {
+      timeoutPhase: "first-ack-timeout",
+      lastDiagnosticCode: "cloud_first_ack_timeout",
+      lastDiagnosticDetail: "Slack task was posted, but Codex Cloud did not acknowledge it before the first-ack timeout.",
+      errorMessage: stringifyCommandError({
+        code: "cloud_first_ack_timeout",
+        stage: "cloud-first-ack-timeout",
+        message: "Codex Cloud did not acknowledge the Slack task in time.",
+        detail: "Slack task was posted, but Codex Cloud did not acknowledge it before the first-ack timeout."
+      })
+    });
+  }
+
+  if (command.status !== "processing") {
+    return command;
+  }
+
+  const staleSince = command.progressUpdatedAt || command.firstAckAt || command.dispatchedAt || command.createdAt;
+
+  if (!isOlderThan(staleSince, CLOUD_RESULT_TIMEOUT_MS)) {
+    return command;
+  }
+
+  const fallbackReason = command.replyMatched === false && command.slackReplyReceived
+    ? "reply arrived but command not matched"
+    : command.slackReplyReceived && !command.slackReplyThreaded
+      ? "reply arrived but not threaded"
+      : "codex did not respond";
+  const detail = command.replyMatched === false && command.slackReplyReceived
+    ? "A Slack reply arrived, but it could not be matched back to the command before result timeout."
+    : command.slackReplyReceived && !command.slackReplyThreaded
+      ? "A Slack reply arrived outside the original thread and could not be reconciled before result timeout."
+      : "Codex Cloud acknowledged the task, but no terminal result arrived before timeout.";
+  const diagnosticCode = command.replyMatched === false && command.slackReplyReceived
+    ? "slack_reply_unmatched"
+    : command.slackReplyReceived && !command.slackReplyThreaded
+      ? "slack_reply_unthreaded"
+      : "cloud_result_timeout";
+
+  if (fallbackAllowed) {
+    return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+      progressStage: "switched-to-bridge",
+      timeoutPhase: "result-timeout",
+      fallbackReason,
+      lastDiagnosticCode: diagnosticCode,
+      lastDiagnosticDetail: detail,
+      errorMessage: stringifyCommandError({
+        code: "fallback_to_bridge",
+        stage: "switched-to-bridge",
+        message: "Codex Cloud result timed out. Switched to local bridge.",
+        detail,
+        fallback: "local-bridge"
+      })
+    });
+  }
+
+  return createFailedMaintenanceState(command, nowIso, {
+    timeoutPhase: "result-timeout",
+    lastDiagnosticCode: diagnosticCode,
+    lastDiagnosticDetail: detail,
+    errorMessage: stringifyCommandError({
+      code: "cloud_result_timeout",
+      stage: "cloud-result-timeout",
+      message: "Codex Cloud did not produce a result in time.",
+      detail
+    })
+  });
+}
+
+function evaluateBridgeMaintenance(command, nowIso, options = {}) {
+  if (command.dispatchMode !== DISPATCH_MODE_LOCAL) {
+    return command;
+  }
+
+  const fallbackAllowed = canFallbackToSlack(command, options);
+
+  if (command.status === "queued") {
+    if (!isOlderThan(command.progressUpdatedAt || command.createdAt, BRIDGE_CLAIM_TIMEOUT_MS)) {
+      return command;
+    }
+
+    if (fallbackAllowed) {
+      return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
+        progressStage: "switched-to-cloud",
+        timeoutPhase: "claim-timeout",
+        fallbackReason: "local bridge did not claim the command in time",
+        lastDiagnosticCode: "bridge_claim_timeout",
+        lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
+        errorMessage: stringifyCommandError({
+          code: "fallback_to_cloud",
+          stage: "switched-to-cloud",
+          message: "Local bridge did not claim the command in time. Switched to Codex Cloud.",
+          detail: "The local bridge did not claim the command before the claim timeout.",
+          fallback: "slack-codex-cloud"
+        })
+      });
+    }
+
+    return createFailedMaintenanceState(command, nowIso, {
+      timeoutPhase: "claim-timeout",
+      lastDiagnosticCode: "bridge_claim_timeout",
+      lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
+      actualExecutor: "bridge",
+      errorMessage: stringifyCommandError({
+        code: "bridge_claim_timeout",
+        stage: "bridge-claim-timeout",
+        message: "Local bridge did not claim the command in time.",
+        detail: "The local bridge did not claim the command before the claim timeout."
+      })
+    });
+  }
+
+  if (command.status !== "processing") {
+    return command;
+  }
+
+  const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
+  const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
+  const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
+  const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
+
+  if (!isLeaseExpired && !isResultStale) {
+    return command;
+  }
+
+  const detail = isLeaseExpired
+    ? "The local bridge lease expired before the command completed."
+    : "The local bridge stopped heartbeating before the command completed.";
+
+  if (fallbackAllowed) {
+    return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
+      progressStage: "switched-to-cloud",
+      timeoutPhase: "result-timeout",
+      fallbackReason: "local bridge stopped heartbeating",
+      lastDiagnosticCode: "bridge_result_timeout",
+      lastDiagnosticDetail: detail,
+      errorMessage: stringifyCommandError({
+        code: "fallback_to_cloud",
+        stage: "switched-to-cloud",
+        message: "Local bridge timed out. Switched to Codex Cloud.",
+        detail,
+        fallback: "slack-codex-cloud"
+      })
+    });
+  }
+
+  return createFailedMaintenanceState(command, nowIso, {
+    timeoutPhase: "result-timeout",
+    lastDiagnosticCode: "bridge_result_timeout",
+    lastDiagnosticDetail: detail,
+    actualExecutor: "bridge",
+    errorMessage: stringifyCommandError({
+      code: "bridge_result_timeout",
+      stage: "bridge-result-timeout",
+      message: "Local bridge did not finish the command in time.",
+      detail
+    })
+  });
+}
+
+export async function runCommandMaintenance(env, options = {}) {
   const current = await readCommands(env);
-  const now = Date.now();
-  const nowIso = new Date(now).toISOString();
-  let changed = false;
+  const nowIso = new Date().toISOString();
+  let changedCount = 0;
+  const commandsToDispatch = [];
 
   const next = current.map((command) => {
-    if (command.dispatchMode !== DISPATCH_MODE_LOCAL) {
-      return command;
+    const previous = command;
+    let updated = command;
+
+    if (command.dispatchMode === DISPATCH_MODE_SLACK) {
+      updated = evaluateCloudMaintenance(command, nowIso, options);
+    } else if (command.dispatchMode === DISPATCH_MODE_LOCAL) {
+      updated = evaluateBridgeMaintenance(command, nowIso, options);
     }
 
-    const canFallbackToSlack = preferSlack
-      && !command.photo
-      && String(command.targetRepo || "").trim();
+    if (updated !== previous) {
+      changedCount += 1;
 
-    if (command.status === "queued") {
-      if (!isOlderThan(command.progressUpdatedAt || command.createdAt, STALE_LOCAL_QUEUE_MS)) {
-        return command;
+      if (
+        updated.dispatchMode === DISPATCH_MODE_SLACK
+        && updated.status === "queued"
+        && !String(updated.slackChannelId || "").trim()
+      ) {
+        commandsToDispatch.push(updated.id);
       }
-
-      changed = true;
-      return {
-        ...command,
-        dispatchMode: canFallbackToSlack ? DISPATCH_MODE_SLACK : command.dispatchMode,
-        status: "queued",
-        progressStage: "queued",
-        progressUpdatedAt: nowIso,
-        errorMessage: canFallbackToSlack
-          ? stringifyCommandError({
-              code: "fallback_to_cloud",
-              stage: "fallback-to-cloud",
-              message: "Local bridge queue timeout. Automatically switched to Codex Cloud.",
-              detail: "The local bridge did not claim the command from the queue in time.",
-              fallback: "slack-codex-cloud"
-            })
-          : command.errorMessage,
-        processingStartedAt: "",
-        processingLeaseUntil: "",
-        processorId: "",
-        completedAt: ""
-      };
     }
 
-    if (command.status !== "processing") {
-      return command;
-    }
-
-    const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
-    const staleSince = command.progressUpdatedAt || command.processingStartedAt || command.createdAt;
-    const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= now;
-    const isHeartbeatStale = isOlderThan(staleSince, STALE_LOCAL_PROCESSING_MS);
-
-    if (!isLeaseExpired && !isHeartbeatStale) {
-      return command;
-    }
-
-    changed = true;
-    return {
-      ...command,
-      dispatchMode: canFallbackToSlack ? DISPATCH_MODE_SLACK : command.dispatchMode,
-      status: "queued",
-      progressStage: "queued",
-      progressUpdatedAt: nowIso,
-      errorMessage: canFallbackToSlack
-        ? stringifyCommandError({
-            code: "fallback_to_cloud",
-            stage: "fallback-to-cloud",
-            message: "Local bridge timeout. Automatically switched to Codex Cloud.",
-            detail: "The local bridge stopped heartbeating while processing the command.",
-            fallback: "slack-codex-cloud"
-          })
-        : command.errorMessage,
-      processingStartedAt: "",
-      processingLeaseUntil: "",
-      processorId: "",
-      completedAt: ""
-    };
+    return updated;
   });
 
-  if (changed) {
+  if (changedCount) {
     await writeCommands(env, next);
   }
 
-  return changed;
+  return {
+    changed: changedCount > 0,
+    changedCount,
+    commands: next,
+    commandsToDispatch
+  };
 }
 
 export async function recoverStaleCommands(env, options = {}) {
-  const [recoveredLocal, recoveredSlack] = await Promise.all([
-    recoverStaleLocalCommands(env, options),
-    recoverStaleSlackCommands(env, options)
-  ]);
-
-  return recoveredLocal || recoveredSlack;
+  const result = await runCommandMaintenance(env, options);
+  return result.changed;
 }
 
 export async function getCommandsForClient(env, clientId) {

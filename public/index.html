@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260418-0002" />
+    <link rel="stylesheet" href="/styles.css?v=20260418-0215" />
   </head>
   <body>
     <main class="page">
@@ -29,12 +29,16 @@
                 <span>Cloud</span>
               </button>
             </div>
-            <a class="button button-secondary header-link-button" href="/projects.html">Projects</a>
-            <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
-            <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
             <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
           </div>
         </header>
+        <section id="project-nav" class="project-nav" aria-label="Проекты из dispatch manifest">
+          <label class="thread-select-field project-nav-field">
+            <span class="field-label" id="command-target-label">Проект</span>
+            <select id="command-thread-select" name="thread"></select>
+          </label>
+          <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
+        </section>
         <section class="bridge-status-block">
           <p id="bridge-status-text" class="bridge-status">Подключаю статус Codex Cloud…</p>
           <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
@@ -50,13 +54,6 @@
 
         <section class="command-wrap">
           <form id="command-form" class="command-form">
-            <div class="thread-select-row">
-              <label class="thread-select-field">
-                <span class="field-label" id="command-target-label">Репозиторий GitHub</span>
-                <select id="command-thread-select" name="thread"></select>
-              </label>
-              <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
-            </div>
             <div class="thread-settings-inline-row">
               <span id="thread-settings-summary" class="form-status">Показываются все репозитории.</span>
               <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
@@ -120,6 +117,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260418-0002"></script>
+    <script type="module" src="/app.js?v=20260418-0215"></script>
   </body>
 </html>
