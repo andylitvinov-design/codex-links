@@ -4,6 +4,7 @@ import path from "node:path";
 const ROOT = process.cwd();
 const DEV_VARS_PATH = path.join(ROOT, ".dev.vars");
 const PROD_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
+const IS_CI = String(process.env.CI || "").trim().toLowerCase() === "true";
 const REQUIRED = [
   "LINKS_WRITE_TOKEN",
   "COMMAND_DISPATCH_MODE",
@@ -185,6 +186,16 @@ async function main() {
 
   console.log("");
   console.log("Slack dispatch validation:");
+
+  if (IS_CI && missing.length) {
+    console.log("- skipped in CI because local Slack secrets are not available");
+
+    if (status.dispatchMode !== "slack-codex-cloud") {
+      process.exitCode = 1;
+    }
+
+    return;
+  }
 
   if (!slackValidation.ok) {
     console.log(`- error: ${slackValidation.error}`);
