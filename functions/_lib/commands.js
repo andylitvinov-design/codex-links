@@ -490,6 +490,10 @@ export function createCommandRecord(input) {
       lastDiagnosticCode: "",
       lastDiagnosticDetail: "",
       firstAckAt: "",
+      bridgeClaimedAt: "",
+      firstExecutorAckSeenAt: "",
+      firstReplySeenAt: "",
+      replyIngestedAt: "",
       resultAt: "",
       slackChannelId: "",
       slackMessageTs: "",
@@ -499,6 +503,9 @@ export function createCommandRecord(input) {
       errorMessage: "",
       dispatchedAt: "",
       completedAt: "",
+      processingStartedAt: "",
+      processingLeaseUntil: "",
+      processorId: "",
       ...normalizeLatencyFields({
         uiSubmitStartedAt: input.uiSubmitStartedAt,
         apiCommandsRequestStartedAt: input.apiCommandsRequestStartedAt,
@@ -549,6 +556,10 @@ export async function readCommands(env) {
       lastDiagnosticCode: normalizeDiagnosticText(entry.lastDiagnosticCode, 80),
       lastDiagnosticDetail: normalizeDiagnosticText(entry.lastDiagnosticDetail, 500),
       firstAckAt: normalizeDateValue(entry.firstAckAt),
+      bridgeClaimedAt: normalizeDateValue(entry.bridgeClaimedAt),
+      firstExecutorAckSeenAt: normalizeDateValue(entry.firstExecutorAckSeenAt),
+      firstReplySeenAt: normalizeDateValue(entry.firstReplySeenAt),
+      replyIngestedAt: normalizeDateValue(entry.replyIngestedAt),
       resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
       slackChannelId: normalizeSlackValue(entry.slackChannelId),
       slackMessageTs: normalizeSlackValue(entry.slackMessageTs),
@@ -558,6 +569,9 @@ export async function readCommands(env) {
       errorMessage: normalizeErrorMessage(entry.errorMessage),
       dispatchedAt: normalizeDateValue(entry.dispatchedAt),
       completedAt: normalizeDateValue(entry.completedAt),
+      processingStartedAt: normalizeDateValue(entry.processingStartedAt),
+      processingLeaseUntil: normalizeDateValue(entry.processingLeaseUntil),
+      processorId: normalizeDiagnosticText(entry.processorId, 120),
       ...normalizeLatencyFields(entry)
     }))
     .filter((entry) => isWithinRetentionWindow(entry.createdAt))

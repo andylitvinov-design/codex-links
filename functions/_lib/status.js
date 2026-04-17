@@ -35,6 +35,12 @@ function normalizeStatus(input) {
       state: "unknown",
       dispatchMode: "",
       executorLabel: "",
+      workerId: "",
+      activeCommandId: "",
+      activeCommandThreadId: "",
+      lastBridgePollAt: "",
+      bridgeAuthOk: false,
+      bridgeQueueSeen: false,
       lastRunAt: "",
       lastDispatchAt: "",
       lastSuccessAt: "",
@@ -50,6 +56,12 @@ function normalizeStatus(input) {
     state: String(input.state || "unknown").trim() || "unknown",
     dispatchMode: String(input.dispatchMode || "").trim(),
     executorLabel: String(input.executorLabel || "").trim(),
+    workerId: String(input.workerId || "").trim(),
+    activeCommandId: String(input.activeCommandId || "").trim(),
+    activeCommandThreadId: String(input.activeCommandThreadId || "").trim(),
+    lastBridgePollAt: normalizeDate(input.lastBridgePollAt),
+    bridgeAuthOk: input.bridgeAuthOk === true,
+    bridgeQueueSeen: input.bridgeQueueSeen === true,
     lastRunAt: normalizeDate(input.lastRunAt),
     lastDispatchAt: normalizeDate(input.lastDispatchAt),
     lastSuccessAt: normalizeDate(input.lastSuccessAt),
@@ -128,8 +140,9 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
   const active = commands
     .filter((command) => ["queued", "dispatched", "processing"].includes(String(command?.status || "").trim().toLowerCase()))
     .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+  const activeLocal = active.filter((command) => command.dispatchMode === DISPATCH_MODE_LOCAL);
+  const activeLocalCommand = activeLocal.find((command) => String(command?.status || "").trim().toLowerCase() === "processing") || null;
   const nextDispatchMode = patch.dispatchMode || configuredDispatchMode || current.dispatchMode;
-  const localActive = active.filter((command) => command.dispatchMode === DISPATCH_MODE_LOCAL);
   const hasActive = active.length > 0;
   const freshHeartbeat = isBridgeHeartbeatFresh({
     ...current,
@@ -141,7 +154,7 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
     : nextDispatchMode === DISPATCH_MODE_CLOUD
       ? true
       : (current.bridgeOnline && freshHeartbeat);
-  const derivedState = nextDispatchMode === DISPATCH_MODE_LOCAL && localActive.length > 0 && !bridgeOnline
+  const derivedState = nextDispatchMode === DISPATCH_MODE_LOCAL && activeLocal.length > 0 && !bridgeOnline
     ? "stale"
     : hasActive
       ? "running"
@@ -152,6 +165,18 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
     ...patch,
     dispatchMode: nextDispatchMode,
     executorLabel: patch.executorLabel || getDispatchModeLabel(nextDispatchMode),
+    workerId: typeof patch.workerId === "string" ? patch.workerId : current.workerId,
+    activeCommandId: typeof patch.activeCommandId === "string"
+      ? patch.activeCommandId
+      : (activeLocalCommand?.id || current.activeCommandId),
+    activeCommandThreadId: typeof patch.activeCommandThreadId === "string"
+      ? patch.activeCommandThreadId
+      : (activeLocalCommand?.threadId || current.activeCommandThreadId),
+    lastBridgePollAt: patch.lastBridgePollAt || current.lastBridgePollAt,
+    bridgeAuthOk: typeof patch.bridgeAuthOk === "boolean" ? patch.bridgeAuthOk : current.bridgeAuthOk,
+    bridgeQueueSeen: typeof patch.bridgeQueueSeen === "boolean"
+      ? patch.bridgeQueueSeen
+      : activeLocal.some((command) => String(command?.status || "").trim().toLowerCase() === "queued"),
     pendingCount: active.length,
     oldestPendingAt: active[0]?.createdAt || "",
     lastRunAt: patch.lastRunAt || current.lastRunAt,

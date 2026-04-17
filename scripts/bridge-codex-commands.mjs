@@ -16,6 +16,8 @@ const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
 const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
+const STATUS_HEARTBEAT_MS = 10 * 1000;
+const WORKER_ID = "launchd-bridge";
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
@@ -28,6 +30,7 @@ const bridgeRunWatchdog = setTimeout(() => {
 }, BRIDGE_RUN_TIMEOUT_MS);
 
 bridgeRunWatchdog.unref();
+let lastBridgeHeartbeatAt = 0;
 
 function getPendingUrl() {
   const url = new URL("/api/commands", baseUrl);
@@ -395,7 +398,7 @@ async function claimNextCommand() {
     },
     body: JSON.stringify({
       action: "claim",
-      processorId: "launchd-bridge",
+      processorId: WORKER_ID,
       leaseMs: CLAIM_LEASE_MS
     })
   });
@@ -493,6 +496,25 @@ async function publishBridgeStatus(status) {
     const body = await response.text();
     throw new Error(`Failed to publish bridge status: ${response.status} ${body}`);
   }
+}
+
+async function publishBridgeHeartbeat(state = "running", extras = {}, force = false) {
+  const now = Date.now();
+
+  if (!force && (now - lastBridgeHeartbeatAt) < STATUS_HEARTBEAT_MS) {
+    return;
+  }
+
+  lastBridgeHeartbeatAt = now;
+  await publishBridgeStatus({
+    bridgeOnline: true,
+    state,
+    workerId: WORKER_ID,
+    lastRunAt: new Date(now).toISOString(),
+    lastBridgePollAt: new Date(now).toISOString(),
+    bridgeAuthOk: true,
+    ...extras
+  });
 }
 
 function createMessageId(threadId, timestamp, text) {
@@ -684,7 +706,11 @@ let idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
 await publishBridgeStatus({
   bridgeOnline: true,
   state: "running",
+  workerId: WORKER_ID,
   lastRunAt: new Date().toISOString(),
+  lastBridgePollAt: new Date().toISOString(),
+  bridgeAuthOk: true,
+  bridgeQueueSeen: initialQueued.length > 0,
   pendingCount: initialQueued.length + initialProcessing.length,
   oldestPendingAt: initialQueued[0]?.createdAt || initialProcessing[0]?.createdAt || "",
   lastDeliveredCount: 0,
@@ -692,9 +718,17 @@ await publishBridgeStatus({
 });
 
 while (true) {
+  await publishBridgeHeartbeat("running", {
+    activeCommandId: "",
+    activeCommandThreadId: ""
+  });
   const command = await claimNextCommand();
 
   if (!command) {
+    await publishBridgeHeartbeat("running", {
+      activeCommandId: "",
+      activeCommandThreadId: ""
+    }, true);
     if (Date.now() >= idleDrainUntil) {
       break;
     }
@@ -706,6 +740,11 @@ while (true) {
   idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
 
   try {
+    await publishBridgeHeartbeat("running", {
+      bridgeQueueSeen: true,
+      activeCommandId: command.id,
+      activeCommandThreadId: String(command.threadId || "").trim()
+    }, true);
     await updateProgress(command.id, "claimed");
 
     const {
@@ -832,7 +871,13 @@ const remainingProcessing = remainingCommands
 await publishBridgeStatus({
   bridgeOnline: true,
   state: failed.length ? "degraded" : "idle",
+  workerId: WORKER_ID,
   lastRunAt: new Date().toISOString(),
+  lastBridgePollAt: new Date().toISOString(),
+  bridgeAuthOk: true,
+  bridgeQueueSeen: remainingQueued.length > 0,
+  activeCommandId: "",
+  activeCommandThreadId: "",
   lastSuccessAt: failed.length ? "" : new Date().toISOString(),
   pendingCount: remainingQueued.length + remainingProcessing.length,
   oldestPendingAt: remainingQueued[0]?.createdAt || remainingProcessing[0]?.createdAt || "",
