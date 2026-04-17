@@ -1,13 +1,13 @@
 # Codex Links
 
-Cloudflare Pages inbox for links and Codex tasks, with production execution routed through Codex Cloud via Slack.
+Cloudflare Pages inbox for links and Codex tasks, with production cloud execution routed directly through the OpenAI Responses API.
 
 ## Current Architecture
 
 - Public UI and API: Cloudflare Pages
-- Primary executor: `Codex Cloud via Slack`
+- Primary executor: `Direct OpenAI cloud`
 - Secondary executor: local bridge on Mac
-- Source repo for Codex Cloud: `andylitvinov-design/codex-links`
+- Source repo for cloud tasks: `andylitvinov-design/codex-links`
 
 Delivery pipeline is intentionally narrow:
 
@@ -17,16 +17,16 @@ Operational rules now are:
 
 - `POST /api/commands` creates and dispatches only the new command
 - `GET /api/commands` and `GET /api/status` are read-only
-- Slack webhook `/api/slack` is the primary cloud reply ingestion path
+- `POST /api/commands` is the primary cloud execution path
 - fallback is one-shot only; no `cloud -> bridge -> cloud` or `bridge -> cloud -> bridge`
-- stale timeout recovery and backup Slack sync moved out of hot paths into admin maintenance
+- stale timeout recovery and legacy reply sync moved out of hot paths into admin maintenance
 
 ## What The App Does
 
 - Stores links in Cloudflare KV
 - Accepts commands from the mobile UI through `POST /api/commands`
-- Dispatches commands to Slack for Codex Cloud execution
-- Ingests Slack thread replies through `/api/slack`
+- Dispatches cloud commands directly to OpenAI Responses API
+- Keeps `/api/slack` only for legacy maintenance flows
 - Mirrors assistant replies and PR links back into the mobile timeline
 
 ## Delivery Maintenance
@@ -39,7 +39,7 @@ This endpoint is authorized-only and is the place for:
 
 - stale timeout evaluation
 - one-shot fallback application
-- optional backup Slack reply sync
+- optional legacy Slack reply sync
 - redispatch of commands that were switched to cloud during maintenance
 
 Normal UI polling must not depend on this endpoint.
@@ -117,43 +117,41 @@ Set these in Cloudflare Pages for project `codex-links`:
 
 ```bash
 npx wrangler pages secret put LINKS_WRITE_TOKEN --project-name codex-links
+npx wrangler pages secret put OPENAI_API_KEY --project-name codex-links
+npx wrangler pages secret put COMMAND_DISPATCH_MODE --project-name codex-links
+```
+
+Optional legacy-only Slack secrets:
+
+```bash
 npx wrangler pages secret put SLACK_BOT_TOKEN --project-name codex-links
 npx wrangler pages secret put SLACK_SIGNING_SECRET --project-name codex-links
 npx wrangler pages secret put SLACK_CODEX_CHANNEL_ID --project-name codex-links
 npx wrangler pages secret put SLACK_CODEX_USER_ID --project-name codex-links
-npx wrangler pages secret put COMMAND_DISPATCH_MODE --project-name codex-links
 ```
 
 Recommended values:
 
-- `COMMAND_DISPATCH_MODE=slack-codex-cloud`
-- `SLACK_CODEX_MENTION=@Codex` if you prefer name-based mention text
-- `SLACK_CODEX_USER_ID=<slack-user-id>` for reliable `<@user>` mention formatting
+- `COMMAND_DISPATCH_MODE=cloud`
+- Keep `OPENAI_API_KEY` only in the Pages environment
+- Slack variables are optional and kept only for legacy maintenance
 
-## Slack + Codex Cloud Setup
+## Direct Cloud Setup
 
-1. Connect GitHub repo `andylitvinov-design/codex-links` inside Codex Cloud at `chatgpt.com/codex`.
-2. Create or select a Codex environment that can open branches and PRs.
-3. Install and enable the Codex Slack integration for the workspace.
-4. Create one dedicated private Slack channel for Codex Links tasks.
-5. Put that channel id into `SLACK_CODEX_CHANNEL_ID`.
-6. Configure Slack Events to call:
-
-```text
-https://codex-links.pages.dev/api/slack
-```
-
-Subscribe to message events for the dedicated channel so Codex replies are mirrored back into the app.
+1. Set `OPENAI_API_KEY` in the Cloudflare Pages project.
+2. Set `COMMAND_DISPATCH_MODE=cloud`.
+3. Run `npm run cloud:check`.
+4. Run `npm run cloud:smoke`.
 
 Quick helpers added to this repo:
 
-- Slack app manifest: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
+- Slack app manifest for legacy maintenance: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
 - Local/prod setup check: `npm run cloud:check`
 - End-to-end text smoke: `npm run cloud:smoke`
 - Bulk Pages secret upload from `.dev.vars`: `npm run cloud:install-secrets`
 - KV-backed runtime config upload from `.dev.vars`: `npm run cloud:save-config`
 
-If you do not want to manage Cloudflare Pages secrets manually, `cloud:save-config` can store the Slack/Codex Cloud settings in KV using only `LINKS_WRITE_TOKEN`. This is easier to operate, but less strict than using platform secrets.
+If you do not want to manage Cloudflare Pages settings manually, `cloud:save-config` can store non-secret runtime settings in KV using only `LINKS_WRITE_TOKEN`. Keep `OPENAI_API_KEY` in the Pages environment; do not store it in KV.
 
 ## Local Development
 
@@ -256,10 +254,10 @@ Slack sends signed webhook events to:
 POST /api/slack
 ```
 
-The handler verifies Slack signatures, maps thread replies back to the originating command, stores assistant messages in KV, and updates command status and PR metadata.
+The handler is kept only for legacy maintenance. Normal cloud command success must not depend on `/api/slack`.
 
 ## Notes
 
-- Photo-only cloud requests are intentionally blocked in v1. Text commands are the first-class path for Slack-triggered Codex Cloud execution.
+- Photo-only cloud requests are intentionally blocked in v1. Text commands are the first-class path for direct cloud execution.
 - The local bridge scripts remain in the repo as manual fallback tooling, but they are no longer the primary production architecture.
 - `codex-links` should now be treated as done only when GitHub has the branch or PR and Cloudflare has a corresponding deploy status.

@@ -11,12 +11,14 @@ import {
   listCommandThreads,
   requeueCommand,
   readCommands,
+  rerouteCommandToSlack,
   upsertCommandDispatchState,
   updateCommandProgress,
   writeCommands
 } from "../_lib/commands.js";
 import { handleOptions, json } from "../_lib/http.js";
 import {
+  DISPATCH_MODE_CLOUD,
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
   getConfiguredDispatchMode,
@@ -30,7 +32,14 @@ import { upsertMessages } from "../_lib/messages.js";
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
 import { stringifyCommandError } from "../_lib/command-debug.js";
+import { createOpenAiCloudResponse } from "../_lib/openai-cloud.js";
 import { resolveProjectDispatchTarget } from "../_lib/project-dispatch-manifest.js";
+import {
+  buildLatencyBreakdown,
+  getVisibleDeliveryStage,
+  storeSlackActiveChannelCommand,
+  storeSlackThreadCommandMap
+} from "../_lib/delivery.js";
 
 const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
 
@@ -112,6 +121,8 @@ function serializeCommand(command) {
 
   return {
     ...command,
+    deliveryStage: getVisibleDeliveryStage(command),
+    latencyBreakdown: buildLatencyBreakdown(command),
     photo,
     projectId: String(command.projectId || "").trim(),
     projectLabel: String(command.projectLabel || "").trim(),
@@ -300,11 +311,179 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
   return fallback.value || command;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function canFallbackToLocalBridge(command) {
+  return Number(command?.fallbackCount || 0) < 1 && (
+    (String(command?.threadId || "").trim() && !String(command?.threadId || "").trim().startsWith("cloud:"))
+    || String(command?.fallbackThreadId || "").trim()
+  );
+}
+
+function canFallbackToCloud(command, runtimeConfig) {
+  return Number(command?.fallbackCount || 0) < 1
+    && !command?.photo
+    && Boolean(String(command?.targetRepo || "").trim())
+    && (String(runtimeConfig?.OPENAI_API_KEY || "").trim().length > 0);
+}
+
+async function markCloudCommandFailed(env, command, commandError) {
+  const normalizedError = stringifyCommandError(commandError);
+  const failed = await markCommandFailed(env, {
+    id: command.id,
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    progressStage: "failed",
+    actualExecutor: "cloud",
+    timeoutPhase: String(commandError?.stage || "").trim().includes("timeout") ? "result-timeout" : "",
+    lastDiagnosticCode: commandError?.code || "cloud_execution_failed",
+    lastDiagnosticDetail: commandError?.detail || commandError?.message || "Direct cloud execution failed.",
+    errorMessage: normalizedError,
+    resultAt: new Date().toISOString()
+  });
+
+  await refreshBridgeStatusFromCommands(env, {
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    executorLabel: getDispatchModeLabel(DISPATCH_MODE_CLOUD),
+    bridgeOnline: true,
+    lastRunAt: new Date().toISOString(),
+    lastError: normalizedError
+  });
+
+  return failed.value || command;
+}
+
+async function answerCloudCommand(env, command, result) {
+  const nowIso = new Date().toISOString();
+
+  await upsertMessages(env, [{
+    id: `cloud:${command.id}:${String(result.responseId || crypto.randomUUID()).trim()}`,
+    clientId: command.clientId,
+    threadId: command.threadId,
+    threadLabel: command.threadLabel,
+    commandId: command.id,
+    role: "assistant",
+    text: result.answerText,
+    createdAt: nowIso
+  }]);
+
+  const answered = await markCommandAnswered(env, {
+    id: command.id,
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    progressStage: "answered",
+    actualExecutor: "cloud",
+    firstAckAt: command.firstAckAt || command.dispatchedAt || nowIso,
+    firstExecutorAckSeenAt: command.firstExecutorAckSeenAt || nowIso,
+    firstReplySeenAt: nowIso,
+    replyIngestedAt: nowIso,
+    replyMatched: true,
+    replyMatchedBy: "direct-api",
+    resultAt: nowIso,
+    completedAt: nowIso
+  });
+
+  await refreshBridgeStatusFromCommands(env, {
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    executorLabel: getDispatchModeLabel(DISPATCH_MODE_CLOUD),
+    bridgeOnline: true,
+    state: "idle",
+    lastRunAt: nowIso,
+    lastSuccessAt: nowIso,
+    lastDeliveredCount: 1,
+    lastError: ""
+  });
+
+  return answered.value || command;
+}
+
+async function executeDirectCloudCommand(env, command) {
+  const dispatchStartedAt = new Date().toISOString();
+  const dispatched = await markCommandDispatched(env, {
+    id: command.id,
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    progressStage: "sent",
+    dispatchStartedAt,
+    dispatchedAt: dispatchStartedAt
+  });
+  const inFlight = dispatched.value || command;
+
+  await upsertCommandDispatchState(env, {
+    id: inFlight.id,
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    status: "processing",
+    progressStage: "processing",
+    actualExecutor: "cloud",
+    firstAckAt: dispatchStartedAt,
+    firstExecutorAckSeenAt: dispatchStartedAt,
+    processingStartedAt: dispatchStartedAt
+  });
+
+  await refreshBridgeStatusFromCommands(env, {
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    executorLabel: getDispatchModeLabel(DISPATCH_MODE_CLOUD),
+    bridgeOnline: true,
+    state: "running",
+    lastRunAt: dispatchStartedAt,
+    lastDispatchAt: dispatchStartedAt,
+    lastError: ""
+  });
+
+  const latest = await getCommandById(env, inFlight.id) || inFlight;
+  const result = await createOpenAiCloudResponse(env, latest);
+
+  if (result.ok) {
+    return answerCloudCommand(env, latest, result);
+  }
+
+  if (result.retryable && canFallbackToLocalBridge(latest)) {
+    const fallbackCommand = await fallbackToLocalBridge(env, latest, {
+      ...(result.commandError || {}),
+      code: "fallback_to_bridge",
+      stage: "switched-to-bridge",
+      message: "Direct cloud execution failed. Switched to local bridge.",
+      detail: result.commandError?.detail || result.commandError?.message || "Direct cloud execution failed.",
+      fallback: "local-bridge"
+    });
+
+    const redispatched = await getCommandById(env, fallbackCommand.id);
+    if (redispatched) {
+      const rerouted = await dispatchCommandIfNeeded(env, redispatched, await readRuntimeConfig(env));
+      return rerouted?.command || redispatched;
+    }
+
+    return fallbackCommand;
+  }
+
+  return markCloudCommandFailed(env, latest, result.commandError || {
+    code: "cloud_execution_failed",
+    stage: "cloud-execution-failed",
+    message: "Direct cloud execution failed.",
+    detail: "The cloud request did not complete successfully."
+  });
+}
+
 export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   const config = runtimeConfig || await readRuntimeConfig(env);
   const dispatchMode = command?.dispatchMode || getConfiguredDispatchMode(config);
+  const dispatchStartedAt = new Date().toISOString();
+
+  if (dispatchMode === DISPATCH_MODE_CLOUD) {
+    return {
+      ok: true,
+      command: await executeDirectCloudCommand(env, command)
+    };
+  }
 
   if (dispatchMode !== DISPATCH_MODE_SLACK) {
+    const staged = await upsertCommandDispatchState(env, {
+      id: command.id,
+      dispatchMode,
+      status: command.status || "queued",
+      progressStage: "dispatching",
+      dispatchStartedAt
+    });
+
     await refreshBridgeStatusFromCommands(env, {
       dispatchMode,
       executorLabel: getDispatchModeLabel(dispatchMode),
@@ -313,21 +492,35 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     });
     return {
       ok: true,
-      command
+      command: staged.value || command
     };
   }
 
   try {
+    await upsertCommandDispatchState(env, {
+      id: command.id,
+      dispatchMode,
+      status: command.status || "queued",
+      progressStage: "dispatching",
+      dispatchStartedAt
+    });
+
     const published = await postSlackCommand(config, command, getSlackCodexMention(config));
     const dispatched = await markCommandDispatched(env, {
       id: command.id,
       dispatchMode,
-      progressStage: "sent-to-slack",
+      progressStage: "dispatched",
+      dispatchStartedAt,
+      slackPostedAt: new Date().toISOString(),
       slackChannelId: published.channel,
       slackMessageTs: published.ts,
       slackThreadTs: published.threadTs,
       dispatchedAt: new Date().toISOString()
     });
+
+    await storeSlackThreadCommandMap(env, published.channel, published.threadTs, command.id);
+    await storeSlackThreadCommandMap(env, published.channel, published.ts, command.id);
+    await storeSlackActiveChannelCommand(env, published.channel, command.id);
 
     await refreshBridgeStatusFromCommands(env, {
       dispatchMode,
@@ -370,6 +563,122 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   }
 }
 
+async function dispatchCreatedCommand(env, commandId, runtimeConfig) {
+  const command = await getCommandById(env, commandId);
+
+  if (!command) {
+    return null;
+  }
+
+  const status = String(command.status || "").trim().toLowerCase();
+
+  if (status === "answered" || status === "failed" || status === "acked") {
+    return command;
+  }
+
+  const result = await dispatchCommandIfNeeded(env, command, runtimeConfig);
+  return result?.command || command;
+}
+
+async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
+  let command = await getCommandById(env, commandId);
+
+  if (!command) {
+    return null;
+  }
+
+  if (command.dispatchMode === DISPATCH_MODE_CLOUD) {
+    return command;
+  }
+
+  const waitMs = command.dispatchMode === DISPATCH_MODE_SLACK ? 5_000 : 3_000;
+  await sleep(waitMs);
+  command = await getCommandById(env, commandId);
+
+  if (!command) {
+    return null;
+  }
+
+  const status = String(command.status || "").trim().toLowerCase();
+
+  if (
+    status === "answered"
+    || status === "failed"
+    || status === "acked"
+    || String(command.firstExecutorAckSeenAt || "").trim()
+    || Number(command.fallbackCount || 0) >= 1
+  ) {
+    return command;
+  }
+
+  if (command.dispatchMode === DISPATCH_MODE_SLACK) {
+    if (canFallbackToLocalBridge(command)) {
+      return fallbackToLocalBridge(env, command, {
+        code: "fallback_to_bridge",
+        stage: "fallback-to-bridge",
+        message: "Direct cloud execution did not acknowledge the task in time. Switched to local bridge.",
+        detail: "No first executor acknowledgement was observed within the fast cloud first-ack window.",
+        fallback: "local-bridge"
+      });
+    }
+
+    const failed = await markCommandFailed(env, {
+      id: command.id,
+      progressStage: "failed",
+      timeoutPhase: "first-ack-timeout",
+      lastDiagnosticCode: "cloud_first_ack_timeout",
+      lastDiagnosticDetail: "No first executor acknowledgement was observed within the fast cloud first-ack window.",
+      errorMessage: stringifyCommandError({
+        code: "cloud_first_ack_timeout",
+        stage: "cloud-first-ack-timeout",
+        message: "Direct cloud execution did not acknowledge the task in time.",
+        detail: "No first executor acknowledgement was observed within the fast cloud first-ack window."
+      })
+    });
+
+    return failed.value || command;
+  }
+
+  if (canFallbackToCloud(command, runtimeConfig)) {
+    const rerouted = await rerouteCommandToSlack(env, {
+      id: command.id,
+      progressStage: "switched-to-cloud",
+      timeoutPhase: "claim-timeout",
+      fallbackReason: "local bridge did not claim the command in time",
+      lastDiagnosticCode: "bridge_claim_timeout",
+      lastDiagnosticDetail: "The local bridge did not claim the command before the fast claim timeout.",
+      errorMessage: stringifyCommandError({
+        code: "fallback_to_cloud",
+        stage: "switched-to-cloud",
+        message: "Local bridge did not claim the command in time. Switched to direct cloud execution.",
+        detail: "The local bridge did not claim the command before the fast claim timeout.",
+        fallback: "cloud"
+      })
+    });
+
+    if (rerouted.ok && rerouted.value) {
+      return dispatchCreatedCommand(env, rerouted.value.id, runtimeConfig);
+    }
+  }
+
+  const failed = await markCommandFailed(env, {
+    id: command.id,
+    progressStage: "failed",
+    actualExecutor: "bridge",
+    timeoutPhase: "claim-timeout",
+    lastDiagnosticCode: "bridge_claim_timeout",
+    lastDiagnosticDetail: "The local bridge did not claim the command before the fast claim timeout.",
+    errorMessage: stringifyCommandError({
+      code: "bridge_claim_timeout",
+      stage: "bridge-claim-timeout",
+      message: "Local bridge did not claim the command in time.",
+      detail: "The local bridge did not claim the command before the fast claim timeout."
+    })
+  });
+
+  return failed.value || command;
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const preflight = handleOptions(request);
@@ -397,7 +706,7 @@ export async function onRequest(context) {
 
     if (commandId) {
       const command = await getCommandById(env, commandId);
-      return json({ command });
+      return json({ command: serializeCommand(command) });
     }
 
     if (scope === "recent") {
@@ -471,7 +780,7 @@ export async function onRequest(context) {
     return json({ ok: true, commands: acked.value });
   }
 
-  if (action === "answer") {
+    if (action === "answer") {
     if (!isAuthorized(request, env)) {
       return json({ error: "Unauthorized." }, { status: 401 });
     }
@@ -482,6 +791,9 @@ export async function onRequest(context) {
       completedAt: payload?.completedAt,
       actualExecutor: payload?.actualExecutor || payload?.actualDispatchMode,
       firstAckAt: payload?.firstAckAt,
+      firstExecutorAckSeenAt: payload?.firstExecutorAckSeenAt,
+      firstReplySeenAt: payload?.firstReplySeenAt,
+      replyIngestedAt: payload?.replyIngestedAt,
       resultAt: payload?.resultAt,
       prUrl: payload?.prUrl,
       branchName: payload?.branchName
@@ -509,6 +821,9 @@ export async function onRequest(context) {
       fallbackCount: payload?.fallbackCount,
       fallbackReason: payload?.fallbackReason,
       firstAckAt: payload?.firstAckAt,
+      firstExecutorAckSeenAt: payload?.firstExecutorAckSeenAt,
+      firstReplySeenAt: payload?.firstReplySeenAt,
+      replyIngestedAt: payload?.replyIngestedAt,
       resultAt: payload?.resultAt,
       timeoutPhase: payload?.timeoutPhase,
       lastDiagnosticCode: payload?.lastDiagnosticCode,
@@ -536,7 +851,7 @@ export async function onRequest(context) {
       return json({ error: claimed.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: claimed.value });
+    return json({ ok: true, command: serializeCommand(claimed.value) });
   }
 
   if (action === "progress") {
@@ -555,7 +870,7 @@ export async function onRequest(context) {
       return json({ error: updated.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: updated.value });
+    return json({ ok: true, command: serializeCommand(updated.value) });
   }
 
   if (action === "requeue") {
@@ -569,7 +884,35 @@ export async function onRequest(context) {
       return json({ error: requeued.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: requeued.value });
+    return json({ ok: true, command: serializeCommand(requeued.value) });
+  }
+
+  if (action === "dispatch") {
+    if (!isAuthorized(request, env)) {
+      return json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    const dispatched = await dispatchCreatedCommand(env, payload?.id, await readRuntimeConfig(env));
+    return json({ ok: true, command: serializeCommand(dispatched) });
+  }
+
+  if (action === "visible") {
+    const commandId = String(payload?.id || "").trim();
+    const clientId = String(payload?.clientId || "").trim();
+    const command = await getCommandById(env, commandId);
+
+    if (!command || !clientId || clientId !== String(command.clientId || "").trim()) {
+      return json({ error: "Command not found." }, { status: 404 });
+    }
+
+    const updated = await upsertCommandDispatchState(env, {
+      id: command.id,
+      status: command.status,
+      progressStage: command.progressStage,
+      uiVisibleAt: payload?.uiVisibleAt || new Date().toISOString()
+    });
+
+    return json({ ok: true, command: serializeCommand(updated.value) });
   }
 
   if (action === "replace") {
@@ -606,9 +949,13 @@ export async function onRequest(context) {
     return json({ error: manifestTarget.error }, { status: 400 });
   }
 
+  const requestStartedAt = new Date().toISOString();
   const created = await insertCommand(env, {
     ...(payload || {}),
     dispatchMode: requestedDispatchMode,
+    uiSubmitStartedAt: payload?.uiSubmitStartedAt,
+    apiCommandsRequestStartedAt: requestStartedAt,
+    commandCreatedAt: new Date().toISOString(),
     projectId: manifestTarget.value.id,
     projectLabel: manifestTarget.value.label,
     projectCategory: manifestTarget.value.group,
@@ -623,14 +970,12 @@ export async function onRequest(context) {
   }
 
   const command = created.value;
-  const dispatched = await dispatchCommandIfNeeded(env, command, runtimeConfig);
+  context.waitUntil((async () => {
+    try {
+      await dispatchCreatedCommand(env, command.id, runtimeConfig);
+      await monitorFirstAckAndFallback(env, command.id, runtimeConfig);
+    } catch {}
+  })());
 
-  if (!dispatched.ok) {
-    return json({
-      error: dispatched.error,
-      command: dispatched.command
-    }, { status: dispatched.status || 502 });
-  }
-
-  return json({ ok: true, command: serializeCommand(dispatched.command) }, { status: 201 });
+  return json({ ok: true, command: serializeCommand(command) }, { status: 201 });
 }
