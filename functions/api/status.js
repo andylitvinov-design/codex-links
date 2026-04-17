@@ -97,7 +97,6 @@ export async function onRequest(context) {
 
   if (request.method === "GET") {
     const runtimeConfig = await readRuntimeConfig(env);
-    await syncRecentSlackReplies(env, runtimeConfig);
     await recoverStaleCommands(env, {
       preferSlack: isSlackDispatchConfigured(runtimeConfig),
       fallbackToLocal: true

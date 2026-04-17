@@ -15,6 +15,7 @@ const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
+const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
@@ -110,6 +111,42 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function runWithProgressHeartbeat(commandId, progressStage, task) {
+  if (!commandId) {
+    return task()
+  }
+
+  let stopped = false
+  let timer = null
+
+  const tick = async () => {
+    if (stopped) {
+      return
+    }
+
+    try {
+      await updateProgress(commandId, progressStage)
+    } finally {
+      if (!stopped) {
+        timer = setTimeout(tick, TURN_PROGRESS_HEARTBEAT_MS)
+        timer.unref?.()
+      }
+    }
+  }
+
+  timer = setTimeout(tick, TURN_PROGRESS_HEARTBEAT_MS)
+  timer.unref?.()
+
+  try {
+    return await task()
+  } finally {
+    stopped = true
+    if (timer) {
+      clearTimeout(timer)
+    }
+  }
+}
+
 async function fetchWithTimeout(resource, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   return fetch(resource, {
     ...init,
@@ -121,7 +158,57 @@ async function getLegacyLinksThreadId() {
   try {
     const toml = await readFile(`${process.env.HOME}/.codex/automations/links-inbox/automation.toml`, "utf8");
     const match = toml.match(/^target_thread_id = "([^"]+)"/m);
-    return match?.[1] || null;
+
+    if (match?.[1]) {
+      return match[1];
+    }
+  } catch {}
+
+  try {
+    return await withCodexAppServer(async ({ request }) => {
+      let cursor = null;
+      let best = null;
+
+      while (true) {
+        const result = await request("thread/list", {
+          limit: 100,
+          archived: false,
+          sourceKinds: ["vscode", "cli"],
+          cursor
+        });
+
+        for (const row of result?.data || []) {
+          const id = String(row?.id || "").trim();
+          const cwd = String(row?.cwd || "").trim();
+          const title = String(row?.name || row?.preview || "").trim();
+          const updatedAt = Number(row?.updatedAt || row?.createdAt || 0);
+
+          if (!id || !isRealThreadId(id)) {
+            continue;
+          }
+
+          if (cwd !== LINKS_REPO_CWD) {
+            continue;
+          }
+
+          if (/^(automation:|task:|autonomous task:|system role|system goal|continue$)/i.test(title)) {
+            continue;
+          }
+
+          if (!best || updatedAt > best.updatedAt) {
+            best = { id, updatedAt };
+          }
+        }
+
+        if (!result?.nextCursor) {
+          break;
+        }
+
+        cursor = result.nextCursor;
+      }
+
+      return best?.id || null;
+    });
   } catch {
     return null;
   }
@@ -654,14 +741,18 @@ while (true) {
     let assistantText = "";
 
     try {
-      const turn = await runTurnStart(threadId, input, {
-        onHeartbeat: async () => {
-          await updateProgress(command.id, "waiting-for-codex");
-        }
-      });
+      const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+        runTurnStart(threadId, input, {
+          onHeartbeat: async () => {
+            await updateProgress(command.id, "waiting-for-codex");
+          }
+        })
+      );
       assistantText = getAssistantTextFromTurn(turn);
     } catch (appServerError) {
-      const result = await runCodexResume(threadId, prompt || "See attached image and respond.", photoPath);
+      const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+        runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
+      );
       assistantText = getImmediateAssistantText(result);
     }
 

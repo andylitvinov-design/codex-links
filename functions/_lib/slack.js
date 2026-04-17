@@ -1,4 +1,5 @@
 import { constantTimeEqual } from "./security.js";
+import { createCommandError } from "./command-debug.js";
 
 const encoder = new TextEncoder();
 
@@ -24,6 +25,12 @@ function buildSlackHeaders(token) {
     authorization: `Bearer ${token}`,
     "content-type": "application/json; charset=utf-8"
   };
+}
+
+function withCommandError(error, input) {
+  const wrapped = error instanceof Error ? error : new Error(String(error || "Slack request failed."))
+  wrapped.commandError = createCommandError(input)
+  return wrapped
 }
 
 async function callSlackApi(token, method, body = null, query = null) {
@@ -90,14 +97,32 @@ async function validateSlackTarget(token, channel, targetUserId) {
   const botUserId = normalizeText(auth.user_id);
 
   if (botUserId && normalizedTarget === botUserId) {
-    throw new Error("SLACK_CODEX_USER_ID points to the Codex Links bot itself, not a Codex worker.");
+    throw withCommandError(
+      new Error("SLACK_CODEX_USER_ID points to the Codex Links bot itself, not a Codex worker."),
+      {
+        code: "codex_target_user_invalid",
+        stage: "codex-target-user-invalid",
+        message: "Configured Slack target user points to the Codex Links bot.",
+        detail: "Set SLACK_CODEX_USER_ID to the Codex worker user, not the app bot user.",
+        fallback: "local-bridge"
+      }
+    );
   }
 
   const members = await callSlackApi(token, "conversations.members", null, { channel });
   const memberIds = Array.isArray(members.members) ? members.members.map((value) => normalizeText(value)) : [];
 
   if (!memberIds.includes(normalizedTarget)) {
-    throw new Error("Configured Slack Codex user is not a member of the dispatch channel.");
+    throw withCommandError(
+      new Error("Configured Slack Codex user is not a member of the dispatch channel."),
+      {
+        code: "codex_target_user_invalid",
+        stage: "codex-target-user-invalid",
+        message: "Configured Slack target user is not in the dispatch channel.",
+        detail: "Invite the target Codex user to SLACK_CODEX_CHANNEL_ID or update SLACK_CODEX_USER_ID.",
+        fallback: "local-bridge"
+      }
+    );
   }
 }
 
@@ -144,7 +169,16 @@ export async function postSlackCommand(env, command, mention) {
   const targetUserId = normalizeText(env?.SLACK_CODEX_USER_ID);
 
   if (!token || !channel) {
-    throw new Error("Slack Codex dispatch is not configured.");
+    throw withCommandError(
+      new Error("Slack Codex dispatch is not configured."),
+      {
+        code: "slack_dispatch_failed",
+        stage: "slack-dispatch-failed",
+        message: "Slack Codex dispatch is not configured.",
+        detail: "Missing SLACK_BOT_TOKEN or SLACK_CODEX_CHANNEL_ID.",
+        fallback: "local-bridge"
+      }
+    );
   }
 
   await validateSlackTarget(token, channel, targetUserId);
@@ -167,7 +201,16 @@ export async function postSlackCommand(env, command, mention) {
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || `Slack dispatch failed with ${response.status}.`);
+    throw withCommandError(
+      new Error(data?.error || `Slack dispatch failed with ${response.status}.`),
+      {
+        code: "slack_dispatch_failed",
+        stage: "slack-dispatch-failed",
+        message: "Slack dispatch failed.",
+        detail: data?.error || `Slack dispatch failed with ${response.status}.`,
+        fallback: "local-bridge"
+      }
+    );
   }
 
   return {

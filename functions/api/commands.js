@@ -28,6 +28,7 @@ import { classifySlackReply, fetchSlackThreadReplies, postSlackCommand } from ".
 import { upsertMessages } from "../_lib/messages.js";
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
+import { stringifyCommandError } from "../_lib/command-debug.js";
 
 function normalizeEntryText(entry) {
   return String(entry?.text || "").trim().toLowerCase();
@@ -110,7 +111,13 @@ function shouldRetryCloudFallback(command) {
     return false;
   }
 
-  if (!errorMessage || !/slack .*falling back to local bridge\./i.test(errorMessage)) {
+  if (
+    !errorMessage
+    || !(
+      /slack .*falling back to local bridge\./i.test(errorMessage)
+      || /cloud (dispatch|reply) timeout\. automatically switched to local bridge\./i.test(errorMessage)
+    )
+  ) {
     return false;
   }
 
@@ -196,7 +203,7 @@ async function syncSlackCommandReplies(env, command) {
     id: command.id,
     dispatchMode: DISPATCH_MODE_SLACK,
     status: classification.status,
-    progressStage: classification.progressStage,
+    progressStage: "slack-reply-received",
     slackChannelId: channelId,
     slackThreadTs: threadTs,
     slackMessageTs: rootTs,
@@ -255,10 +262,19 @@ async function syncRecentSlackReplies(env, runtimeConfig) {
 }
 
 async function fallbackToLocalBridge(env, command, errorMessage) {
+  const normalizedErrorMessage = typeof errorMessage === "string"
+    ? stringifyCommandError({
+        code: "fallback_to_bridge",
+        stage: "fallback-to-bridge",
+        message: errorMessage,
+        detail: errorMessage,
+        fallback: "local-bridge"
+      })
+    : stringifyCommandError(errorMessage);
   const fallback = await fallbackCommandToLocalBridge(env, {
     id: command.id,
-    progressStage: "queued",
-    errorMessage
+    progressStage: "fallback-to-bridge",
+    errorMessage: normalizedErrorMessage
   });
 
   await refreshBridgeStatusFromCommands(env, {
@@ -266,7 +282,7 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
     executorLabel: getDispatchModeLabel(DISPATCH_MODE_LOCAL),
     bridgeOnline: true,
     lastRunAt: new Date().toISOString(),
-    lastError: errorMessage
+    lastError: typeof errorMessage === "string" ? errorMessage : normalizedErrorMessage
   });
 
   return fallback.value || command;
@@ -293,7 +309,13 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     const fallbackCommand = await fallbackToLocalBridge(
       env,
       command,
-      "Cloud does not support photo attachments yet. Falling back to local bridge."
+      {
+        code: "fallback_to_bridge",
+        stage: "fallback-to-bridge",
+        message: "Cloud does not support photo attachments yet. Falling back to local bridge.",
+        detail: "Photo attachments are intentionally forced through the local bridge in v1.",
+        fallback: "local-bridge"
+      }
     );
 
     await refreshBridgeStatusFromCommands(env, {
@@ -315,6 +337,7 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     const dispatched = await markCommandDispatched(env, {
       id: command.id,
       dispatchMode,
+      progressStage: "sent-to-slack",
       slackChannelId: published.channel,
       slackMessageTs: published.ts,
       slackThreadTs: published.threadTs,
@@ -336,10 +359,23 @@ async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Slack dispatch failed.";
+    const detail = error && typeof error === "object" && error.commandError
+      ? error.commandError
+      : {
+          code: "slack_dispatch_failed",
+          stage: "slack-dispatch-failed",
+          message: "Slack dispatch failed. Falling back to local bridge.",
+          detail: errorMessage,
+          fallback: "local-bridge"
+        };
     const fallbackCommand = await fallbackToLocalBridge(
       env,
       command,
-      `Slack dispatch failed. Falling back to local bridge. ${errorMessage}`.trim()
+      {
+        ...detail,
+        message: detail.message || "Slack dispatch failed. Falling back to local bridge.",
+        detail: detail.detail || errorMessage
+      }
     );
 
     return {
@@ -523,7 +559,6 @@ export async function onRequest(context) {
   }
 
   const runtimeConfig = await readRuntimeConfig(env);
-  await syncRecentSlackReplies(env, runtimeConfig);
   const dispatchMode = getConfiguredDispatchMode(runtimeConfig);
   await recoverStaleCommands(env, {
     preferSlack: isSlackDispatchConfigured(runtimeConfig),

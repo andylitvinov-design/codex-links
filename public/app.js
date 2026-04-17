@@ -19,7 +19,7 @@ const state = {
   audioUnlocked: false
 };
 
-const BUILD_VERSION = "20260417-2358";
+const BUILD_VERSION = "20260418-0001";
 const FAST_POLL_INTERVAL_MS = 3500;
 const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
@@ -236,6 +236,7 @@ const commandForm = document.querySelector("#command-form");
 const commandTargetLabel = document.querySelector("#command-target-label");
 const commandThreadSelect = document.querySelector("#command-thread-select");
 const commandPhotoInput = document.querySelector("#command-photo-input");
+const commandPhotoClear = document.querySelector("#command-photo-clear");
 const commandPhotoStatus = document.querySelector("#command-photo-status");
 const commandInput = document.querySelector("#command-input");
 const commandStatus = document.querySelector("#command-status");
@@ -274,9 +275,33 @@ function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Не удалось прочитать фото."));
+    reader.onabort = () => reject(new Error("Чтение фото было прервано браузером."));
+    reader.onerror = () => reject(reader.error || new Error("Не удалось прочитать фото."));
     reader.readAsDataURL(file);
   });
+}
+
+function encodeBase64FromBytes(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
+async function readFileAsDataUrlFallback(file) {
+  if (typeof file?.arrayBuffer !== "function") {
+    throw new Error("Браузер не смог прочитать фото.");
+  }
+
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const contentType = String(file.type || "image/jpeg").toLowerCase();
+  return `data:${contentType};base64,${encodeBase64FromBytes(bytes)}`;
 }
 
 function loadImageFromUrl(url) {
@@ -345,7 +370,16 @@ async function preparePhotoPayload(file) {
   }
 
   if (file.size <= MAX_PHOTO_UPLOAD_BYTES) {
-    const dataUrl = await readFileAsDataUrl(file);
+    let dataUrl = "";
+
+    try {
+      dataUrl = await readFileAsDataUrl(file);
+    } catch (error) {
+      dataUrl = await readFileAsDataUrlFallback(file).catch(() => {
+        throw new Error(String(error?.message || "Не удалось прочитать фото."));
+      });
+    }
+
     return {
       fileName: file.name,
       contentType: String(file.type || "image/jpeg").toLowerCase(),
@@ -573,6 +607,19 @@ function getSelectedThreadIds() {
   return getAllThreadOptions().map((option) => option.id);
 }
 
+function getFilteredBridgeThreadOptions() {
+  const activeCategories = new Set(state.activeThreadCategories);
+  const selectedThreadIds = new Set(getSelectedThreadIds());
+
+  return getAllThreadOptions().filter((option) => {
+    if (activeCategories.size && !activeCategories.has(option.category)) {
+      return false;
+    }
+
+    return selectedThreadIds.has(option.id);
+  });
+}
+
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
   const normalizedId = String(threadId || "").trim();
 
@@ -654,6 +701,18 @@ function renderThreadSettingsSummary() {
 
   if (storage.showAllMessages) {
     threadSettingsSummary.textContent = "Показываются все чаты.";
+    return;
+  }
+
+  const filteredOptions = getFilteredBridgeThreadOptions();
+
+  if (state.activeThreadCategories.length) {
+    if (!filteredOptions.length) {
+      threadSettingsSummary.textContent = "В выбранных категориях нет включённых чатов.";
+      return;
+    }
+
+    threadSettingsSummary.textContent = `Категории: ${state.activeThreadCategories.join(", ")} · чатов в поле: ${filteredOptions.length}.`;
     return;
   }
 
@@ -836,6 +895,23 @@ function activateReplyThread(threadId) {
 
 function formatProgressStage(progressStage, status) {
   const stage = String(progressStage || "").trim();
+  const mapped = {
+    "sending-to-slack": "Готовлю отправку в Slack",
+    "sent-to-slack": "Команда отправлена в Slack",
+    "slack-dispatch-failed": "Slack dispatch не удался",
+    "fallback-to-bridge": "Переведено на bridge",
+    "fallback-to-cloud": "Переведено в Codex Cloud",
+    "slack-reply-received": "Slack reply получен",
+    "slack-signature-failed": "Slack signature не прошла",
+    "reply-not-threaded": "Reply пришёл вне thread",
+    "codex-target-user-invalid": "Неверный Codex target user",
+    "slack-dispatch-timeout": "Slack dispatch timeout",
+    "slack-reply-timeout": "Slack reply timeout"
+  };
+
+  if (mapped[stage]) {
+    return mapped[stage];
+  }
 
   if (stage) {
     return stage.charAt(0).toUpperCase() + stage.slice(1);
@@ -854,6 +930,26 @@ function formatProgressStage(progressStage, status) {
   }
 
   return "В очереди";
+}
+
+function parseCommandErrorDetails(command) {
+  const raw = String(command?.errorMessage || "").trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function formatCommandStage(command) {
@@ -876,6 +972,7 @@ function getCommandDeliveryStatus(command) {
   const status = String(command?.status || "").trim().toLowerCase();
   const stage = String(command?.progressStage || "").trim().toLowerCase();
   const errorMessage = String(command?.errorMessage || "").trim();
+  const errorDetails = parseCommandErrorDetails(command);
 
   if (status === "failed") {
     return {
@@ -908,23 +1005,23 @@ function getCommandDeliveryStatus(command) {
     return null;
   }
 
-  if (/automatically switched to local bridge/i.test(errorMessage)) {
+  if (errorDetails?.code === "fallback_to_bridge" || /automatically switched to local bridge/i.test(errorMessage)) {
     return {
       tone: "queued",
-      text: "Cloud не ответил вовремя. Автоматически перевёл задачу на bridge."
+      text: errorDetails?.message || "Cloud не ответил вовремя. Автоматически перевёл задачу на bridge."
     };
   }
 
-  if (/automatically switched to codex cloud/i.test(errorMessage)) {
+  if (errorDetails?.code === "fallback_to_cloud" || /automatically switched to codex cloud/i.test(errorMessage)) {
     return {
       tone: "queued",
-      text: "Bridge задержался. Автоматически перевёл задачу в Codex Cloud."
+      text: errorDetails?.message || "Bridge задержался. Автоматически перевёл задачу в Codex Cloud."
     };
   }
 
   return {
-    tone: "delivery",
-    text
+    tone: errorDetails ? "error" : "delivery",
+    text: errorDetails?.message || text
   };
 }
 
@@ -975,6 +1072,11 @@ function getCommandFailureMessage(command) {
   }
 
   const message = String(command?.errorMessage || "").trim();
+  const details = parseCommandErrorDetails(command);
+
+  if (details?.message) {
+    return details.detail ? `${details.message} ${details.detail}`.trim() : details.message;
+  }
 
   if (!message) {
     return "Не удалось доставить сообщение.";
@@ -1544,6 +1646,23 @@ function setPhotoStatusMessage(message, tone = "") {
   commandPhotoStatus.dataset.tone = tone;
 }
 
+function syncPhotoClearButton() {
+  if (!commandPhotoClear) {
+    return;
+  }
+
+  commandPhotoClear.disabled = !Boolean(commandPhotoInput?.files?.[0]);
+}
+
+function clearSelectedPhoto(message = "Фото не выбрано.", tone = "") {
+  if (commandPhotoInput) {
+    commandPhotoInput.value = "";
+  }
+
+  setPhotoStatusMessage(message, tone);
+  syncPhotoClearButton();
+}
+
 function setSubmitProgress(stage = "", tone = "") {
   if (!submitProgress) {
     return;
@@ -1702,8 +1821,7 @@ function renderCommandThreads() {
 
   const isCloud = getActiveDispatchMode() === "cloud";
   const options = isCloud ? getAllCloudRepoOptions() : getAllThreadOptions();
-  const visibleIds = new Set(isCloud ? options.map((option) => option.id) : getSelectedThreadIds());
-  const nextOptions = options.filter((option) => visibleIds.has(option.id));
+  const nextOptions = isCloud ? options : getFilteredBridgeThreadOptions();
   const currentValue = String(
     commandThreadSelect.dataset.pendingValue
     || commandThreadSelect.value
@@ -1927,6 +2045,7 @@ async function submitCommand(event) {
   const fallbackThreadId = String(storage.activeBridgeThreadId || getAllThreadOptions()[0]?.id || "").trim();
   const fallbackThreadLabel = getThreadDisplayLabel(fallbackThreadId, "");
   const photoFile = commandPhotoInput?.files?.[0];
+  const requestedCloudMode = requestedDispatchMode === "cloud";
   const forceBridgeForPhoto = requestedDispatchMode === "cloud" && Boolean(photoFile);
   const dispatchMode = forceBridgeForPhoto ? "bridge" : requestedDispatchMode;
   const threadId = forceBridgeForPhoto && fallbackThreadId
@@ -1941,7 +2060,7 @@ async function submitCommand(event) {
     return;
   }
 
-  if (requestedDispatchMode === "cloud" && !cloudRepo) {
+  if (requestedCloudMode && !cloudRepo) {
     setCommandStatusMessage("Для Codex Cloud сначала выберите GitHub-репозиторий.", { tone: "error" });
     return;
   }
@@ -1962,13 +2081,13 @@ async function submitCommand(event) {
     targetExecutionMode: dispatchMode
   };
 
-  if (cloudRepo) {
+  if (requestedCloudMode && cloudRepo) {
     payload.targetRepo = cloudRepo.nameWithOwner;
     payload.targetRepoUrl = cloudRepo.url;
     payload.targetContextFiles = Array.isArray(cloudRepo.contextFiles) ? cloudRepo.contextFiles : [];
   }
 
-  if (dispatchMode === "cloud" && fallbackThreadId) {
+  if (requestedCloudMode && fallbackThreadId) {
     payload.fallbackThreadId = fallbackThreadId;
     payload.fallbackThreadLabel = fallbackThreadLabel;
   }
@@ -1999,14 +2118,10 @@ async function submitCommand(event) {
   }
 
   commandInput.value = "";
-
-  if (commandPhotoInput) {
-    commandPhotoInput.value = "";
-    setPhotoStatusMessage("Фото не выбрано.");
-  }
+  clearSelectedPhoto();
 
   setSubmitProgress("processing", "processing");
-  setCommandStatusMessage("Обработка…", { tone: "processing" });
+  setCommandStatusMessage(dispatchMode === "cloud" ? "Команда отправлена в Slack…" : "Обработка…", { tone: "processing" });
   await refreshAll();
 }
 
@@ -2105,7 +2220,7 @@ function bindEvents() {
     const file = commandPhotoInput.files?.[0];
 
     if (!file) {
-      setPhotoStatusMessage("Фото не выбрано.");
+      clearSelectedPhoto();
       return;
     }
 
@@ -2115,7 +2230,12 @@ function bindEvents() {
     const suffix = getActiveDispatchMode() === "cloud"
       ? " · для фото будет использован bridge"
       : "";
+    syncPhotoClearButton();
     setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})${suffix}`);
+  });
+
+  commandPhotoClear?.addEventListener("click", () => {
+    clearSelectedPhoto("Фото удалено из формы.");
   });
 
   threadSettingsToggle?.addEventListener("click", () => {
@@ -2146,9 +2266,13 @@ function bindEvents() {
   });
 
   threadSettingsSelectAll?.addEventListener("click", () => {
-    storage.selectedThreadIds = getAllThreadOptions().map((option) => option.id);
+    const visibleOptions = state.activeThreadCategories.length
+      ? getAllThreadOptions().filter((option) => state.activeThreadCategories.includes(option.category))
+      : getAllThreadOptions();
+    storage.selectedThreadIds = visibleOptions.map((option) => option.id);
     renderCommandThreads();
     renderThreadSettingsList();
+    setCommandStatusMessage("В поле Беседа добавлены чаты из текущих категорий.");
   });
 
   threadSettingsClear?.addEventListener("click", () => {
@@ -2213,7 +2337,7 @@ async function boot() {
     commandInput.value = "";
   }
 
-  setPhotoStatusMessage("Фото не выбрано.");
+  clearSelectedPhoto();
   bindEvents();
 
   if (await ensureLatestClient()) {
