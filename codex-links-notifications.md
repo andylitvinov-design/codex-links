@@ -1,0 +1,96 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - heading "Ссылки" [level=1] [ref=e5]
+      - generic [ref=e6]:
+        - tablist "Режим отправки" [ref=e7]:
+          - tab "Bridge" [selected] [ref=e8] [cursor=pointer]:
+            - generic [ref=e10]: Bridge
+          - tab "Cloud" [ref=e11] [cursor=pointer]:
+            - generic [ref=e13]: Cloud
+        - button "Refresh" [ref=e14] [cursor=pointer]
+    - navigation "Проекты из dispatch manifest" [ref=e15]:
+      - generic [ref=e201]:
+        - generic [ref=e202]: brain
+        - generic [ref=e203]:
+          - button "advice bridge-only" [ref=e204] [cursor=pointer]:
+            - generic [ref=e205]: advice
+            - generic [ref=e206]: bridge-only
+          - button "management cloud-ready" [ref=e207] [cursor=pointer]:
+            - generic [ref=e208]: management
+            - generic [ref=e209]: cloud-ready
+      - generic [ref=e210]:
+        - generic [ref=e211]: myprojects
+        - generic [ref=e212]:
+          - button "alchemy bridge-only" [ref=e213] [cursor=pointer]:
+            - generic [ref=e214]: alchemy
+            - generic [ref=e215]: bridge-only
+          - button "artefacts cloud-ready" [ref=e216] [cursor=pointer]:
+            - generic [ref=e217]: artefacts
+            - generic [ref=e218]: cloud-ready
+          - button "ezohata bridge-only" [ref=e219] [cursor=pointer]:
+            - generic [ref=e220]: ezohata
+            - generic [ref=e221]: bridge-only
+          - button "links cloud-ready" [ref=e222] [cursor=pointer]:
+            - generic [ref=e223]: links
+            - generic [ref=e224]: cloud-ready
+          - button "sales bridge-only" [ref=e225] [cursor=pointer]:
+            - generic [ref=e226]: sales
+            - generic [ref=e227]: bridge-only
+    - generic [ref=e16]:
+      - paragraph [ref=e17]: "Статус: Codex Cloud via Slack · running"
+      - paragraph [ref=e18]: "Watchdog: ошибок нет"
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: Живые ссылки
+        - paragraph [ref=e22]: Готовая страница со списком опубликованных проектов и рабочих online-ссылок.
+      - link "Открыть список проектов" [ref=e23] [cursor=pointer]:
+        - /url: /projects.html
+    - generic [ref=e24]:
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - generic [ref=e28]: Проект
+            - combobox "Проект" [ref=e84]:
+              - option "advice · bridge-only"
+              - option "management · cloud-ready"
+              - option "alchemy · bridge-only"
+              - option "artefacts · cloud-ready"
+              - option "ezohata · bridge-only"
+              - option "links · cloud-ready" [selected]
+              - option "sales · bridge-only"
+          - button "Меню" [ref=e30] [cursor=pointer]
+        - generic [ref=e31]:
+          - generic [ref=e32]: "Выбран проект: myprojects / links · cloud-ready."
+          - generic [ref=e33]:
+            - checkbox "Все" [ref=e34]
+            - generic [ref=e35]: Все
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - generic [ref=e38]: Фото
+            - button "Фото" [ref=e39]
+          - button "Удалить фото" [disabled] [ref=e40]
+        - paragraph [ref=e41]: Фото не выбрано.
+        - generic [ref=e42]:
+          - textbox "Сообщение для Codex" [ref=e43]
+          - button "Отправить в Codex" [ref=e44] [cursor=pointer]:
+            - generic [ref=e45]: ▶
+        - generic [ref=e46]:
+          - generic [ref=e85]: Сообщение в очереди (cloud)…
+          - generic "Стадия обработки запроса" [ref=e48]
+      - navigation "Меню чатов" [ref=e54]:
+        - button "Диалоги" [ref=e55] [cursor=pointer]
+        - button "Уведомления" [active] [ref=e56] [cursor=pointer]
+      - generic [ref=e86]:
+        - article [ref=e187]:
+          - generic [ref=e188]:
+            - strong [ref=e189]: Система
+            - time [ref=e190]: 17.04.2026, 08:30
+          - paragraph [ref=e191]: готово
+          - generic [ref=e193]: Системное сообщение
+        - article [ref=e194]:
+          - generic [ref=e195]:
+            - strong [ref=e196]: Система
+            - time [ref=e197]: 15.04.2026, 15:43
+          - paragraph [ref=e198]: Cloud dispatch недоступен. Команда автоматически переведена на локальный bridge.
+          - generic [ref=e200]: Системное сообщение

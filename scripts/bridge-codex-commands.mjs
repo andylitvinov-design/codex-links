@@ -10,11 +10,13 @@ const token = process.env.LINKS_WRITE_TOKEN;
 const EXEC_TIMEOUT_MS = 4 * 60 * 1000;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15 * 1000;
-const BRIDGE_RUN_TIMEOUT_MS = 10 * 60 * 1000;
+const BRIDGE_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
-const IDLE_DRAIN_WINDOW_MS = 20 * 1000;
+const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
+const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
+const STATUS_HEARTBEAT_MS = 10 * 1000;
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
@@ -27,6 +29,7 @@ const bridgeRunWatchdog = setTimeout(() => {
 }, BRIDGE_RUN_TIMEOUT_MS);
 
 bridgeRunWatchdog.unref();
+let lastBridgeHeartbeatAt = 0;
 
 function getPendingUrl() {
   const url = new URL("/api/commands", baseUrl);
@@ -76,8 +79,74 @@ function isRealThreadId(value) {
   return /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(String(value || "").trim());
 }
 
+function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
+  const sourceThreadId = String(command?.threadId || "").trim();
+  const sourceThreadLabel = String(command?.threadLabel || "").trim();
+  const fallbackThreadId = String(command?.fallbackThreadId || "").trim();
+  const fallbackThreadLabel = String(command?.fallbackThreadLabel || "").trim();
+  let threadId = sourceThreadId;
+  let threadLabel = sourceThreadLabel;
+
+  if (!isRealThreadId(threadId) && isRealThreadId(fallbackThreadId)) {
+    threadId = fallbackThreadId;
+    threadLabel = fallbackThreadLabel || threadLabel;
+  }
+
+  if (!isRealThreadId(threadId)) {
+    if (
+      threadId.toLowerCase() === "links"
+      || threadLabel.toLowerCase() === "links"
+    ) {
+      threadId = legacyLinksThreadId || "";
+    }
+  }
+
+  return {
+    executionThreadId: threadId,
+    executionThreadLabel: threadLabel,
+    sourceThreadId,
+    sourceThreadLabel
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithProgressHeartbeat(commandId, progressStage, task) {
+  if (!commandId) {
+    return task()
+  }
+
+  let stopped = false
+  let timer = null
+
+  const tick = async () => {
+    if (stopped) {
+      return
+    }
+
+    try {
+      await updateProgress(commandId, progressStage)
+    } finally {
+      if (!stopped) {
+        timer = setTimeout(tick, TURN_PROGRESS_HEARTBEAT_MS)
+        timer.unref?.()
+      }
+    }
+  }
+
+  timer = setTimeout(tick, TURN_PROGRESS_HEARTBEAT_MS)
+  timer.unref?.()
+
+  try {
+    return await task()
+  } finally {
+    stopped = true
+    if (timer) {
+      clearTimeout(timer)
+    }
+  }
 }
 
 async function fetchWithTimeout(resource, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
@@ -91,7 +160,57 @@ async function getLegacyLinksThreadId() {
   try {
     const toml = await readFile(`${process.env.HOME}/.codex/automations/links-inbox/automation.toml`, "utf8");
     const match = toml.match(/^target_thread_id = "([^"]+)"/m);
-    return match?.[1] || null;
+
+    if (match?.[1]) {
+      return match[1];
+    }
+  } catch {}
+
+  try {
+    return await withCodexAppServer(async ({ request }) => {
+      let cursor = null;
+      let best = null;
+
+      while (true) {
+        const result = await request("thread/list", {
+          limit: 100,
+          archived: false,
+          sourceKinds: ["vscode", "cli"],
+          cursor
+        });
+
+        for (const row of result?.data || []) {
+          const id = String(row?.id || "").trim();
+          const cwd = String(row?.cwd || "").trim();
+          const title = String(row?.name || row?.preview || "").trim();
+          const updatedAt = Number(row?.updatedAt || row?.createdAt || 0);
+
+          if (!id || !isRealThreadId(id)) {
+            continue;
+          }
+
+          if (cwd !== LINKS_REPO_CWD) {
+            continue;
+          }
+
+          if (/^(automation:|task:|autonomous task:|system role|system goal|continue$)/i.test(title)) {
+            continue;
+          }
+
+          if (!best || updatedAt > best.updatedAt) {
+            best = { id, updatedAt };
+          }
+        }
+
+        if (!result?.nextCursor) {
+          break;
+        }
+
+        cursor = result.nextCursor;
+      }
+
+      return best?.id || null;
+    });
   } catch {
     return null;
   }
@@ -135,7 +254,7 @@ async function materializePhoto(command) {
 
 function buildInput(command, photoPath) {
   const items = [];
-  const text = sanitizeBridgeText(command?.text);
+  const text = buildBridgePrompt(command);
 
   if (text) {
     items.push({
@@ -155,6 +274,19 @@ function buildInput(command, photoPath) {
   return items;
 }
 
+function buildBridgeContextFilePaths(command) {
+  const workspacePath = String(command?.targetWorkspacePath || "").trim();
+  const contextFiles = Array.isArray(command?.targetContextFiles)
+    ? command.targetContextFiles.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+
+  if (!workspacePath || !contextFiles.length) {
+    return [];
+  }
+
+  return contextFiles.map((file) => join(workspacePath, file));
+}
+
 function sanitizeBridgeText(rawText) {
   const text = String(rawText || "").replace(/\r/g, "").trim();
 
@@ -171,6 +303,43 @@ function sanitizeBridgeText(rawText) {
   }
 
   return text;
+}
+
+function buildBridgePrompt(command) {
+  const userRequest = sanitizeBridgeText(command?.text);
+  const projectCategory = String(command?.projectCategory || "").trim() || "other";
+  const projectLabel = String(command?.projectLabel || command?.threadLabel || command?.threadId || "").trim() || "links";
+  const projectId = String(command?.projectId || command?.threadId || "").trim() || "links";
+  const targetRepo = String(command?.targetRepo || "").trim();
+  const targetRepoUrl = String(command?.targetRepoUrl || "").trim();
+  const workspacePath = String(command?.targetWorkspacePath || "").trim();
+  const contextFilePaths = buildBridgeContextFilePaths(command);
+  const contextLine = contextFilePaths.length
+    ? `Start by reading these project context files in order: ${contextFilePaths.join(" -> ")}.`
+    : "Start by reading the selected project context files first.";
+  const photoNote = command?.photo
+    ? "A photo is attached to this request. Use it together with the project context files."
+    : "";
+
+  return [
+    "New Codex Links bridge task.",
+    "",
+    `Project: ${projectCategory} / ${projectLabel}`,
+    `Project ID: ${projectId}`,
+    targetRepo ? `Repository: ${targetRepo}` : "",
+    targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
+    workspacePath ? `Workspace path: ${workspacePath}` : "",
+    `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
+    `Command ID: ${String(command?.id || "").trim()}`,
+    "Mode: work only inside the selected project boundary.",
+    "Do not switch to sibling repositories or unrelated workspace folders.",
+    contextLine,
+    "Delivery rule: read the context files before changing code, then respond in the same conversation.",
+    "",
+    "User request:",
+    userRequest || "User sent a photo-only request.",
+    photoNote
+  ].filter(Boolean).join("\n");
 }
 
 function runCodexResume(threadId, prompt, photoPath) {
@@ -317,6 +486,8 @@ async function updateProgress(commandId, progressStage) {
     const body = await response.text();
     throw new Error(`Failed to update command progress: ${response.status} ${body}`);
   }
+
+  await publishBridgeHeartbeat("running");
 }
 
 async function acknowledge(ids) {
@@ -339,6 +510,65 @@ async function acknowledge(ids) {
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Failed to ack commands: ${response.status} ${body}`);
+  }
+}
+
+function extractPrUrl(text) {
+  const match = String(text || "").match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/i);
+  return match ? match[0] : "";
+}
+
+async function markAnswered(commandId, assistantText, completedAt) {
+  if (!commandId) {
+    return;
+  }
+
+  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-write-token": token
+    },
+    body: JSON.stringify({
+      action: "answer",
+      id: commandId,
+      progressStage: "answered",
+      completedAt,
+      actualDispatchMode: "bridge",
+      prUrl: extractPrUrl(assistantText)
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to mark command answered: ${response.status} ${body}`);
+  }
+}
+
+async function markFailed(commandId, errorMessage, completedAt) {
+  if (!commandId) {
+    return;
+  }
+
+  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-write-token": token
+    },
+    body: JSON.stringify({
+      action: "fail",
+      id: commandId,
+      progressStage: "failed",
+      completedAt,
+      actualDispatchMode: "bridge",
+      errorMessage
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to mark command failed: ${response.status} ${body}`);
   }
 }
 
@@ -376,6 +606,21 @@ async function publishBridgeStatus(status) {
     const body = await response.text();
     throw new Error(`Failed to publish bridge status: ${response.status} ${body}`);
   }
+}
+
+async function publishBridgeHeartbeat(state = "running", force = false) {
+  const now = Date.now();
+
+  if (!force && (now - lastBridgeHeartbeatAt) < STATUS_HEARTBEAT_MS) {
+    return;
+  }
+
+  lastBridgeHeartbeatAt = now;
+  await publishBridgeStatus({
+    bridgeOnline: true,
+    state,
+    lastRunAt: new Date(now).toISOString()
+  });
 }
 
 function createMessageId(threadId, timestamp, text) {
@@ -552,12 +797,17 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
     return;
   }
 
-  if (batchCompleted.length) {
-    await acknowledge(batchCompleted.map((command) => command.id));
-  }
-
   if (batchMessages.length) {
     await syncMessages(batchMessages);
+  }
+
+  for (const command of batchCompleted) {
+    if (command.result === "failed") {
+      await markFailed(command.id, command.errorMessage, command.completedAt);
+      continue;
+    }
+
+    await markAnswered(command.id, command.assistantText, command.completedAt);
   }
 }
 
@@ -573,11 +823,14 @@ await publishBridgeStatus({
   lastDeliveredCount: 0,
   lastError: ""
 });
+lastBridgeHeartbeatAt = Date.now();
 
 while (true) {
   const command = await claimNextCommand();
 
   if (!command) {
+    await publishBridgeHeartbeat("running");
+
     if (Date.now() >= idleDrainUntil) {
       break;
     }
@@ -591,17 +844,12 @@ while (true) {
   try {
     await updateProgress(command.id, "claimed");
 
-    let threadId = String(command?.threadId || "").trim();
-    const threadLabel = String(command?.threadLabel || "").trim();
-
-    if (!isRealThreadId(threadId)) {
-      if (
-        threadId.toLowerCase() === "links" ||
-        threadLabel.toLowerCase() === "links"
-      ) {
-        threadId = legacyLinksThreadId || "";
-      }
-    }
+    const {
+      executionThreadId,
+      sourceThreadId,
+      sourceThreadLabel
+    } = getResolvedExecutionThread(command, legacyLinksThreadId);
+    let threadId = executionThreadId;
 
     if (!threadId) {
       throw new Error("Missing threadId.");
@@ -629,14 +877,18 @@ while (true) {
     let assistantText = "";
 
     try {
-      const turn = await runTurnStart(threadId, input, {
-        onHeartbeat: async () => {
-          await updateProgress(command.id, "waiting-for-codex");
-        }
-      });
+      const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+        runTurnStart(threadId, input, {
+          onHeartbeat: async () => {
+            await updateProgress(command.id, "waiting-for-codex");
+          }
+        })
+      );
       assistantText = getAssistantTextFromTurn(turn);
     } catch (appServerError) {
-      const result = await runCodexResume(threadId, prompt || "See attached image and respond.", photoPath);
+      const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+        runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
+      );
       assistantText = getImmediateAssistantText(result);
     }
 
@@ -653,13 +905,18 @@ while (true) {
 
     await updateProgress(command.id, "saving-reply");
 
+    const deliveryThreadId = sourceThreadId || threadId;
+    const deliveryThreadLabel = sourceThreadLabel || command.threadLabel || deliveryThreadId;
+
     const completedEntry = {
       id: command.id,
-      threadId,
-      threadLabel: command.threadLabel || threadId,
-      ackedAt
+      threadId: deliveryThreadId,
+      threadLabel: deliveryThreadLabel,
+      completedAt: ackedAt,
+      assistantText,
+      result: "answered"
     };
-    const syncedMessage = createAssistantMessage(command, threadId, command.threadLabel || threadId, assistantText, ackedAt);
+    const syncedMessage = createAssistantMessage(command, deliveryThreadId, deliveryThreadLabel, assistantText, ackedAt);
 
     completed.push(completedEntry);
     syncedMessages.push(syncedMessage);
@@ -681,13 +938,16 @@ while (true) {
       id: command.id,
       threadId,
       threadLabel,
-      ackedAt
+      completedAt: ackedAt,
+      assistantText: assistantText || getFailureAssistantText(error),
+      errorMessage: error.message || getFailureAssistantText(error),
+      result: assistantText ? "answered" : "failed"
     };
     const syncedMessage = createAssistantMessage(
       command,
       threadId,
       threadLabel,
-      assistantText || getFailureAssistantText(error),
+      completedEntry.assistantText,
       ackedAt
     );
 

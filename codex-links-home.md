@@ -1,0 +1,152 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - heading "Ссылки" [level=1] [ref=e5]
+      - generic [ref=e6]:
+        - tablist "Режим отправки" [ref=e7]:
+          - tab "Bridge" [selected] [ref=e8] [cursor=pointer]:
+            - generic [ref=e10]: Bridge
+          - tab "Cloud" [ref=e11] [cursor=pointer]:
+            - generic [ref=e13]: Cloud
+        - button "Refresh" [ref=e14] [cursor=pointer]
+    - navigation "Проекты из dispatch manifest" [ref=e15]:
+      - generic [ref=e57]:
+        - generic [ref=e58]: brain
+        - generic [ref=e59]:
+          - button "advice bridge-only" [ref=e60] [cursor=pointer]:
+            - generic [ref=e61]: advice
+            - generic [ref=e62]: bridge-only
+          - button "management cloud-ready" [ref=e63] [cursor=pointer]:
+            - generic [ref=e64]: management
+            - generic [ref=e65]: cloud-ready
+      - generic [ref=e66]:
+        - generic [ref=e67]: myprojects
+        - generic [ref=e68]:
+          - button "alchemy bridge-only" [ref=e69] [cursor=pointer]:
+            - generic [ref=e70]: alchemy
+            - generic [ref=e71]: bridge-only
+          - button "artefacts cloud-ready" [ref=e72] [cursor=pointer]:
+            - generic [ref=e73]: artefacts
+            - generic [ref=e74]: cloud-ready
+          - button "ezohata bridge-only" [ref=e75] [cursor=pointer]:
+            - generic [ref=e76]: ezohata
+            - generic [ref=e77]: bridge-only
+          - button "links cloud-ready" [ref=e78] [cursor=pointer]:
+            - generic [ref=e79]: links
+            - generic [ref=e80]: cloud-ready
+          - button "sales bridge-only" [ref=e81] [cursor=pointer]:
+            - generic [ref=e82]: sales
+            - generic [ref=e83]: bridge-only
+    - generic [ref=e16]:
+      - paragraph [ref=e17]: "Статус: Codex Cloud via Slack · running"
+      - paragraph [ref=e18]: "Watchdog: ошибок нет"
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: Живые ссылки
+        - paragraph [ref=e22]: Готовая страница со списком опубликованных проектов и рабочих online-ссылок.
+      - link "Открыть список проектов" [ref=e23] [cursor=pointer]:
+        - /url: /projects.html
+    - generic [ref=e24]:
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - generic [ref=e28]: Проект
+            - combobox "Проект" [ref=e84]:
+              - option "advice · bridge-only"
+              - option "management · cloud-ready"
+              - option "alchemy · bridge-only"
+              - option "artefacts · cloud-ready"
+              - option "ezohata · bridge-only"
+              - option "links · cloud-ready" [selected]
+              - option "sales · bridge-only"
+          - button "Меню" [ref=e30] [cursor=pointer]
+        - generic [ref=e31]:
+          - generic [ref=e32]: "Выбран проект: myprojects / links · cloud-ready."
+          - generic [ref=e33]:
+            - checkbox "Все" [ref=e34]
+            - generic [ref=e35]: Все
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - generic [ref=e38]: Фото
+            - button "Фото" [ref=e39]
+          - button "Удалить фото" [disabled] [ref=e40]
+        - paragraph [ref=e41]: Фото не выбрано.
+        - generic [ref=e42]:
+          - textbox "Сообщение для Codex" [ref=e43]
+          - button "Отправить в Codex" [ref=e44] [cursor=pointer]:
+            - generic [ref=e45]: ▶
+        - generic [ref=e46]:
+          - generic [ref=e85]: Сообщение в очереди (cloud)…
+          - generic "Стадия обработки запроса" [ref=e48]
+      - navigation "Меню чатов" [ref=e54]:
+        - button "Диалоги" [ref=e55] [cursor=pointer]
+        - button "Уведомления" [ref=e56] [cursor=pointer]
+      - generic [ref=e86]:
+        - article [ref=e87]:
+          - generic [ref=e88]:
+            - strong [ref=e89]: Вы
+            - time [ref=e90]: 17.04.2026, 14:31
+          - generic [ref=e91]:
+            - generic [ref=e92]: myprojects / links
+            - generic [ref=e93]: cloud-ready
+            - code [ref=e94]: andylitvinov-design/codex-links
+            - generic [ref=e95]: "delivery: cloud"
+          - paragraph [ref=e96]: Все ошибки и открытия за последнюю неделю собери в лог чтобы не потерялось
+          - generic [ref=e97]: Bridge не забрал сообщение из очереди вовремя. · cloud
+          - generic [ref=e99]: Queued · только что
+        - article [ref=e100]:
+          - generic [ref=e101]:
+            - strong [ref=e102]: Вы
+            - time [ref=e103]: 17.04.2026, 13:54
+          - generic [ref=e104]:
+            - generic [ref=e105]: myprojects / links
+            - generic [ref=e106]: cloud-ready
+            - code [ref=e107]: andylitvinov-design/codex-links
+            - generic [ref=e108]: "delivery: cloud"
+          - paragraph [ref=e109]: Сробщения через бридж зависли. Исправь
+          - generic [ref=e110]: Bridge не забрал сообщение из очереди вовремя. · cloud
+          - generic [ref=e112]: Queued · только что
+        - article [ref=e113]:
+          - generic [ref=e114]:
+            - strong [ref=e115]: Вы
+            - time [ref=e116]: 17.04.2026, 13:46
+          - generic [ref=e117]:
+            - generic [ref=e118]: myprojects / links
+            - generic [ref=e119]: cloud-ready
+            - code [ref=e120]: andylitvinov-design/codex-links
+            - generic [ref=e121]: "delivery: cloud"
+          - paragraph [ref=e122]: "Внедри правило в течении сегодня проверять проект cloud-links каждые 30 минут доходят ли нормально сообщения через cloud и bridge в кодекс и обратно. И исправлять И во вкладку уведомления высылать отчет: - проверено. Все ок Или - проверено. Исправляю"
+          - generic [ref=e123]: Bridge не забрал сообщение из очереди вовремя. · cloud
+          - generic [ref=e125]: Queued · только что
+        - article [ref=e126]:
+          - generic [ref=e127]:
+            - strong [ref=e128]: Вы
+            - time [ref=e129]: 17.04.2026, 13:26
+          - generic [ref=e130]:
+            - generic [ref=e131]: myprojects / links
+            - generic [ref=e132]: cloud-ready
+            - code [ref=e133]: andylitvinov-design/codex-links
+            - generic [ref=e134]: "delivery: bridge"
+          - paragraph [ref=e135]: Исправь проблему с cloud
+          - generic [ref=e136]: К сообщению приложено фото.
+          - group [ref=e137]:
+            - generic "▼ Ответ Codex bridge" [ref=e138] [cursor=pointer]:
+              - generic [ref=e139]: ▼ Ответ Codex
+              - generic [ref=e140]: bridge
+          - generic [ref=e142]: Ответ получен · 37 мин назад
+        - article [ref=e143]:
+          - generic [ref=e144]:
+            - strong [ref=e145]: Вы
+            - time [ref=e146]: 17.04.2026, 13:11
+          - generic [ref=e147]:
+            - generic [ref=e148]: myprojects / links
+            - generic [ref=e149]: cloud-ready
+            - code [ref=e150]: andylitvinov-design/codex-links
+            - generic [ref=e151]: "delivery: bridge"
+          - paragraph [ref=e152]: Проверь и Исправь проблемы загрузки через cloud
+          - generic [ref=e153]: К сообщению приложено фото.
+          - group [ref=e154]:
+            - generic "▼ Ответ Codex bridge" [ref=e155] [cursor=pointer]:
+              - generic [ref=e156]: ▼ Ответ Codex
+              - generic [ref=e157]: bridge
+          - generic [ref=e159]: Ответ получен · 71 мин назад

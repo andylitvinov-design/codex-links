@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260416-2320" />
+    <link rel="stylesheet" href="/styles.css?v=20260418-0011" />
   </head>
   <body>
     <main class="page">
@@ -19,16 +19,29 @@
         <header class="chat-header">
           <h1>Ссылки</h1>
           <div class="header-actions">
-            <a class="button button-secondary header-link-button" href="/projects.html">Projects</a>
-            <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
-            <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
+            <div class="dispatch-toggle" id="dispatch-toggle" role="tablist" aria-label="Режим отправки">
+              <button class="dispatch-toggle-button is-active" id="dispatch-mode-bridge" type="button" data-mode="bridge" role="tab" aria-selected="true">
+                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
+                <span>Bridge</span>
+              </button>
+              <button class="dispatch-toggle-button" id="dispatch-mode-cloud" type="button" data-mode="cloud" role="tab" aria-selected="false">
+                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
+                <span>Cloud</span>
+              </button>
+            </div>
             <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
           </div>
         </header>
+        <section id="project-nav" class="project-nav" aria-label="Проекты из dispatch manifest">
+          <label class="thread-select-field project-nav-field">
+            <span class="field-label" id="command-target-label">Проект</span>
+            <select id="command-thread-select" name="thread"></select>
+          </label>
+          <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
+        </section>
         <section class="bridge-status-block">
           <p id="bridge-status-text" class="bridge-status">Подключаю статус Codex Cloud…</p>
           <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
-          <p class="ops-release-notice">Изменение считается завершённым только после ветки или PR в GitHub и понятного deploy status.</p>
         </section>
 
         <section class="projects-entry">
@@ -41,15 +54,8 @@
 
         <section class="command-wrap">
           <form id="command-form" class="command-form">
-            <div class="thread-select-row">
-              <label class="thread-select-field">
-                <span class="field-label">Беседа Codex</span>
-                <select id="command-thread-select" name="thread"></select>
-              </label>
-              <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
-            </div>
             <div class="thread-settings-inline-row">
-              <span id="thread-settings-summary" class="form-status">Показываются все чаты.</span>
+              <span id="thread-settings-summary" class="form-status">Показываются все репозитории.</span>
               <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
                 <input id="thread-settings-show-all" type="checkbox" />
                 <span>Все</span>
@@ -58,7 +64,7 @@
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
                 <span class="field-label">Поиск по чатам</span>
-                <input id="thread-settings-search" type="search" placeholder="Название категории или чата" />
+                <input id="thread-settings-search" type="search" placeholder="Название категории или репозитория" />
               </label>
               <section class="thread-categories">
                 <div class="thread-categories-top">
@@ -74,10 +80,13 @@
               </div>
               <div id="thread-settings-list" class="thread-settings-list" aria-live="polite"></div>
             </section>
-            <label>
-              <span class="field-label">Фото</span>
-              <input id="command-photo-input" name="photo" type="file" accept="image/*" />
-            </label>
+            <div class="command-photo-row">
+              <label class="command-photo-field">
+                <span class="field-label">Фото</span>
+                <input id="command-photo-input" name="photo" type="file" accept="image/*" />
+              </label>
+              <button class="button button-secondary command-photo-clear" id="command-photo-clear" type="button" disabled>Удалить фото</button>
+            </div>
             <p id="command-photo-status" class="form-status command-photo-status">Фото не выбрано.</p>
             <div class="command-compose-row">
               <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true"></textarea>
@@ -98,12 +107,16 @@
               </div>
             </div>
           </form>
+          <nav class="timeline-tabs" aria-label="Меню чатов">
+            <button class="timeline-tab-button is-active" id="timeline-tab-dialog" type="button" data-tab="dialog">Диалоги</button>
+            <button class="timeline-tab-button" id="timeline-tab-notifications" type="button" data-tab="notifications">Уведомления</button>
+          </nav>
           <div id="command-timeline" class="command-timeline" aria-live="polite"></div>
         </section>
 
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260416-2320"></script>
+    <script type="module" src="/app.js?v=20260418-0011"></script>
   </body>
 </html>

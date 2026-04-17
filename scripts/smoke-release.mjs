@@ -23,6 +23,14 @@ async function main() {
     failures.push("public/app.js BUILD_VERSION does not match public/version.json.");
   }
 
+  if (!appJs.includes("if (await ensureLatestClient()) {")) {
+    failures.push("public/app.js must trigger ensureLatestClient before polling or boot refresh.");
+  }
+
+  if (!appJs.includes("document.addEventListener(\"visibilitychange\"")) {
+    failures.push("public/app.js must re-check the latest build when the tab becomes visible.");
+  }
+
   if (!indexHtml.includes(`/styles.css?v=${build}`) || !indexHtml.includes(`/app.js?v=${build}`)) {
     failures.push("public/index.html asset cache-busting parameters do not match the build id.");
   }

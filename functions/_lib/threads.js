@@ -30,6 +30,16 @@ function normalizeThreadMessageCount(rawThreadMessageCount) {
   return Math.floor(value);
 }
 
+function normalizeThreadTimestamp(rawThreadTimestamp) {
+  const value = Number(rawThreadTimestamp);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return Math.floor(value);
+}
+
 function normalizeDisplayLabel(rawDisplayLabel, label, category) {
   const displayLabel = String(rawDisplayLabel || "")
     .replace(/\s+/g, " ")
@@ -67,13 +77,15 @@ function normalizeThread(input) {
   const label = normalizeThreadLabel(input.label, id);
   const displayLabel = normalizeDisplayLabel(input.displayLabel, label, category);
   const messageCount = normalizeThreadMessageCount(input.messageCount);
+  const createdAt = normalizeThreadTimestamp(input.createdAt);
+  const updatedAt = normalizeThreadTimestamp(input.updatedAt);
   const syncedAt = String(input.syncedAt || "").trim();
 
   if (!id) {
     return null;
   }
 
-  return { id, label, category, displayLabel, messageCount, syncedAt };
+  return { id, label, category, displayLabel, messageCount, createdAt, updatedAt, syncedAt };
 }
 
 export async function readThreads(env) {
@@ -88,7 +100,9 @@ export async function readThreads(env) {
     .filter(Boolean)
     .filter((thread) => isWithinRetentionWindow(thread.syncedAt))
     .sort((left, right) =>
-      (left.displayLabel || left.label).localeCompare((right.displayLabel || right.label), "ru")
+      String(left.category || "").localeCompare(String(right.category || ""), "ru")
+      || (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+      || (left.displayLabel || left.label).localeCompare((right.displayLabel || right.label), "ru")
     );
 }
 
@@ -103,7 +117,9 @@ export async function writeThreads(env, threads) {
     .filter((thread) => isWithinRetentionWindow(thread.syncedAt))
     .slice(0, MAX_THREADS)
     .sort((left, right) =>
-      (left.displayLabel || left.label).localeCompare((right.displayLabel || right.label), "ru")
+      String(left.category || "").localeCompare(String(right.category || ""), "ru")
+      || (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+      || (left.displayLabel || left.label).localeCompare((right.displayLabel || right.label), "ru")
     );
 
   await env.LINKS_STORE.put(THREADS_STORAGE_KEY, JSON.stringify(normalized));

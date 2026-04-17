@@ -1,9 +1,10 @@
 const state = {
   commands: [],
   messages: [],
-  threads: [],
-  threadMessageCounts: {},
+  menuRepos: [],
   activeThreadCategories: [],
+  activeTimelineTab: "dialog",
+  dispatchMode: "bridge",
   bridgeWatchdog: null,
   commandPoller: null,
   commandPollerInterval: 0,
@@ -11,23 +12,17 @@ const state = {
   lastRenderedTimelineSignature: "",
   answerOpenUntil: {},
   answerCloseTimer: null,
-  hardReloading: false
+  hardReloading: false,
+  hasLoadedMessagesOnce: false,
+  audioUnlocked: false
 };
 
-const BUILD_VERSION = "20260416-2402";
-const FAST_POLL_INTERVAL_MS = 6000;
-const IDLE_POLL_INTERVAL_MS = 20000;
+const BUILD_VERSION = "20260418-0011";
+const FAST_POLL_INTERVAL_MS = 3500;
+const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
 const MAX_PHOTO_UPLOAD_BYTES = 1_600_000;
 const MAX_PHOTO_DIMENSION = 1600;
-
-const CLOUD_CODEX_CATEGORIES = new Set([
-  "artefacts",
-  "ezohata",
-  "links",
-  "sales",
-  "system-optimization"
-]);
 
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
@@ -125,11 +120,14 @@ const storage = {
     return value;
   },
 
-  get selectedThreadIds() {
-    let raw = safeLocalStorageGet("codex-links-selected-thread-ids");
+  get selectedMenuRepoIds() {
+    let raw = safeLocalStorageGet("codex-links-selected-menu-repos");
 
     if (raw === null) {
-      raw = readCookie("codex-links-selected-thread-ids") || null;
+      raw = readCookie("codex-links-selected-menu-repos")
+        || safeLocalStorageGet("codex-links-selected-thread-ids")
+        || readCookie("codex-links-selected-thread-ids")
+        || null;
     }
 
     if (raw === null) {
@@ -138,18 +136,18 @@ const storage = {
 
     try {
       const value = JSON.parse(raw || "[]");
-      safeLocalStorageSet("codex-links-selected-thread-ids", JSON.stringify(value));
-      writeCookie("codex-links-selected-thread-ids", JSON.stringify(value));
+      safeLocalStorageSet("codex-links-selected-menu-repos", JSON.stringify(value));
+      writeCookie("codex-links-selected-menu-repos", JSON.stringify(value));
       return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
     } catch {
       return [];
     }
   },
 
-  set selectedThreadIds(value) {
+  set selectedMenuRepoIds(value) {
     if (value === null) {
-      safeLocalStorageRemove("codex-links-selected-thread-ids");
-      removeCookie("codex-links-selected-thread-ids");
+      safeLocalStorageRemove("codex-links-selected-menu-repos");
+      removeCookie("codex-links-selected-menu-repos");
       return;
     }
 
@@ -158,8 +156,8 @@ const storage = {
       : [];
 
     const serialized = JSON.stringify(normalized);
-    safeLocalStorageSet("codex-links-selected-thread-ids", serialized);
-    writeCookie("codex-links-selected-thread-ids", serialized);
+    safeLocalStorageSet("codex-links-selected-menu-repos", serialized);
+    writeCookie("codex-links-selected-menu-repos", serialized);
   },
 
   get showAllMessages() {
@@ -171,13 +169,63 @@ const storage = {
     const normalized = value ? "1" : "0";
     safeLocalStorageSet("codex-links-show-all-messages", normalized);
     writeCookie("codex-links-show-all-messages", normalized);
+  },
+
+  get activeTimelineTab() {
+    const raw = safeLocalStorageGet("codex-links-active-timeline-tab") ?? readCookie("codex-links-active-timeline-tab");
+    return raw === "notifications" ? "notifications" : "dialog";
+  },
+
+  set activeTimelineTab(value) {
+    const normalized = value === "notifications" ? "notifications" : "dialog";
+    safeLocalStorageSet("codex-links-active-timeline-tab", normalized);
+    writeCookie("codex-links-active-timeline-tab", normalized);
+  },
+
+  get dispatchModePreference() {
+    const raw = safeLocalStorageGet("codex-links-dispatch-mode") ?? readCookie("codex-links-dispatch-mode");
+    return raw === "cloud" ? "cloud" : "bridge";
+  },
+
+  set dispatchModePreference(value) {
+    const normalized = value === "cloud" ? "cloud" : "bridge";
+    safeLocalStorageSet("codex-links-dispatch-mode", normalized);
+    writeCookie("codex-links-dispatch-mode", normalized);
+  },
+
+  get selectedRepoId() {
+    const raw = safeLocalStorageGet("codex-links-selected-repo")
+      ?? readCookie("codex-links-selected-repo")
+      ?? safeLocalStorageGet("codex-links-selected-cloud-repo")
+      ?? readCookie("codex-links-selected-cloud-repo")
+      ?? safeLocalStorageGet("codex-links-active-bridge-thread")
+      ?? readCookie("codex-links-active-bridge-thread");
+    return String(raw || "").trim().toLowerCase().replace(/^cloud:/, "");
+  },
+
+  set selectedRepoId(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+
+    if (!normalized) {
+      safeLocalStorageRemove("codex-links-selected-repo");
+      removeCookie("codex-links-selected-repo");
+      return;
+    }
+
+    safeLocalStorageSet("codex-links-selected-repo", normalized);
+    writeCookie("codex-links-selected-repo", normalized);
   }
 };
 
 const refreshButton = document.querySelector("#refresh-button");
+const dispatchModeBridgeButton = document.querySelector("#dispatch-mode-bridge");
+const dispatchModeCloudButton = document.querySelector("#dispatch-mode-cloud");
+const projectNav = document.querySelector("#project-nav");
 const commandForm = document.querySelector("#command-form");
+const commandTargetLabel = document.querySelector("#command-target-label");
 const commandThreadSelect = document.querySelector("#command-thread-select");
 const commandPhotoInput = document.querySelector("#command-photo-input");
+const commandPhotoClear = document.querySelector("#command-photo-clear");
 const commandPhotoStatus = document.querySelector("#command-photo-status");
 const commandInput = document.querySelector("#command-input");
 const commandStatus = document.querySelector("#command-status");
@@ -194,6 +242,8 @@ const threadSettingsList = document.querySelector("#thread-settings-list");
 const threadSettingsSave = document.querySelector("#thread-settings-save");
 const threadSettingsSelectAll = document.querySelector("#thread-settings-select-all");
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
+const timelineTabDialog = document.querySelector("#timeline-tab-dialog");
+const timelineTabNotifications = document.querySelector("#timeline-tab-notifications");
 
 function estimateDataUrlBytes(dataUrl) {
   const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
@@ -211,9 +261,33 @@ function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Не удалось прочитать фото."));
+    reader.onabort = () => reject(new Error("Чтение фото было прервано браузером."));
+    reader.onerror = () => reject(reader.error || new Error("Не удалось прочитать фото."));
     reader.readAsDataURL(file);
   });
+}
+
+function encodeBase64FromBytes(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
+async function readFileAsDataUrlFallback(file) {
+  if (typeof file?.arrayBuffer !== "function") {
+    throw new Error("Браузер не смог прочитать фото.");
+  }
+
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const contentType = String(file.type || "image/jpeg").toLowerCase();
+  return `data:${contentType};base64,${encodeBase64FromBytes(bytes)}`;
 }
 
 function loadImageFromUrl(url) {
@@ -282,7 +356,16 @@ async function preparePhotoPayload(file) {
   }
 
   if (file.size <= MAX_PHOTO_UPLOAD_BYTES) {
-    const dataUrl = await readFileAsDataUrl(file);
+    let dataUrl = "";
+
+    try {
+      dataUrl = await readFileAsDataUrl(file);
+    } catch (error) {
+      dataUrl = await readFileAsDataUrlFallback(file).catch(() => {
+        throw new Error(String(error?.message || "Не удалось прочитать фото."));
+      });
+    }
+
     return {
       fileName: file.name,
       contentType: String(file.type || "image/jpeg").toLowerCase(),
@@ -315,8 +398,60 @@ function escapeThreadLabel(thread) {
   return thread || "";
 }
 
-function isCloudCodexCategory(category) {
-  return CLOUD_CODEX_CATEGORIES.has(String(category || "").trim().toLowerCase());
+function getActiveDispatchMode() {
+  return state.dispatchMode === "cloud" ? "cloud" : "bridge";
+}
+
+function normalizeRepoSelectionId(value) {
+  return String(value || "").trim().toLowerCase().replace(/^cloud:/, "");
+}
+
+function isSameThreadTarget(left, right) {
+  const normalizedLeft = String(left || "").trim();
+  const normalizedRight = String(right || "").trim();
+
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  return normalizeRepoSelectionId(normalizedLeft) === normalizeRepoSelectionId(normalizedRight);
+}
+
+function getMenuRepoById(repoId) {
+  const normalized = normalizeRepoSelectionId(repoId);
+  return state.menuRepos.find((repo) => normalizeRepoSelectionId(repo?.id) === normalized) || null;
+}
+
+function isCloudReadyRepo(repo) {
+  return Boolean(repo?.cloudReady) && Boolean(String(repo?.targetRepo || "").trim());
+}
+
+function formatMenuRepoLabel(repo) {
+  const displayLabel = String(repo?.displayLabel || "").trim();
+  const label = String(repo?.label || "").trim();
+  const nameWithOwner = String(repo?.nameWithOwner || "").trim();
+  const name = String(repo?.name || "").trim();
+  return displayLabel || label || name || nameWithOwner;
+}
+
+function getProjectCategory(repo) {
+  return String(repo?.group || repo?.category || "").trim() || "other";
+}
+
+function getProjectStatusLabel(repo) {
+  return isCloudReadyRepo(repo) ? "cloud-ready" : "bridge-only";
+}
+
+function formatProjectPath(repo) {
+  if (!repo) {
+    return "";
+  }
+
+  return `${getProjectCategory(repo)} / ${formatMenuRepoLabel(repo)}`;
 }
 
 function compareBuildVersions(left, right) {
@@ -345,13 +480,11 @@ async function ensureLatestClient() {
 
     const data = await response.json();
     const latestVersion = String(data?.build || "").trim();
-    const currentUrlVersion = String(new URL(window.location.href).searchParams.get("v") || "").trim();
 
     if (
       !latestVersion
       || latestVersion === BUILD_VERSION
       || compareBuildVersions(latestVersion, BUILD_VERSION) < 0
-      || latestVersion === currentUrlVersion
     ) {
       return false;
     }
@@ -360,6 +493,7 @@ async function ensureLatestClient() {
     setCommandStatusMessage("Обновляю страницу до новой версии…");
     const nextUrl = new URL(window.location.href);
     nextUrl.searchParams.set("v", latestVersion);
+    nextUrl.searchParams.set("reload", String(Date.now()));
     window.location.replace(nextUrl.toString());
     return true;
   } catch {
@@ -397,71 +531,116 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function formatThreadOptionLabel(thread) {
-  const label = String(thread?.label || "").trim();
-  const category = String(thread?.category || "").trim();
-  const count = Math.max(0, Number(thread?.messageCount || 0));
-  const suffix = count ? ` · ${count}` : "";
-  return category ? `${category} / ${label}${suffix}` : `${label}${suffix}`;
-}
-
-function getAllThreadOptions() {
+function getAllMenuOptions() {
   return [...new Map(
-    state.threads
-      .map((thread) => {
-        const id = String(thread?.id || "").trim();
-        const label = escapeThreadLabel(thread?.label || "").trim();
-        const displayLabel = formatThreadOptionLabel(thread);
-        const category = String(thread?.category || "").trim();
-        const messageCount = Math.max(0, Number(thread?.messageCount || 0));
+    state.menuRepos
+      .map((repo) => {
+        const id = normalizeRepoSelectionId(repo?.id);
+        const repoId = normalizeRepoSelectionId(repo?.repoId || repo?.id);
+        const label = escapeThreadLabel(repo?.label || repo?.displayLabel || repo?.name || repo?.id || "").trim();
+        const displayLabel = formatMenuRepoLabel(repo);
+        const category = getProjectCategory(repo);
+        const updatedAt = Number(new Date(repo?.updatedAt || 0)) || 0;
 
-        if (!id || !label || !displayLabel) {
+        if (!id || !repoId || !label || !displayLabel) {
           return null;
         }
 
         return [id, {
           id,
+          repoId,
           label,
           displayLabel,
           category,
-          messageCount
+          updatedAt,
+          cloudReady: isCloudReadyRepo(repo),
+          targetRepo: String(repo?.targetRepo || "").trim(),
+          workspacePath: String(repo?.workspacePath || "").trim(),
+          statusLabel: getProjectStatusLabel(repo)
         }];
       })
       .filter(Boolean)
-  ).values()].sort((left, right) => left.displayLabel.localeCompare(right.displayLabel, "ru"));
+  ).values()].sort((left, right) =>
+    left.category.localeCompare(right.category, "ru")
+    || (right.updatedAt || 0) - (left.updatedAt || 0)
+    || left.displayLabel.localeCompare(right.displayLabel, "ru")
+  );
+}
+
+function groupSelectableOptions(options) {
+  return [...options.reduce((groups, option) => {
+    const key = option.category || "Без категории";
+    const bucket = groups.get(key) || [];
+    bucket.push(option);
+    groups.set(key, bucket);
+    return groups;
+  }, new Map()).entries()]
+    .sort((left, right) => left[0].localeCompare(right[0], "ru"))
+    .map(([category, items]) => ({
+      category,
+      items: items.sort((left, right) =>
+        (right.updatedAt || 0) - (left.updatedAt || 0)
+        || left.displayLabel.localeCompare(right.displayLabel, "ru")
+      )
+    }));
 }
 
 function getActiveThreadId() {
-  return String(commandThreadSelect?.value || "").trim();
+  return normalizeRepoSelectionId(commandThreadSelect?.value || storage.selectedRepoId || "");
 }
 
-function getSelectedThreadIds() {
-  const stored = storage.selectedThreadIds;
+function getSelectedMenuRepoIds() {
+  const availableIds = new Set(getAllMenuOptions().map((option) => option.id));
+  const stored = storage.selectedMenuRepoIds
+    .map((item) => normalizeRepoSelectionId(item))
+    .filter((item) => Boolean(item) && availableIds.has(item));
 
   if (stored.length) {
     return stored;
   }
 
-  return getAllThreadOptions().map((option) => option.id);
+  return [...availableIds];
+}
+
+function getFilteredMenuOptions() {
+  const activeCategories = new Set(state.activeThreadCategories);
+  const selectedRepoIds = new Set(getSelectedMenuRepoIds());
+
+  return getAllMenuOptions().filter((option) => {
+    if (activeCategories.size && !activeCategories.has(option.category)) {
+      return false;
+    }
+
+    return selectedRepoIds.has(option.id);
+  });
 }
 
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
-  const normalizedId = String(threadId || "").trim();
+  const normalizedId = normalizeRepoSelectionId(threadId);
 
   if (!normalizedId) {
     return fallbackLabel;
   }
 
-  const match = state.threads.find((thread) => String(thread?.id || "").trim() === normalizedId);
-  return match ? formatThreadOptionLabel(match) : fallbackLabel;
+  const match = getMenuRepoById(normalizedId);
+  return match ? formatMenuRepoLabel(match) : fallbackLabel;
 }
 
 function getAllCategories() {
   return [...new Set(
-    state.threads
-      .map((thread) => String(thread?.category || "").trim())
+    state.menuRepos
+      .map((repo) => getProjectCategory(repo))
       .filter(Boolean)
   )].sort((left, right) => left.localeCompare(right, "ru"));
+}
+
+function renderProjectNav() {
+  if (!projectNav) {
+    return;
+  }
+
+  const activeRepo = getMenuRepoById(getActiveThreadId()) || state.menuRepos[0] || null;
+  projectNav.dataset.status = activeRepo ? getProjectStatusLabel(activeRepo) : "";
 }
 
 function renderThreadCategories() {
@@ -471,9 +650,10 @@ function renderThreadCategories() {
 
   threadCategoriesList.innerHTML = "";
   const categories = getAllCategories();
+  const totalRepos = getAllMenuOptions().length;
 
   threadCategoriesSummary.textContent = categories.length
-    ? `Показано категорий: ${categories.length}`
+    ? `Групп: ${categories.length} · проектов: ${totalRepos}`
     : "Категории не найдены.";
 
   categories.forEach((category) => {
@@ -505,15 +685,27 @@ function renderThreadSettingsSummary() {
   }
 
   if (storage.showAllMessages) {
-    threadSettingsSummary.textContent = "Показываются все чаты.";
+    threadSettingsSummary.textContent = "Показываются все проекты.";
+    return;
+  }
+
+  const filteredOptions = getFilteredMenuOptions();
+
+  if (state.activeThreadCategories.length) {
+    if (!filteredOptions.length) {
+      threadSettingsSummary.textContent = "В выбранных группах нет включённых проектов.";
+      return;
+    }
+
+    threadSettingsSummary.textContent = `Группы: ${state.activeThreadCategories.join(", ")} · проектов в меню: ${filteredOptions.length}.`;
     return;
   }
 
   const activeThreadId = getActiveThreadId();
-  const activeThread = state.threads.find((thread) => String(thread?.id || "").trim() === activeThreadId);
-  threadSettingsSummary.textContent = activeThread
-    ? `Показывается чат: ${formatThreadOptionLabel(activeThread)}.`
-    : "Показываются все чаты.";
+  const activeRepo = getMenuRepoById(activeThreadId);
+  threadSettingsSummary.textContent = activeRepo
+    ? `Выбран проект: ${formatProjectPath(activeRepo)} · ${getProjectStatusLabel(activeRepo)}.`
+    : "Выберите проект.";
 }
 
 function renderThreadSettingsList() {
@@ -523,8 +715,8 @@ function renderThreadSettingsList() {
 
   const search = String(threadSettingsSearch?.value || "").trim().toLowerCase();
   const activeCategories = new Set(state.activeThreadCategories);
-  const selectedThreadIds = new Set(getSelectedThreadIds());
-  const options = getAllThreadOptions().filter((option) => {
+  const selectedRepoIds = new Set(getSelectedMenuRepoIds());
+  const options = getAllMenuOptions().filter((option) => {
     const haystack = `${option.displayLabel} ${option.category}`.toLowerCase();
 
     if (search && !haystack.includes(search)) {
@@ -537,68 +729,90 @@ function renderThreadSettingsList() {
 
     return activeCategories.has(option.category);
   });
+  const groupedOptions = groupSelectableOptions(options);
 
   threadSettingsList.innerHTML = "";
 
-  options.forEach((option) => {
-    const row = document.createElement("label");
-    row.className = "thread-settings-item";
+  groupedOptions.forEach(({ category, items }) => {
+    const section = document.createElement("section");
+    section.className = "thread-settings-group";
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selectedThreadIds.has(option.id);
-    checkbox.addEventListener("change", () => {
-      const next = new Set(getSelectedThreadIds());
+    const heading = document.createElement("div");
+    heading.className = "thread-settings-group-title";
+    heading.textContent = `${category} · ${items.length}`;
+    section.appendChild(heading);
 
-      if (checkbox.checked) {
-        next.add(option.id);
-      } else {
-        next.delete(option.id);
-      }
+    items.forEach((option) => {
+      const row = document.createElement("label");
+      row.className = "thread-settings-item";
 
-      storage.selectedThreadIds = [...next];
-      renderCommandThreads();
-      renderThreadSettingsList();
-      renderCommands();
-      setCommandStatusMessage(
-        checkbox.checked
-          ? `Чат добавлен в поле Беседа Codex: ${option.displayLabel}.`
-          : `Чат убран из поля Беседа Codex: ${option.displayLabel}.`
-      );
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedRepoIds.has(option.id);
+      checkbox.addEventListener("change", () => {
+        const next = new Set(getSelectedMenuRepoIds());
+
+        if (checkbox.checked) {
+          next.add(option.id);
+        } else {
+          next.delete(option.id);
+        }
+
+        storage.selectedMenuRepoIds = [...next];
+        renderCommandThreads();
+        renderThreadSettingsList();
+        renderCommands();
+        setCommandStatusMessage(
+          checkbox.checked
+            ? `Проект добавлен в меню: ${option.displayLabel}.`
+            : `Проект убран из меню: ${option.displayLabel}.`
+        );
+      });
+
+      const text = document.createElement("span");
+      text.className = "thread-settings-copy";
+      text.innerHTML = `
+        <strong>${escapeHtml(option.displayLabel)}</strong>
+        <span class="thread-settings-meta">
+          <span>${escapeHtml(category)}</span>
+          <span class="thread-status-badge" data-status="${escapeHtml(option.statusLabel)}">${escapeHtml(option.statusLabel)}</span>
+          ${option.targetRepo ? `<code>${escapeHtml(option.targetRepo)}</code>` : ""}
+        </span>
+      `;
+
+      row.append(checkbox, text);
+      section.appendChild(row);
     });
 
-    const text = document.createElement("span");
-    text.textContent = option.displayLabel;
-
-    row.append(checkbox, text);
-    threadSettingsList.appendChild(row);
+    threadSettingsList.appendChild(section);
   });
 }
 
 function ensureThreadVisible(threadId) {
-  const normalizedId = String(threadId || "").trim();
+  const normalizedId = normalizeRepoSelectionId(threadId);
 
   if (!normalizedId) {
     return false;
   }
 
-  const allOptionIds = getAllThreadOptions().map((option) => option.id);
+  const allOptionIds = getAllMenuOptions().map((option) => option.id);
 
   if (!allOptionIds.includes(normalizedId)) {
     return false;
   }
 
-  const selectedThreadIds = storage.selectedThreadIds;
+  const selectedRepoIds = getSelectedMenuRepoIds();
 
-  if (Array.isArray(selectedThreadIds) && !selectedThreadIds.includes(normalizedId)) {
-    storage.selectedThreadIds = [...selectedThreadIds, normalizedId];
+  if (!selectedRepoIds.includes(normalizedId)) {
+    storage.selectedMenuRepoIds = [...selectedRepoIds, normalizedId];
   }
 
+  storage.selectedRepoId = normalizedId;
   return true;
 }
 
 function activateReplyThread(threadId) {
-  const normalizedId = String(threadId || "").trim();
+  const normalizedId = normalizeRepoSelectionId(threadId);
 
   if (!ensureThreadVisible(normalizedId)) {
     return false;
@@ -621,6 +835,24 @@ function activateReplyThread(threadId) {
 
 function formatProgressStage(progressStage, status) {
   const stage = String(progressStage || "").trim();
+  const mapped = {
+    "sending-to-slack": "Готовлю отправку в Slack",
+    "sent-to-slack": "Команда отправлена в Slack",
+    "slack-dispatch-failed": "Slack dispatch не удался",
+    "fallback-to-bridge": "Переведено на bridge",
+    "fallback-to-cloud": "Переведено в Codex Cloud",
+    "slack-reply-received": "Slack reply получен",
+    "slack-reply-received-unthreaded": "Slack reply получен вне thread и сопоставлен",
+    "slack-signature-failed": "Slack signature не прошла",
+    "reply-not-threaded": "Reply пришёл вне thread",
+    "codex-target-user-invalid": "Неверный Codex target user",
+    "slack-dispatch-timeout": "Slack dispatch timeout",
+    "slack-reply-timeout": "Slack reply timeout"
+  };
+
+  if (mapped[stage]) {
+    return mapped[stage];
+  }
 
   if (stage) {
     return stage.charAt(0).toUpperCase() + stage.slice(1);
@@ -641,15 +873,224 @@ function formatProgressStage(progressStage, status) {
   return "В очереди";
 }
 
+function parseCommandErrorDetails(command) {
+  const raw = String(command?.errorMessage || "").trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function getCommandDiagnosticMessage(command) {
+  const fallbackReason = String(command?.fallbackReason || "").trim().toLowerCase();
+  const timeoutPhase = String(command?.timeoutPhase || "").trim().toLowerCase();
+  const diagnosticCode = String(command?.lastDiagnosticCode || "").trim().toLowerCase();
+
+  if (diagnosticCode === "slack_webhook_unauthorized") {
+    return "Slack webhook отклонён: подпись запроса не прошла проверку.";
+  }
+
+  if (diagnosticCode === "slack_reply_unmatched" || fallbackReason === "reply arrived but command not matched") {
+    return "Reply от Codex пришёл, но не сматчился с командой.";
+  }
+
+  if (diagnosticCode === "slack_reply_unthreaded" || fallbackReason === "reply arrived but not threaded") {
+    return "Reply от Codex пришёл вне thread.";
+  }
+
+  if (fallbackReason === "timeout exceeded before first progress reply" || timeoutPhase === "first-reply-timeout") {
+    return "Codex Cloud не прислал первый reply вовремя.";
+  }
+
+  if (fallbackReason === "codex did not respond" || timeoutPhase === "processing-timeout") {
+    return "Codex Cloud перестал отвечать в Slack thread.";
+  }
+
+  if (fallbackReason === "local bridge did not claim the command in time") {
+    return "Bridge не забрал сообщение из очереди вовремя.";
+  }
+
+  if (fallbackReason === "local bridge stopped heartbeating") {
+    return "Bridge перестал heartbeat’ить во время обработки.";
+  }
+
+  return "";
+}
+
 function formatCommandStage(command) {
+  if (hasAssistantReply(command?.id, command)) {
+    const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
+    return relative ? `Ответ получен · ${relative}` : "Ответ получен";
+  }
+
   const status = String(command?.status || "").trim().toLowerCase();
   const label = formatProgressStage(command?.progressStage, status);
   const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
   return relative ? `${label} · ${relative}` : label;
 }
 
+function getCommandDeliveryStatus(command) {
+  if (hasAssistantReply(command?.id, command)) {
+    return null;
+  }
+
+  const status = String(command?.status || "").trim().toLowerCase();
+  const stage = String(command?.progressStage || "").trim().toLowerCase();
+  const errorMessage = String(command?.errorMessage || "").trim();
+  const errorDetails = parseCommandErrorDetails(command);
+  const deliveryLabel = getCommandDeliveryLabel(command);
+  const diagnosticMessage = getCommandDiagnosticMessage(command);
+
+  const withDeliveryLabel = (text) => {
+    const normalized = String(text || "").trim();
+
+    if (!normalized) {
+      return "";
+    }
+
+    return `${normalized} · ${deliveryLabel}`;
+  };
+
+  if (status === "failed") {
+    return {
+      tone: "error",
+      text: withDeliveryLabel(diagnosticMessage || getCommandFailureMessage(command))
+    };
+  }
+
+  const transportTextByKey = {
+    queued: `В очереди на отправку через ${deliveryLabel}`,
+    claimed: `Команда принята в работу через ${deliveryLabel}`,
+    "preparing-input": `Подготавливаю сообщение для ${deliveryLabel}`,
+    "sending-to-codex": `Отправляю через ${deliveryLabel}`,
+    "sent-to-slack": "Отправлено в Slack, жду Codex Cloud",
+    dispatched: `Отправляю через ${deliveryLabel}`,
+    processing: `Обработка через ${deliveryLabel}`,
+    "waiting-for-codex": `Жду ответ через ${deliveryLabel}`,
+    "reading-codex-reply": `Читаю ответ из ${deliveryLabel}`,
+    "saving-reply": `Сохраняю ответ из ${deliveryLabel}`,
+    "slack-reply-received": "Reply получен из cloud",
+    "slack-reply-received-unthreaded": "Reply получен из cloud вне thread",
+    answered: "Ответ сохранён",
+    acked: "Ответ сохранён"
+  };
+
+  const text = transportTextByKey[stage] || transportTextByKey[status] || "";
+
+  if (!text) {
+    return null;
+  }
+
+  if (status === "answered" || status === "acked" || stage === "answered" || stage === "acked") {
+    return null;
+  }
+
+  if (errorDetails?.code === "fallback_to_bridge" || /automatically switched to local bridge/i.test(errorMessage)) {
+    return {
+      tone: "queued",
+      text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || "Cloud не ответил вовремя. Автоматически перевёл задачу на bridge.")
+    };
+  }
+
+  if (errorDetails?.code === "fallback_to_cloud" || /automatically switched to codex cloud/i.test(errorMessage)) {
+    return {
+      tone: "queued",
+      text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || "Bridge задержался. Автоматически перевёл задачу в Codex Cloud.")
+    };
+  }
+
+  return {
+    tone: errorDetails ? "error" : "delivery",
+    text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || text)
+  };
+}
+
+function getVisibleTimelineCommands() {
+  const showAllMessages = storage.showAllMessages;
+  const activeThreadId = showAllMessages ? "" : getActiveThreadId();
+
+  return state.commands
+    .filter((command) => !activeThreadId || isSameThreadTarget(command.threadId, activeThreadId))
+    .filter((command) => !isHiddenSystemEntry(command))
+    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+}
+
+function syncCommandStatusFromState() {
+  const activeCommand = getVisibleTimelineCommands().find((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    if (hasAssistantReply(command?.id, command)) {
+      return false;
+    }
+
+    return status === "queued" || status === "dispatched" || status === "processing";
+  });
+
+  if (!activeCommand) {
+    setCommandStatusMessage("");
+    setSubmitProgress("", "");
+    return;
+  }
+
+  const status = String(activeCommand?.status || "").trim().toLowerCase();
+  const isProcessing = status === "processing" || status === "dispatched";
+  const tone = isProcessing ? "processing" : "queued";
+  const deliveryLabel = getCommandDeliveryLabel(activeCommand);
+  const stage = String(activeCommand?.progressStage || "").trim().toLowerCase();
+  const message = stage === "sent-to-slack"
+    ? "Отправлено в Slack, жду Codex Cloud…"
+    : stage === "waiting-for-codex"
+      ? `Жду ответ через ${deliveryLabel}…`
+      : isProcessing
+        ? `Обработка через ${deliveryLabel}…`
+        : `Сообщение в очереди (${deliveryLabel})…`;
+
+  setCommandStatusMessage(message, { tone });
+  setSubmitProgress(isProcessing ? "processing" : "queued", tone);
+}
+
 function getCommandDeliveryLabel(command) {
   return String(command?.dispatchMode || "").trim() === "local-bridge" ? "bridge" : "cloud";
+}
+
+function getCommandProjectPath(command) {
+  const projectCategory = String(command?.projectCategory || "").trim();
+  const projectLabel = String(command?.projectLabel || command?.threadLabel || "").trim();
+
+  if (projectCategory && projectLabel) {
+    return `${projectCategory} / ${projectLabel}`;
+  }
+
+  return projectLabel;
+}
+
+function renderCommandContextMarkup(command) {
+  if (!command) {
+    return "";
+  }
+
+  const projectPath = getCommandProjectPath(command);
+  const targetRepo = String(command?.targetRepo || "").trim();
+  const statusLabel = targetRepo ? "cloud-ready" : "bridge-only";
+  const parts = [
+    projectPath ? `<span>${escapeHtml(projectPath)}</span>` : "",
+    `<span class="command-context-badge" data-status="${escapeHtml(statusLabel)}">${escapeHtml(statusLabel)}</span>`,
+    targetRepo ? `<code>${escapeHtml(targetRepo)}</code>` : "",
+    `<span>delivery: ${escapeHtml(getCommandDeliveryLabel(command))}</span>`
+  ].filter(Boolean);
+
+  return parts.length ? `<div class="command-context">${parts.join("")}</div>` : "";
 }
 
 function getCommandFailureMessage(command) {
@@ -657,13 +1098,58 @@ function getCommandFailureMessage(command) {
     return "";
   }
 
-  return String(command?.errorMessage || "").trim() || "Не удалось доставить сообщение.";
+  const message = String(command?.errorMessage || "").trim();
+  const details = parseCommandErrorDetails(command);
+  const diagnosticMessage = getCommandDiagnosticMessage(command);
+
+  if (diagnosticMessage) {
+    return diagnosticMessage;
+  }
+
+  if (details?.message) {
+    return details.detail ? `${details.message} ${details.detail}`.trim() : details.message;
+  }
+
+  if (!message) {
+    return "Не удалось доставить сообщение.";
+  }
+
+  if (/did not send a slack reply in time/i.test(message)) {
+    return "Codex Cloud не ответил вовремя.";
+  }
+
+  if (/did not acknowledge the slack task in time/i.test(message)) {
+    return "Codex Cloud не подтвердил задачу вовремя.";
+  }
+
+  if (/cloud dispatch timeout/i.test(message)) {
+    return "Cloud не ответил вовремя, задача переведена на bridge.";
+  }
+
+  if (/cloud reply timeout/i.test(message)) {
+    return "Cloud завис на ответе, задача переведена на bridge.";
+  }
+
+  if (/local bridge timeout/i.test(message) || /local bridge queue timeout/i.test(message)) {
+    return "Bridge задержался, задача переведена в Codex Cloud.";
+  }
+
+  if (/slack photo upload failed/i.test(message)) {
+    return "Cloud не смог загрузить фото в Slack thread, задача переведена на bridge.";
+  }
+
+  if (/photo attachments yet/i.test(message)) {
+    return "Cloud пока не пересылал фото и задача была переведена на bridge.";
+  }
+
+  return message;
 }
 
 function buildTimelineSignature(items, context = {}) {
   return JSON.stringify({
     activeThreadId: context.activeThreadId || "",
     showAllMessages: Boolean(context.showAllMessages),
+    activeTimelineTab: context.activeTimelineTab || "dialog",
     items: items.map((entry) => ({
       id: entry.id,
       role: entry.role,
@@ -673,6 +1159,9 @@ function buildTimelineSignature(items, context = {}) {
       threadLabel: entry.threadLabel,
       status: entry.status || "",
       progressStage: entry.progressStage || "",
+      projectCategory: entry.command?.projectCategory || entry.linkedCommand?.projectCategory || "",
+      projectLabel: entry.command?.projectLabel || entry.linkedCommand?.projectLabel || "",
+      targetRepo: entry.command?.targetRepo || entry.linkedCommand?.targetRepo || "",
       commandError: entry.command?.errorMessage || "",
       commandPrUrl: entry.command?.prUrl || "",
       commandBranch: entry.command?.branchName || "",
@@ -736,31 +1225,233 @@ async function parseJsonResponse(response) {
   }
 }
 
-function hasAssistantReply(commandId) {
+function hasAssistantReply(commandId, command = null) {
   const normalizedId = String(commandId || "").trim();
+  const directReplyExists = normalizedId
+    ? state.messages.some((message) => String(message?.commandId || "").trim() === normalizedId)
+    : false;
 
-  if (!normalizedId) {
+  if (directReplyExists) {
+    return true;
+  }
+
+  if (!command || !command.threadId || !command.createdAt) {
     return false;
   }
 
-  return state.messages.some((message) => String(message?.commandId || "").trim() === normalizedId);
+  return getInferredAssistantReplies(command, state.messages, state.commands).length > 0;
 }
 
-function isSystemConversationEntry(entry) {
+function toTimestamp(value) {
+  const timestamp = Date.parse(String(value || "").trim());
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function isTerminalAssistantReplyText(text) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return false;
+  }
+
+  if (/\b(error|failed|failure|unable|blocked|need access|permission denied|could not|can'?t complete)\b/i.test(value)) {
+    return true;
+  }
+
+  if (
+    /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/i.test(value)
+    || /\b(pr ready|pull request|opened pr|created pr|implemented|completed|finished|done|готово|исправил|сделал)\b/i.test(value)
+  ) {
+    return true;
+  }
+
+  return !/\b(checking|investigating|looking into|working on|reading|starting|preparing|waiting|running|processing|analyzing|analysing|searching|syncing|opening|reviewing|triaging|debugging|retrying|dispatching|queue(?:d)?|queued|in progress|wip|thinking)\b/i.test(value)
+    && !/(проверяю|смотрю|изучаю|читаю|готовлю|запускаю|жду|обрабатываю|анализирую|ищу|синхронизирую|открываю|разбираю|дебажу|повторяю|в очереди|в работе|работаю)/i.test(value);
+}
+
+function collapseAssistantReplies(replies) {
+  const normalizedReplies = Array.isArray(replies) ? replies : [];
+
+  if (!normalizedReplies.length) {
+    return [];
+  }
+
+  const latestBySignature = new Map();
+  normalizedReplies.forEach((reply) => {
+    const text = String(reply?.text || "").trim();
+    const prUrl = String(reply?.linkedCommand?.prUrl || "").trim();
+    const branchName = String(reply?.linkedCommand?.branchName || "").trim();
+    const signature = `${text.toLowerCase()}::${prUrl}::${branchName}`;
+    const existing = latestBySignature.get(signature);
+
+    if (!existing || toTimestamp(reply?.createdAt) >= toTimestamp(existing?.createdAt)) {
+      latestBySignature.set(signature, reply);
+    }
+  });
+
+  const uniqueReplies = [...latestBySignature.values()]
+    .sort((left, right) => toTimestamp(right?.createdAt) - toTimestamp(left?.createdAt));
+  const terminalReply = uniqueReplies.find((reply) => isTerminalAssistantReplyText(reply?.text || ""));
+
+  return terminalReply ? [terminalReply] : uniqueReplies.slice(0, 1);
+}
+
+function getInferredAssistantReplies(command, visibleMessages, visibleCommands) {
+  const commandThreadId = String(command?.threadId || "").trim();
+  const commandCreatedAt = toTimestamp(command?.createdAt);
+
+  if (!commandThreadId || !commandCreatedAt) {
+    return [];
+  }
+
+  const nextUserTimestamp = Math.min(
+    ...[
+      ...visibleCommands
+      .filter((entry) => entry?.id !== command?.id)
+      .filter((entry) => isSameThreadTarget(entry?.threadId, commandThreadId))
+      .map((entry) => toTimestamp(entry?.createdAt))
+      .filter((value) => value > commandCreatedAt),
+      ...visibleMessages
+        .filter((entry) => entry?.role === "user")
+        .filter((entry) => isSameThreadTarget(entry?.threadId, commandThreadId))
+        .map((entry) => toTimestamp(entry?.createdAt))
+        .filter((value) => value > commandCreatedAt)
+    ]
+  );
+
+  return visibleMessages
+    .filter((message) => message?.role === "assistant")
+    .filter((message) => !String(message?.commandId || "").trim())
+    .filter((message) => isSameThreadTarget(message?.threadId, commandThreadId))
+    .filter((message) => {
+      const createdAt = toTimestamp(message?.createdAt);
+      if (!createdAt || createdAt < commandCreatedAt) {
+        return false;
+      }
+
+      return !Number.isFinite(nextUserTimestamp) || createdAt < nextUserTimestamp;
+    })
+    .map((message) => ({
+      id: `message:${message.id}`,
+      kind: "message",
+      role: "assistant",
+      text: message.text || "",
+      createdAt: message.createdAt,
+      threadId: message.threadId || "",
+      threadLabel: message.threadLabel || "",
+      message,
+      linkedCommand: command
+    }));
+}
+
+function normalizeEntryText(entry) {
+  return String(entry?.text || "").trim().toLowerCase();
+}
+
+function isHiddenJunkFeedText(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  const allowedTokens = new Set(["photo", "repro", "ignore", "test", "probe"]);
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^(?:photo|repro|ignore)(?:\s+(?:photo|repro|ignore))*$/i.test(normalized)) {
+    return true;
+  }
+
+  const tokens = normalized
+    .replace(/[^a-z\s]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  return tokens.length > 0
+    && tokens.length <= 6
+    && tokens.every((token) => allowedTokens.has(token))
+    && tokens.includes("ignore")
+    && (tokens.includes("photo") || tokens.includes("repro"));
+}
+
+function isTechnicalProbeEntry(entry) {
+  const text = normalizeEntryText(entry);
+  const isProductionVerificationProbe = text.includes("production")
+    && (
+      text.includes("verification")
+      || text.includes("route check")
+      || text.includes(" ping")
+    )
+    && (
+      text.includes("ignore if seen")
+      || text.includes("reply with ok only")
+    );
+
+  return (
+    isHiddenJunkFeedText(text)
+    || isProductionVerificationProbe
+    || text.includes("delivery-probe")
+    || text.includes("local bridge probe")
+    || text.includes("probe reply with ok only")
+    || text.includes("dedupe test ignore")
+    || text.includes("codex cloud routing probe ignore")
+    || text.includes("test command from site api")
+    || text.includes("direct deploy command test")
+    || text.includes("ready check command")
+  );
+}
+
+function isHiddenSystemEntry(entry) {
   const threadId = String(entry?.threadId || "").trim().toLowerCase();
-  const text = String(entry?.text || "").trim().toLowerCase();
 
   if (threadId === "dedupe-thread") {
     return true;
   }
 
-  return (
-    text.includes("dedupe test ignore")
-    || text.includes("test command from site api")
-    || text.includes("direct deploy command test")
-    || text.includes("ready check command")
-    || text.includes("cloud dispatch недоступен. команда автоматически переведена на локальный bridge.")
-  );
+  return isTechnicalProbeEntry(entry);
+}
+
+function isNotificationEntry(entry) {
+  const threadId = String(entry?.threadId || "").trim().toLowerCase();
+
+  if (threadId === "system-notifications") {
+    return true;
+  }
+
+  if (entry?.systemChannel === "notifications") {
+    return true;
+  }
+
+  if (isHiddenSystemEntry(entry)) {
+    return false;
+  }
+
+  const text = normalizeEntryText(entry);
+  return text.includes("cloud dispatch недоступен. команда автоматически переведена на локальный bridge.");
+}
+
+function isCodexDialogMessage(entry) {
+  return entry?.role === "assistant"
+    && !isHiddenSystemEntry(entry)
+    && !isNotificationEntry(entry);
+}
+
+function getReleaseNotificationEntry() {
+  return {
+    id: `release:${BUILD_VERSION}`,
+    kind: "notification",
+    role: "assistant",
+    text: "готово",
+    createdAt: "2026-04-17T12:30:00.000Z",
+    threadId: "system-notifications",
+    threadLabel: "Уведомления",
+    systemChannel: "notifications",
+    statusLabel: "Системное сообщение"
+  };
+}
+
+function renderTimelineTabButtons() {
+  const isDialogActive = state.activeTimelineTab !== "notifications";
+  timelineTabDialog?.classList.toggle("is-active", isDialogActive);
+  timelineTabNotifications?.classList.toggle("is-active", !isDialogActive);
 }
 
 function renderAssistantReplyMarkup(replyEntry) {
@@ -768,26 +1459,30 @@ function renderAssistantReplyMarkup(replyEntry) {
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
   const deliveryLabel = getCommandDeliveryLabel(linkedCommand);
+  const contextMeta = renderCommandContextMarkup(linkedCommand);
   const commandMeta = linkedCommand?.branchName
-    ? `<p>Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
+    ? `<p class="command-answer-meta">Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
     : "";
   const prMeta = linkedCommand?.prUrl
-    ? `<p><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
+    ? `<p class="command-answer-meta"><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
     : "";
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
-        <span>Ответ Codex</span>
+        <span class="command-answer-title">Ответ Codex</span>
         <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
       </summary>
-      <p>${escapeHtml(replyEntry?.text || "")}</p>
-      ${prMeta}
-      ${commandMeta}
-      <div class="command-answer-actions">
-        <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
-          Ответить
-        </button>
+      <div class="command-answer-body">
+        ${contextMeta}
+        <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
+        ${prMeta}
+        ${commandMeta}
+        <div class="command-answer-actions">
+          <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
+            Ответить
+          </button>
+        </div>
       </div>
     </details>
   `;
@@ -845,15 +1540,14 @@ function bindAssistantReplyInteractions(container, replies) {
 
 function renderCommands() {
   pruneExpiredAnswerState();
+  renderTimelineTabButtons();
   const showAllMessages = storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
-  const visibleCommands = state.commands
-    .filter((command) => !activeThreadId || command.threadId === activeThreadId)
-    .filter((command) => !isSystemConversationEntry(command))
-    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  const visibleCommands = getVisibleTimelineCommands();
   const visibleMessages = state.messages
-    .filter((message) => !activeThreadId || message.threadId === activeThreadId)
-    .filter((message) => !isSystemConversationEntry(message));
+    .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
+    .filter((message) => !isHiddenSystemEntry(message))
+    .filter((message) => !isNotificationEntry(message));
 
   const commandsById = new Map(
     visibleCommands.map((command) => [String(command.id || "").trim(), command])
@@ -888,8 +1582,22 @@ function renderCommands() {
       };
       const items = assistantRepliesByCommandId.get(commandId) || [];
       items.push(entry);
-      assistantRepliesByCommandId.set(commandId, items);
+      assistantRepliesByCommandId.set(commandId, collapseAssistantReplies(items));
     });
+
+  visibleCommands.forEach((command) => {
+    const commandId = String(command.id || "").trim();
+
+    if (!commandId || assistantRepliesByCommandId.has(commandId)) {
+      return;
+    }
+
+    const inferredReplies = getInferredAssistantReplies(command, visibleMessages, visibleCommands);
+
+    if (inferredReplies.length) {
+      assistantRepliesByCommandId.set(commandId, collapseAssistantReplies(inferredReplies));
+    }
+  });
 
   const timelineItems = [
     ...visibleCommands
@@ -929,10 +1637,30 @@ function renderCommands() {
           : []
       }))
   ].sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  const notificationItems = [
+    getReleaseNotificationEntry(),
+    ...state.messages
+      .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
+      .filter((message) => isNotificationEntry(message))
+      .map((message) => ({
+        id: `notification:${message.id}`,
+        kind: "notification",
+        role: "assistant",
+        text: message.text || "",
+        createdAt: message.createdAt,
+        threadId: message.threadId || "",
+        threadLabel: message.threadLabel || "",
+        message,
+        systemChannel: "notifications",
+        statusLabel: "Системное сообщение"
+      }))
+  ].sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  const activeItems = state.activeTimelineTab === "notifications" ? notificationItems : timelineItems;
 
-  const signature = buildTimelineSignature(timelineItems, {
+  const signature = buildTimelineSignature(activeItems, {
     activeThreadId,
-    showAllMessages
+    showAllMessages,
+    activeTimelineTab: state.activeTimelineTab
   });
 
   if (signature === state.lastRenderedTimelineSignature) {
@@ -943,26 +1671,41 @@ function renderCommands() {
   state.lastRenderedTimelineSignature = signature;
   commandTimeline.innerHTML = "";
 
-  if (!timelineItems.length) {
-    commandTimeline.innerHTML = '<div class="command-empty">Здесь будут только ваши сообщения и их доставка.</div>';
+  if (!activeItems.length) {
+    commandTimeline.innerHTML = state.activeTimelineTab === "notifications"
+      ? '<div class="command-empty">Системные сообщения появятся здесь.</div>'
+      : '<div class="command-empty">Здесь будут только ваши сообщения и их доставка.</div>';
     state.lastRenderedTimelineSize = 0;
     return;
   }
 
   const fragment = document.createDocumentFragment();
 
-  timelineItems.forEach((entry) => {
+  activeItems.forEach((entry) => {
     const element = document.createElement("article");
     element.className = `command-item ${entry.role === "assistant" ? "command-item-assistant" : "command-item-user"}`;
 
-    const shouldShowThreadMeta = showAllMessages || !activeThreadId;
-    const threadMeta = shouldShowThreadMeta
-      ? `<span>${escapeHtml(getThreadDisplayLabel(entry.threadId, entry.threadLabel || ""))}</span>`
-      : "";
+    if (entry.kind === "notification") {
+      element.classList.add("command-item-notification");
+      element.innerHTML = `
+        <div class="command-item-top">
+          <strong>Система</strong>
+          <time>${formatDate(entry.createdAt)}</time>
+        </div>
+        <p>${escapeHtml(entry.text || "")}</p>
+        <div class="command-item-top">
+          <span>${escapeHtml(entry.statusLabel || "Системное сообщение")}</span>
+        </div>
+      `;
+      fragment.appendChild(element);
+      return;
+    }
 
     if (entry.kind === "command") {
       const command = entry.command;
       const failureMessage = getCommandFailureMessage(command);
+      const deliveryStatus = getCommandDeliveryStatus(command);
+      const contextMarkup = renderCommandContextMarkup(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
@@ -972,13 +1715,14 @@ function renderCommands() {
           <strong>Вы</strong>
           <time>${formatDate(entry.createdAt)}</time>
         </div>
+        ${contextMarkup}
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
-        ${failureMessage ? `<div class="command-fallback-note">${escapeHtml(failureMessage)}</div>` : ""}
+        ${failureMessage ? "" : ""}
+        ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
         ${repliesMarkup}
         <div class="command-item-top">
           <span>${formatCommandStage(command)}</span>
-          ${threadMeta}
         </div>
       `;
 
@@ -993,9 +1737,10 @@ function renderCommands() {
     const statusLabel = isAssistant
       ? (linkedCommand?.prUrl ? "PR готов" : "Ответ получен")
       : "Сообщение в истории";
+    const contextMarkup = renderCommandContextMarkup(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
-      : `<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
+      : `${contextMarkup}<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
 
     element.innerHTML = `
       <div class="command-item-top">
@@ -1005,7 +1750,6 @@ function renderCommands() {
       ${body}
       <div class="command-item-top">
         <span>${statusLabel}</span>
-        ${threadMeta}
       </div>
     `;
 
@@ -1014,7 +1758,7 @@ function renderCommands() {
   });
 
   commandTimeline.appendChild(fragment);
-  state.lastRenderedTimelineSize = timelineItems.length;
+  state.lastRenderedTimelineSize = activeItems.length;
   scheduleAnswerAutoClose();
 }
 
@@ -1035,6 +1779,23 @@ function setPhotoStatusMessage(message, tone = "") {
 
   commandPhotoStatus.textContent = message || "";
   commandPhotoStatus.dataset.tone = tone;
+}
+
+function syncPhotoClearButton() {
+  if (!commandPhotoClear) {
+    return;
+  }
+
+  commandPhotoClear.disabled = !Boolean(commandPhotoInput?.files?.[0]);
+}
+
+function clearSelectedPhoto(message = "Фото не выбрано.", tone = "") {
+  if (commandPhotoInput) {
+    commandPhotoInput.value = "";
+  }
+
+  setPhotoStatusMessage(message, tone);
+  syncPhotoClearButton();
 }
 
 function setSubmitProgress(stage = "", tone = "") {
@@ -1061,23 +1822,155 @@ function setSubmitProgress(stage = "", tone = "") {
   });
 }
 
+function unlockReplySound() {
+  if (state.audioUnlocked) {
+    return;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    state.audioUnlocked = true;
+    return;
+  }
+
+  try {
+    const context = new AudioContextClass();
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.connect(context.destination);
+    const resumePromise = typeof context.resume === "function" ? context.resume() : Promise.resolve();
+
+    Promise.resolve(resumePromise)
+      .catch(() => {})
+      .finally(() => {
+        state.audioUnlocked = context.state === "running";
+        context.close().catch(() => {});
+      });
+  } catch {
+    // Ignore browsers that block or do not support Web Audio setup here.
+  }
+}
+
+function playReplySound() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return;
+  }
+
+  try {
+    const context = new AudioContextClass();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const resumePromise = typeof context.resume === "function" ? context.resume() : Promise.resolve();
+
+    Promise.resolve(resumePromise)
+      .then(() => {
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(880, context.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(1240, context.currentTime + 0.16);
+        gain.gain.setValueAtTime(0.0001, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.07, context.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
+
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.34);
+        oscillator.addEventListener("ended", () => {
+          context.close().catch(() => {});
+        });
+      })
+      .catch(() => {
+        context.close().catch(() => {});
+      });
+  } catch {
+    // Ignore browsers that do not allow playback in the current state.
+  }
+}
+
+function renderDispatchModeUi() {
+  const isCloud = getActiveDispatchMode() === "cloud";
+  const selectedRepo = getMenuRepoById(storage.selectedRepoId);
+  const activeRepo = selectedRepo || state.menuRepos[0] || null;
+  const hasActiveStatus = Boolean(String(commandStatus?.textContent || "").trim());
+  const hasPendingCommand = state.commands.some((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    return status === "queued" || status === "dispatched" || status === "processing";
+  });
+
+  if (activeRepo && !selectedRepo) {
+    storage.selectedRepoId = activeRepo.id;
+  }
+
+  dispatchModeBridgeButton?.classList.toggle("is-active", !isCloud);
+  dispatchModeCloudButton?.classList.toggle("is-active", isCloud);
+  dispatchModeBridgeButton?.setAttribute("aria-selected", String(!isCloud));
+  dispatchModeCloudButton?.setAttribute("aria-selected", String(isCloud));
+
+  if (commandTargetLabel) {
+    commandTargetLabel.textContent = "Проект";
+  }
+
+  renderProjectNav();
+  renderThreadCategories();
+  renderThreadSettingsSummary();
+  renderThreadSettingsList();
+  renderCommandThreads();
+
+  if (!hasPendingCommand && !hasActiveStatus) {
+    setCommandStatusMessage(
+      activeRepo
+        ? isCloud && !isCloudReadyRepo(activeRepo)
+          ? `Проект: ${formatProjectPath(activeRepo)} · bridge-only, manifest GitHub repo ещё не подтверждён.`
+          : `Проект: ${formatProjectPath(activeRepo)} · ${getProjectStatusLabel(activeRepo)} · отправка через ${isCloud ? "cloud" : "bridge"}.`
+        : "Выберите проект."
+    );
+  }
+}
+
 function renderCommandThreads() {
   if (!commandThreadSelect) {
     return;
   }
 
-  const options = getAllThreadOptions();
-  const visibleIds = new Set(getSelectedThreadIds());
-  const nextOptions = options.filter((option) => visibleIds.has(option.id));
-  const currentValue = String(commandThreadSelect.dataset.pendingValue || commandThreadSelect.value || "").trim();
+  const nextOptions = getFilteredMenuOptions();
+  const currentValue = String(
+    commandThreadSelect.dataset.pendingValue
+    || commandThreadSelect.value
+    || storage.selectedRepoId
+    || ""
+  ).trim();
 
   commandThreadSelect.innerHTML = "";
 
-  nextOptions.forEach((option) => {
-    const element = document.createElement("option");
-    element.value = option.id;
-    element.textContent = option.displayLabel;
-    commandThreadSelect.appendChild(element);
+  if (!nextOptions.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Проекты не найдены";
+    commandThreadSelect.appendChild(option);
+    commandThreadSelect.disabled = true;
+    storage.selectedRepoId = "";
+    renderThreadSettingsSummary();
+    renderCommands();
+    return;
+  }
+
+  commandThreadSelect.disabled = false;
+
+  groupSelectableOptions(nextOptions).forEach(({ category, items }) => {
+    const group = document.createElement("optgroup");
+    group.label = category;
+
+    items.forEach((option) => {
+      const element = document.createElement("option");
+      element.value = option.id;
+      element.textContent = `${option.displayLabel} · ${option.statusLabel}`;
+      group.appendChild(element);
+    });
+
+    commandThreadSelect.appendChild(group);
   });
 
   delete commandThreadSelect.dataset.pendingValue;
@@ -1088,6 +1981,8 @@ function renderCommandThreads() {
   if (targetValue) {
     commandThreadSelect.value = targetValue;
   }
+
+  storage.selectedRepoId = targetValue;
 
   renderThreadSettingsSummary();
   renderCommands();
@@ -1108,8 +2003,8 @@ async function fetchBridgeStatus() {
   return response.json();
 }
 
-async function fetchThreads() {
-  const response = await fetch(`/api/threads?_=${Date.now()}`, {
+async function fetchMenuRepos() {
+  const response = await fetch(`/api/repos?mode=cloud&_=${Date.now()}`, {
     cache: "no-store",
     headers: {
       accept: "application/json"
@@ -1117,28 +2012,11 @@ async function fetchThreads() {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to load threads: ${response.status}`);
+    throw new Error(`Failed to load repos: ${response.status}`);
   }
 
   const data = await response.json();
-  state.threads = Array.isArray(data?.threads) ? data.threads : [];
-}
-
-async function fetchThreadCounts() {
-  const response = await fetch(`/thread-counts.json?_=${Date.now()}`, {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    state.threadMessageCounts = {};
-    return;
-  }
-
-  const data = await response.json();
-  state.threadMessageCounts = data && typeof data === "object" ? data : {};
+  state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
 async function fetchCommands() {
@@ -1178,7 +2056,32 @@ async function fetchMessages() {
   }
 
   const data = await response.json();
+  const previousCodexReplyIds = new Set(
+    state.messages
+      .filter((message) => isCodexDialogMessage(message))
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean)
+  );
+  const previousNotificationIds = new Set(
+    state.messages
+      .filter((message) => isNotificationEntry(message))
+      .map((message) => String(message.id || "").trim())
+      .filter(Boolean)
+  );
   state.messages = Array.isArray(data?.messages) ? data.messages : [];
+
+  const hasNewCodexReply = state.hasLoadedMessagesOnce && state.messages.some((message) => (
+    isCodexDialogMessage(message) && !previousCodexReplyIds.has(String(message.id || "").trim())
+  ));
+  const hasNewNotification = state.hasLoadedMessagesOnce && state.messages.some((message) => (
+    isNotificationEntry(message) && !previousNotificationIds.has(String(message.id || "").trim())
+  ));
+
+  if (hasNewCodexReply || hasNewNotification) {
+    playReplySound();
+  }
+
+  state.hasLoadedMessagesOnce = true;
 }
 
 async function refreshAll() {
@@ -1186,13 +2089,13 @@ async function refreshAll() {
     fetchBridgeStatus(),
     fetchCommands(),
     fetchMessages(),
-    fetchThreads(),
-    fetchThreadCounts()
+    fetchMenuRepos()
   ]);
 
   const statusResult = results[0];
   const commandsError = results[1].status === "rejected" ? results[1].reason : null;
   const messagesError = results[2].status === "rejected" ? results[2].reason : null;
+  const reposError = results[3].status === "rejected" ? results[3].reason : null;
 
   if (statusResult.status === "fulfilled") {
     const status = statusResult.value?.status || {};
@@ -1208,22 +2111,25 @@ async function refreshAll() {
     }
   }
 
-  renderThreadCategories();
-  renderThreadSettingsList();
-  renderCommandThreads();
+  renderDispatchModeUi();
 
   const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
 
-  if ((commandsError || messagesError) && hasCachedData) {
+  if ((commandsError || messagesError || reposError) && hasCachedData) {
     setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
   } else if (commandsError && messagesError) {
     setCommandStatusMessage("Не удалось обновить команды и ответы.", { tone: "error" });
+  } else if (reposError) {
+    setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
   } else if (messagesError) {
     setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
   } else if (commandsError) {
     setCommandStatusMessage("Не удалось обновить команды.", { tone: "error" });
+  } else {
+    syncCommandStatusFromState();
   }
 
+  startPolling();
   renderCommands();
 }
 
@@ -1231,24 +2137,66 @@ async function submitCommand(event) {
   event.preventDefault();
 
   const text = String(commandInput?.value || "").trim();
-  const threadId = getActiveThreadId();
+  const requestedThreadId = getActiveThreadId();
+  const requestedDispatchMode = getActiveDispatchMode();
+  const activeRepo = getMenuRepoById(requestedThreadId);
+  const fallbackThreadId = requestedThreadId;
+  const fallbackThreadLabel = activeRepo ? formatMenuRepoLabel(activeRepo) : getThreadDisplayLabel(fallbackThreadId, "");
+  const photoFile = commandPhotoInput?.files?.[0];
+  const requestedCloudMode = requestedDispatchMode === "cloud";
+  const dispatchMode = requestedDispatchMode;
+  const threadId = requestedThreadId;
+  const threadLabel = activeRepo?.label || fallbackThreadLabel;
 
-  if (!text && !(commandPhotoInput?.files?.[0])) {
+  if (!text && !photoFile) {
     setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
     return;
   }
 
-  setCommandStatusMessage("Отправляю сообщение…");
+  if (!activeRepo) {
+    setCommandStatusMessage("Сначала выберите проект.", { tone: "error" });
+    return;
+  }
+
+  if (requestedCloudMode && !isCloudReadyRepo(activeRepo)) {
+    setCommandStatusMessage(`Проект ${formatProjectPath(activeRepo)} сейчас bridge-only. Cloud недоступен без manifest-backed GitHub repo.`, { tone: "error" });
+    return;
+  }
+
+  if (requestedCloudMode && photoFile) {
+    setPhotoStatusMessage("Фото отправлю через Cloud в Slack thread.");
+  }
+
+  setCommandStatusMessage(
+    requestedCloudMode && photoFile
+      ? "Отправляю фото через cloud в Slack thread…"
+      : dispatchMode === "cloud"
+        ? "Отправляю через cloud…"
+        : "Отправляю через bridge…"
+  );
   setSubmitProgress("queued", "queued");
 
   const payload = {
     clientId: storage.clientId,
     threadId,
-    threadLabel: getThreadDisplayLabel(threadId, ""),
-    text
+    threadLabel,
+    text,
+    dispatchMode: dispatchMode === "cloud" ? "slack-codex-cloud" : "local-bridge",
+    targetExecutionMode: dispatchMode
   };
 
-  const photoFile = commandPhotoInput?.files?.[0];
+  payload.targetRepo = String(activeRepo.targetRepo || "").trim();
+  payload.targetRepoUrl = String(activeRepo.targetRepoUrl || "").trim();
+  payload.targetContextFiles = Array.isArray(activeRepo.contextFiles) ? activeRepo.contextFiles : [];
+  payload.targetWorkspacePath = String(activeRepo.workspacePath || "").trim();
+  payload.projectId = String(activeRepo.id || "").trim();
+  payload.projectLabel = String(activeRepo.label || "").trim();
+  payload.projectCategory = getProjectCategory(activeRepo);
+
+  if (fallbackThreadId) {
+    payload.fallbackThreadId = fallbackThreadId;
+    payload.fallbackThreadLabel = fallbackThreadLabel;
+  }
 
   if (photoFile) {
     setPhotoStatusMessage("Подготавливаю фото для отправки…");
@@ -1272,14 +2220,17 @@ async function submitCommand(event) {
   }
 
   commandInput.value = "";
-
-  if (commandPhotoInput) {
-    commandPhotoInput.value = "";
-    setPhotoStatusMessage("Фото не выбрано.");
-  }
+  clearSelectedPhoto();
 
   setSubmitProgress("processing", "processing");
-  setCommandStatusMessage("Сообщение отправлено.");
+  setCommandStatusMessage(
+    requestedCloudMode && photoFile
+      ? "Фото отправлено в Slack thread, жду Codex Cloud…"
+      : dispatchMode === "cloud"
+      ? "Отправлено в Slack, жду Codex Cloud…"
+      : "Обработка через bridge…",
+    { tone: "processing" }
+  );
   await refreshAll();
 }
 
@@ -1288,13 +2239,51 @@ function startPolling() {
     window.clearInterval(state.commandPoller);
   }
 
-  state.commandPollerInterval = FAST_POLL_INTERVAL_MS;
-  state.commandPoller = window.setInterval(() => {
+  const hasActiveCommands = state.commands.some((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    return status === "queued" || status === "dispatched" || status === "processing";
+  });
+
+  state.commandPollerInterval = hasActiveCommands ? FAST_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
+  state.commandPoller = window.setInterval(async () => {
+    if (await ensureLatestClient()) {
+      return;
+    }
+
     refreshAll().catch(() => {});
   }, state.commandPollerInterval);
 }
 
 function bindEvents() {
+  const primeReplySound = () => {
+    unlockReplySound();
+  };
+
+  document.addEventListener("pointerdown", primeReplySound, { passive: true });
+  document.addEventListener("keydown", primeReplySound, { passive: true });
+
+  dispatchModeBridgeButton?.addEventListener("click", () => {
+    state.dispatchMode = "bridge";
+    storage.dispatchModePreference = "bridge";
+    renderDispatchModeUi();
+  });
+
+  dispatchModeCloudButton?.addEventListener("click", () => {
+    const activeRepo = getMenuRepoById(storage.selectedRepoId) || state.menuRepos[0] || null;
+
+    if (activeRepo && !isCloudReadyRepo(activeRepo)) {
+      state.dispatchMode = "bridge";
+      storage.dispatchModePreference = "bridge";
+      renderDispatchModeUi();
+      setCommandStatusMessage(`Проект ${formatProjectPath(activeRepo)} сейчас bridge-only. Cloud недоступен без manifest-backed GitHub repo.`, { tone: "error" });
+      return;
+    }
+
+    state.dispatchMode = "cloud";
+    storage.dispatchModePreference = "cloud";
+    renderDispatchModeUi();
+  });
+
   refreshButton?.addEventListener("click", async () => {
     if (await ensureLatestClient()) {
       return;
@@ -1311,7 +2300,30 @@ function bindEvents() {
   });
 
   commandThreadSelect?.addEventListener("change", () => {
+    storage.selectedRepoId = normalizeRepoSelectionId(commandThreadSelect.value);
+
+    const activeRepo = getMenuRepoById(storage.selectedRepoId);
+
+    if (state.dispatchMode === "cloud" && activeRepo && !isCloudReadyRepo(activeRepo)) {
+      state.dispatchMode = "bridge";
+      storage.dispatchModePreference = "bridge";
+      setCommandStatusMessage(`Проект ${formatProjectPath(activeRepo)} bridge-only. Переключаю на bridge.`, { tone: "error" });
+    }
+
+    renderDispatchModeUi();
     renderThreadSettingsSummary();
+    renderCommands();
+  });
+
+  timelineTabDialog?.addEventListener("click", () => {
+    state.activeTimelineTab = "dialog";
+    storage.activeTimelineTab = "dialog";
+    renderCommands();
+  });
+
+  timelineTabNotifications?.addEventListener("click", () => {
+    state.activeTimelineTab = "notifications";
+    storage.activeTimelineTab = "notifications";
     renderCommands();
   });
 
@@ -1319,14 +2331,22 @@ function bindEvents() {
     const file = commandPhotoInput.files?.[0];
 
     if (!file) {
-      setPhotoStatusMessage("Фото не выбрано.");
+      clearSelectedPhoto();
       return;
     }
 
     const sizeLabel = file.size > 1_000_000
       ? `${(file.size / 1_000_000).toFixed(1)} MB`
       : `${Math.max(1, Math.round(file.size / 1000))} KB`;
-    setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})`);
+    const suffix = getActiveDispatchMode() === "cloud"
+      ? " · для фото будет использован bridge"
+      : "";
+    syncPhotoClearButton();
+    setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})${suffix}`);
+  });
+
+  commandPhotoClear?.addEventListener("click", () => {
+    clearSelectedPhoto("Фото удалено из формы.");
   });
 
   threadSettingsToggle?.addEventListener("click", () => {
@@ -1357,9 +2377,13 @@ function bindEvents() {
   });
 
   threadSettingsSelectAll?.addEventListener("click", () => {
-    storage.selectedThreadIds = getAllThreadOptions().map((option) => option.id);
+    const visibleOptions = state.activeThreadCategories.length
+      ? getAllMenuOptions().filter((option) => state.activeThreadCategories.includes(option.category))
+      : getAllMenuOptions();
+    storage.selectedMenuRepoIds = visibleOptions.map((option) => option.id);
     renderCommandThreads();
     renderThreadSettingsList();
+    setCommandStatusMessage("В меню добавлены репозитории из текущих категорий.");
   });
 
   threadSettingsClear?.addEventListener("click", () => {
@@ -1367,16 +2391,37 @@ function bindEvents() {
     if (threadSettingsSearch) {
       threadSettingsSearch.value = "";
     }
-    storage.selectedThreadIds = null;
     renderThreadCategories();
-    renderCommandThreads();
     renderThreadSettingsList();
+    setCommandStatusMessage("Фильтры меню сброшены.");
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+
+    ensureLatestClient().catch(() => {});
+  });
+
+  window.addEventListener("focus", () => {
+    ensureLatestClient().catch(() => {});
+  });
+
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) {
+      return;
+    }
+
+    ensureLatestClient().catch(() => {});
   });
 }
 
 async function boot() {
   if (
     !refreshButton ||
+    !dispatchModeBridgeButton ||
+    !dispatchModeCloudButton ||
     !threadSettingsToggle ||
     !threadSettingsSearch ||
     !threadSettingsSave ||
@@ -1395,17 +2440,27 @@ async function boot() {
     threadSettingsShowAll.checked = storage.showAllMessages;
   }
 
+  state.dispatchMode = storage.dispatchModePreference;
+  state.activeTimelineTab = storage.activeTimelineTab;
+  renderTimelineTabButtons();
+
   if (commandInput) {
     commandInput.value = "";
   }
 
-  setPhotoStatusMessage("Фото не выбрано.");
+  clearSelectedPhoto();
   bindEvents();
+
+  if (await ensureLatestClient()) {
+    return;
+  }
+
   await refreshAll();
   startPolling();
 
   const url = new URL(window.location.href);
   url.searchParams.set("v", BUILD_VERSION);
+  url.searchParams.delete("reload");
   window.history.replaceState({}, "", url.toString());
 }
 

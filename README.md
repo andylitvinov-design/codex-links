@@ -19,6 +19,14 @@ This repo no longer treats the local Mac bridge as the primary execution path. I
 - Ingests Slack thread replies through `/api/slack`
 - Mirrors assistant replies and PR links back into the mobile timeline
 
+## Saved Audit Notes
+
+Latest saved context-routing summary:
+
+- repo copy: [docs/project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+- static online copy after deploy: `/project-context-audit-2026-04-17.md`
+- weekly error and findings log: [docs/weekly-errors-and-findings-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/weekly-errors-and-findings-2026-04-17.md)
+
 ## Project To Repo Alignment
 
 Rule for this workspace:
@@ -104,6 +112,7 @@ Quick helpers added to this repo:
 
 - Slack app manifest: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
 - Local/prod setup check: `npm run cloud:check`
+- End-to-end text smoke: `npm run cloud:smoke`
 - Bulk Pages secret upload from `.dev.vars`: `npm run cloud:install-secrets`
 - KV-backed runtime config upload from `.dev.vars`: `npm run cloud:save-config`
 
@@ -138,6 +147,7 @@ Expected platform setup for this repo:
 - GitHub repo `andylitvinov-design/codex-links` connected to Cloudflare Pages project `codex-links`
 - PR preview deployments enabled
 - production deploys only from `main`
+- after merge and Pages deploy, the client auto-detects a newer `public/version.json` build on boot, during polling, and when the tab regains focus; users do not need to tap `Refresh`
 
 Emergency rollback flow:
 
