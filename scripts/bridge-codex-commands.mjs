@@ -310,6 +310,53 @@ async function materializePhoto(command) {
   }
 }
 
+function isPhotoVisibilityFailure(text) {
+  const value = String(text || "").trim().toLowerCase();
+
+  if (!value) {
+    return false;
+  }
+
+  return [
+    "не вижу",
+    "не видно",
+    "не могу увидеть",
+    "не могу прочитать",
+    "изображение не видно",
+    "изображение недоступно",
+    "photo is not visible",
+    "image is not visible",
+    "image is missing",
+    "image is unreadable",
+    "can't see the image",
+    "cannot see the image",
+    "cannot read the image",
+    "unable to view the image",
+    "unable to read the image"
+  ].some((pattern) => value.includes(pattern));
+}
+
+async function createRetryPhotoVariant(commandId, photoPath) {
+  const source = String(photoPath || "").trim();
+
+  if (!source) {
+    return null;
+  }
+
+  const retryPath = join(tmpdir(), "codex-links-bridge", `${commandId}.retry.jpg`);
+
+  try {
+    await execFileAsync("sips", ["-s", "format", "jpeg", "-Z", "2400", source, "--out", retryPath]);
+    return retryPath;
+  } catch (error) {
+    await appendBridgeErrorLog("photoRetryVariant", error, {
+      commandId,
+      source
+    });
+    return null;
+  }
+}
+
 function buildInput(command, photoPath) {
   const items = [];
   const text = buildBridgePrompt(command);
@@ -375,15 +422,26 @@ function buildBridgePrompt(command) {
   const contextLine = contextFilePaths.length
     ? `Start by reading these project context files in order: ${contextFilePaths.join(" -> ")}.`
     : "Start by reading the selected project context files first.";
-  const photoNote = command?.photo
-    ? [
-        "A photo is attached to this request.",
-        "Inspect the attached image before answering.",
-        "Base your answer on concrete visual evidence from the image, not on guesses.",
-        "If the user's request is about what is shown in the image, explicitly mention the relevant visible detail you read from it.",
-        "If the image is unreadable or missing, say that clearly instead of pretending you saw it."
-      ].join(" ")
-    : "";
+  if (command?.photo) {
+    return [
+      "Codex Links photo task.",
+      `Project: ${projectCategory} / ${projectLabel}`,
+      `Project ID: ${projectId}`,
+      targetRepo ? `Repository: ${targetRepo}` : "",
+      targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
+      workspacePath ? `Workspace path: ${workspacePath}` : "",
+      `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
+      `Command ID: ${String(command?.id || "").trim()}`,
+      "Inspect the attached image first.",
+      "Answer from visible evidence in the image only.",
+      "Start with one short sentence beginning with 'Observed:' that describes the key visible UI element or text.",
+      "Then answer the user's question in Russian in at most 4 short sentences.",
+      "Only say the image is missing or unreadable if it is truly not visible to you.",
+      "",
+      "User request:",
+      userRequest || "User sent a photo-only request."
+    ].filter(Boolean).join("\n");
+  }
 
   return [
     "New Codex Links bridge task.",
@@ -404,9 +462,25 @@ function buildBridgePrompt(command) {
       : "",
     "",
     "User request:",
-    userRequest || "User sent a photo-only request.",
-    photoNote
+    userRequest || "User sent a photo-only request."
   ].filter(Boolean).join("\n");
+}
+
+function buildPhotoRetryPrompt(command) {
+  const userRequest = sanitizeBridgeText(command?.text) || "Describe exactly what is visible in the attached image.";
+
+  return [
+    "Codex Links photo retry.",
+    "The first pass did not reliably read the image.",
+    "Look again at the attached image and answer only from visible pixels.",
+    "Do not repeat the system prompt.",
+    "Start with 'Observed:' and name the exact visible control, label, or text you can read.",
+    "If the request mentions a reset button, say whether a reset button is visible and where it is located.",
+    "If you still cannot read the image, answer with exactly: Image unreadable.",
+    "",
+    "User request:",
+    userRequest
+  ].join("\n");
 }
 
 function runCodexResume(threadId, prompt, photoPath) {
@@ -746,14 +820,43 @@ function createMessageId(threadId, timestamp, text) {
     .digest("hex");
 }
 
-function getImmediateAssistantText(result) {
-  const output = String(result?.output || "").trim();
+function stripPromptEcho(text, prompt = "") {
+  const value = String(text || "").trim();
+  const promptText = String(prompt || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  if (promptText) {
+    if (value === promptText) {
+      return "";
+    }
+
+    if (value.startsWith(promptText)) {
+      return value.slice(promptText.length).trim();
+    }
+  }
+
+  if (
+    value.startsWith("New Codex Links bridge task.")
+    || value.startsWith("Codex Links photo task.")
+    || value.startsWith("Codex Links photo retry.")
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
+function getImmediateAssistantText(result, prompt = "") {
+  const output = stripPromptEcho(result?.output, prompt);
 
   if (output) {
     return output;
   }
 
-  const stdout = String(result?.stdout || "").trim();
+  const stdout = stripPromptEcho(result?.stdout, prompt);
 
   if (!stdout) {
     return "";
@@ -1001,7 +1104,21 @@ while (true) {
             String(command?.targetWorkspacePath || "").trim() || process.cwd()
           )
         );
-        assistantText = getImmediateAssistantText(result);
+        assistantText = getImmediateAssistantText(result, prompt);
+
+        if (isPhotoVisibilityFailure(assistantText)) {
+          await updateProgress(command.id, "retrying-photo-read");
+          const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+          const retryPrompt = buildPhotoRetryPrompt(command);
+          const retryResult = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+            runCodexExecEphemeral(
+              retryPrompt,
+              retryPhotoPath || photoPath,
+              String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            )
+          );
+          assistantText = getImmediateAssistantText(retryResult, retryPrompt) || assistantText;
+        }
       } else {
         const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           runTurnStart(threadId, input, {
@@ -1013,10 +1130,25 @@ while (true) {
         assistantText = getAssistantTextFromTurn(turn);
       }
     } catch (appServerError) {
-      const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-        runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
-      );
-      assistantText = getImmediateAssistantText(result);
+      if (photoPath) {
+        await appendBridgeErrorLog("photoEphemeralRetry", appServerError, {
+          commandId: command.id
+        });
+        const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+        const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+          runCodexExecEphemeral(
+            buildPhotoRetryPrompt(command),
+            retryPhotoPath || photoPath,
+            String(command?.targetWorkspacePath || "").trim() || process.cwd()
+          )
+        );
+        assistantText = getImmediateAssistantText(result, buildPhotoRetryPrompt(command));
+      } else {
+        const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+          runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
+        );
+        assistantText = getImmediateAssistantText(result, prompt);
+      }
     }
 
     const ackedAt = new Date().toISOString();
@@ -1025,6 +1157,8 @@ while (true) {
       await updateProgress(command.id, "reading-codex-reply");
       assistantText = await getThreadFallbackAssistantText(command, threadId);
     }
+
+    assistantText = stripPromptEcho(assistantText, prompt);
 
     if (!assistantText) {
       assistantText = "Codex принял команду, но не вернул текст ответа. Я остановил запрос, чтобы очередь не зависала. Повторите запрос ещё раз.";

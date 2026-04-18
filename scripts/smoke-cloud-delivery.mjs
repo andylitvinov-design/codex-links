@@ -99,6 +99,10 @@ function assertManifestContext(command, label) {
 }
 
 function assertDirectCloudState(command, label) {
+  if (String(command?.dispatchMode || "").trim() !== "cloud") {
+    throw new Error(`${label}: expected dispatchMode=cloud for text cloud request, got ${String(command?.dispatchMode || "").trim() || "empty"}.`)
+  }
+
   if (String(command?.requestedExecutor || "").trim() !== "cloud") {
     throw new Error(`${label}: expected requestedExecutor=cloud, got ${String(command?.requestedExecutor || "").trim() || "empty"}.`)
   }

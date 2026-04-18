@@ -71,12 +71,12 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
       return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
     }
 
-    if (isSlackDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_SLACK;
-    }
-
     if (isCloudDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_CLOUD;
+    }
+
+    if (isSlackDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_SLACK;
     }
   }
 
