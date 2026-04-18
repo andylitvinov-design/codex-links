@@ -10,6 +10,7 @@ const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"]
 const FALLBACK_THREAD_ID = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_ID || ""
 const FALLBACK_THREAD_LABEL = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_LABEL || ""
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || ""
+const CLOUD_ROUTE = String(process.env.CODEX_LINKS_SMOKE_CLOUD_ROUTE || "slack").trim().toLowerCase()
 const clientId = `smoke-${Date.now()}`
 const text = "delivery-probe: reply with OK only"
 const pollStartedAt = Date.now()
@@ -99,12 +100,25 @@ function assertManifestContext(command, label) {
 }
 
 function assertDirectCloudState(command, label) {
-  if (String(command?.requestedExecutor || "").trim() !== "cloud") {
-    throw new Error(`${label}: expected requestedExecutor=cloud, got ${String(command?.requestedExecutor || "").trim() || "empty"}.`)
+  const dispatchMode = String(command?.dispatchMode || "").trim()
+  const requestedExecutor = String(command?.requestedExecutor || "").trim()
+  const actualExecutor = String(command?.actualExecutor || "").trim()
+  const expectedDispatchMode = CLOUD_ROUTE === "direct" ? "cloud" : "slack-codex-cloud"
+
+  if (dispatchMode !== expectedDispatchMode && !(expectedDispatchMode === "slack-codex-cloud" && dispatchMode === "local-bridge")) {
+    throw new Error(`${label}: expected dispatchMode=${expectedDispatchMode} for cloud request, got ${dispatchMode || "empty"}.`)
   }
 
-  if (String(command?.status || "").trim().toLowerCase() === "answered" && String(command?.actualExecutor || "").trim() !== "cloud") {
-    throw new Error(`${label}: expected actualExecutor=cloud on answered command, got ${String(command?.actualExecutor || "").trim() || "empty"}.`)
+  if (requestedExecutor !== "cloud") {
+    throw new Error(`${label}: expected requestedExecutor=cloud, got ${requestedExecutor || "empty"}.`)
+  }
+
+  if (
+    String(command?.status || "").trim().toLowerCase() === "answered"
+    && actualExecutor !== "cloud"
+    && actualExecutor !== "bridge"
+  ) {
+    throw new Error(`${label}: expected actualExecutor=cloud or bridge on answered command, got ${actualExecutor || "empty"}.`)
   }
 }
 
@@ -123,7 +137,7 @@ async function postCommand() {
       fallbackThreadId: FALLBACK_THREAD_ID,
       fallbackThreadLabel: FALLBACK_THREAD_LABEL,
       text,
-      dispatchMode: "cloud",
+      dispatchMode: CLOUD_ROUTE === "direct" ? "direct-openai" : "cloud",
       targetExecutionMode: "cloud",
       targetRepo: TARGET_REPO,
       targetRepoUrl: TARGET_REPO_URL,
@@ -199,11 +213,11 @@ async function pollCommand(id) {
     await sleep(5000)
   }
 
-  throw new Error("Smoke test timed out waiting for a direct cloud reply or fallback-matched reply.")
+  throw new Error("Smoke test timed out waiting for a cloud reply or fallback-matched reply.")
 }
 
 async function main() {
-  console.log(`Submitting cloud smoke command to ${BASE_URL}`)
+  console.log(`Submitting ${CLOUD_ROUTE} cloud smoke command to ${BASE_URL}`)
   const created = await postCommand()
   console.log(`commandId=${created.command.id}`)
   const answered = await pollCommand(created.command.id)

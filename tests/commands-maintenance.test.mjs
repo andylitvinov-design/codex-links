@@ -97,3 +97,44 @@ test("runCommandMaintenance schedules queued cloud fallback commands for dispatc
   assert.equal(result.changed, false);
   assert.deepEqual(result.commandsToDispatch, ["cmd-cloud-fallback"]);
 });
+
+test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-bridge-timeout",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "bridge",
+    status: "processing",
+    progressStage: "waiting-for-codex",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() - 1000).toISOString(),
+    targetRepo: "andylitvinov-design/codex-links"
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.changedCount, 1);
+  assert.deepEqual(result.commandsToDispatch, ["cmd-bridge-timeout"]);
+
+  const updated = result.commands.find((command) => command.id === "cmd-bridge-timeout");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "slack-codex-cloud");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "switched-to-cloud");
+  assert.equal(updated.timeoutPhase, "result-timeout");
+  assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
+  assert.match(updated.errorMessage, /fallback_to_slack/);
+});
