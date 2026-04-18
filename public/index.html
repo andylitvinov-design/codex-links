@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260418-0315" />
+    <link rel="stylesheet" href="/styles.css?v=20260418-0348" />
   </head>
   <body>
     <main class="page">
@@ -19,6 +19,9 @@
         <header class="chat-header">
           <h1>Ссылки</h1>
           <div class="header-actions">
+            <a class="button button-secondary header-link-button" href="/projects.html">Projects</a>
+            <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
+            <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
             <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
           </div>
         </header>
@@ -28,23 +31,12 @@
               <p id="bridge-status-text" class="bridge-status">Подключаю статус cloud execution…</p>
               <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
             </div>
-            <button class="button button-secondary bridge-reset-button" id="delivery-reset-button" type="button">Reset</button>
           </div>
-          <p class="bridge-reset-help">Резервный запуск maintenance для зависших cloud/bridge сообщений.</p>
-        </section>
-
-        <section class="projects-entry">
-          <div class="projects-entry-copy">
-            <span class="field-label">Живые ссылки</span>
-            <p>Готовая страница со списком опубликованных проектов и рабочих online-ссылок.</p>
-          </div>
-          <a class="button button-primary projects-entry-button" href="/projects.html">Открыть список проектов</a>
         </section>
 
         <section class="command-wrap">
           <form id="command-form" class="command-form">
             <div class="thread-settings-inline-row">
-              <span id="thread-settings-summary" class="form-status">Показываются все репозитории.</span>
               <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
                 <input id="thread-settings-show-all" type="checkbox" />
                 <span>Все</span>
@@ -82,7 +74,6 @@
                 <span class="field-label" id="command-target-label">Проект</span>
                 <select id="command-thread-select" name="thread"></select>
               </label>
-              <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
             </section>
             <div class="command-compose-row">
               <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true"></textarea>
@@ -123,6 +114,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260418-0315"></script>
+    <script type="module" src="/app.js?v=20260418-0348"></script>
   </body>
 </html>
