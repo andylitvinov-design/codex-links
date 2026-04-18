@@ -22,7 +22,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0022";
+const BUILD_VERSION = "20260418-0159";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1173,6 +1173,20 @@ function getCommandDeliveryLabel(command) {
   return getCommandActualExecutor(command);
 }
 
+function getCommandAnswerTitle(command) {
+  const executor = getCommandActualExecutor(command);
+
+  if (executor === "bridge") {
+    return "Ответ Codex bridge";
+  }
+
+  if (executor === "cloud") {
+    return "Ответ Codex сдщгв";
+  }
+
+  return "Ответ Codex";
+}
+
 function getCommandProjectPath(command) {
   const projectCategory = String(command?.projectCategory || "").trim();
   const projectLabel = String(command?.projectLabel || command?.threadLabel || "").trim();
@@ -1727,7 +1741,7 @@ function renderAssistantReplyMarkup(replyEntry) {
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
-        <span class="command-answer-title">Ответ Codex</span>
+        <span class="command-answer-title">${escapeHtml(getCommandAnswerTitle(linkedCommand))}</span>
         <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
       </summary>
       <div class="command-answer-body">
