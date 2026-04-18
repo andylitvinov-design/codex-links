@@ -1770,39 +1770,23 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
-  const deliveryLabel = getCommandDeliveryLabel(linkedCommand);
-  const contextMeta = renderCommandContextMarkup(linkedCommand);
-  const commandMeta = linkedCommand?.branchName
-    ? `<p class="command-answer-meta">Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
-    : "";
-  const prMeta = linkedCommand?.prUrl
-    ? `<p class="command-answer-meta"><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
-    : "";
+  const title = linkedCommand?.threadLabel
+    ? `Ответ Codex · ${linkedCommand.threadLabel}`
+    : getCommandAnswerTitle(linkedCommand);
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
-        <span class="command-answer-title">${escapeHtml(getCommandAnswerTitle(linkedCommand))}</span>
-        <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
+        <span class="command-answer-title">${escapeHtml(title)}</span>
       </summary>
       <div class="command-answer-body">
-        ${contextMeta}
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
-        ${prMeta}
-        ${commandMeta}
-        <div class="command-answer-actions">
-          <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
-            Ответить
-          </button>
-        </div>
       </div>
     </details>
   `;
 }
 
 function bindAssistantReplyInteractions(container, replies) {
-  const normalizedReplies = Array.isArray(replies) ? replies : [];
-
   container.querySelectorAll(".command-answer").forEach((details) => {
     const detailsId = String(details.dataset.entryId || "").trim();
 
@@ -1825,40 +1809,6 @@ function bindAssistantReplyInteractions(container, replies) {
     });
   });
 
-  container.querySelectorAll(".command-reply-link").forEach((replyLink) => {
-    replyLink.addEventListener("click", () => {
-      const threadId = String(replyLink.dataset.threadId || "").trim();
-      const reply = normalizedReplies.find((entry) => String(entry?.threadId || "").trim() === threadId) || normalizedReplies[0];
-      const didActivate = activateReplyThread(threadId);
-
-      if (!didActivate) {
-        setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
-        return;
-      }
-
-      if (commandInput) {
-        commandInput.value = "";
-      }
-
-      commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
-      window.setTimeout(() => {
-        commandInput.focus();
-      }, 180);
-
-      setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, reply?.threadLabel || "")}`);
-    });
-  });
-
-  container.querySelectorAll(".command-retry-link").forEach((button) => {
-    button.addEventListener("click", () => {
-      const commandId = String(button.dataset.commandId || "").trim();
-      const executor = String(button.dataset.executor || "").trim() === "cloud" ? "cloud" : "bridge";
-
-      retryCommandWithExecutor(commandId, executor).catch((error) => {
-        setCommandStatusMessage(String(error?.message || "Не удалось повторить сообщение."), { tone: "error" });
-      });
-    });
-  });
 }
 
 function renderCommands() {
@@ -2026,41 +1976,18 @@ function renderCommands() {
 
     if (entry.kind === "command") {
       const command = entry.command;
-      const failureMessage = getCommandFailureMessage(command);
-      const deliveryStatus = getCommandDeliveryStatus(command);
-      const contextMarkup = renderCommandContextMarkup(command);
-      const latencyMarkup = renderCommandLatencyMarkup(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
-      const showRetryActions = canRetryCommand(command);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
-      const retryActionsMarkup = showRetryActions ? `
-        <div class="command-answer-actions">
-          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="bridge">
-            Повторить через bridge
-          </button>
-          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="cloud">
-            Повторить через cloud
-          </button>
-        </div>
-      ` : "";
 
       element.innerHTML = `
         <div class="command-item-top">
           <strong>Вы</strong>
           <time>${formatDate(entry.createdAt)}</time>
         </div>
-        ${contextMarkup}
-        ${latencyMarkup}
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
-        ${failureMessage ? "" : ""}
-        ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
-        ${retryActionsMarkup}
         ${repliesMarkup}
-        <div class="command-item-top">
-          <span>${formatCommandStage(command)}</span>
-        </div>
       `;
 
       bindAssistantReplyInteractions(element, entry.replies);
@@ -2071,13 +1998,9 @@ function renderCommands() {
     const message = entry.message;
     const linkedCommand = entry.linkedCommand;
     const isAssistant = entry.role === "assistant";
-    const statusLabel = isAssistant
-      ? (linkedCommand?.prUrl ? "PR готов" : "Ответ получен")
-      : "Сообщение в истории";
-    const contextMarkup = renderCommandContextMarkup(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
-      : `${contextMarkup}<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
+      : `<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
 
     element.innerHTML = `
       <div class="command-item-top">
@@ -2085,9 +2008,6 @@ function renderCommands() {
         <time>${formatDate(entry.createdAt)}</time>
       </div>
       ${body}
-      <div class="command-item-top">
-        <span>${statusLabel}</span>
-      </div>
     `;
 
     bindAssistantReplyInteractions(element, isAssistant ? [entry] : entry.replies);
@@ -2710,7 +2630,7 @@ function noteNewMessages(previousMessages, nextMessages) {
 
 async function fetchDeliverySnapshot(options = {}) {
   const url = new URL("/api/delivery", window.location.origin);
-  url.searchParams.set("clientId", storage.clientId);
+  url.searchParams.set("scope", "public");
   if (options.activeOnly) {
     url.searchParams.set("activeOnly", "1");
   }
