@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0420";
+const BUILD_VERSION = "20260418-0444";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -710,16 +710,7 @@ function getSelectedMenuRepoIds() {
 }
 
 function getFilteredMenuOptions() {
-  const activeCategories = new Set(state.activeThreadCategories);
-  const selectedRepoIds = new Set(getSelectedMenuRepoIds());
-
-  return getAllMenuOptions().filter((option) => {
-    if (activeCategories.size && !activeCategories.has(option.category)) {
-      return false;
-    }
-
-    return selectedRepoIds.has(option.id);
-  });
+  return getAllMenuOptions();
 }
 
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
@@ -3182,7 +3173,6 @@ async function boot() {
     !refreshButton ||
     !dispatchModeBridgeButton ||
     !dispatchModeCloudButton ||
-    !threadSettingsToggle ||
     !threadSettingsSearch ||
     !threadSettingsSave ||
     !threadSettingsSelectAll ||
