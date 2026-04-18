@@ -1406,16 +1406,16 @@ export async function runCommandMaintenance(env, options = {}) {
       updated = evaluateBridgeMaintenance(command, nowIso, options);
     }
 
+    if (
+      updated.dispatchMode === DISPATCH_MODE_SLACK
+      && updated.status === "queued"
+      && !String(updated.slackChannelId || "").trim()
+    ) {
+      commandsToDispatch.push(updated.id);
+    }
+
     if (updated !== previous) {
       changedCount += 1;
-
-      if (
-        updated.dispatchMode === DISPATCH_MODE_SLACK
-        && updated.status === "queued"
-        && !String(updated.slackChannelId || "").trim()
-      ) {
-        commandsToDispatch.push(updated.id);
-      }
     }
 
     return updated;
