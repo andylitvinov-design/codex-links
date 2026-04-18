@@ -335,3 +335,32 @@ Fix prepared:
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+
+## 2026-04-18 Photo Stall After Yellow Badge Restore
+
+### What actually happened
+
+- the restored yellow processing badge was not the root cause
+- the badge exposed a real live delay: a `user` message could appear in the timeline before the linked `command` snapshot reached terminal state
+- on photo requests, bridge finalization could lag behind long enough that the UI kept showing `Обрабатываю · статус синхронизируется`
+
+### Confirmed production symptom
+
+- recent photo messages such as `Что на фото` and `Облако что на фото` appeared immediately in `/api/messages`
+- at least one matching `command` stayed non-terminal for too long before manual recovery
+- result: the user saw a yellow status block that looked permanently stuck even though the queue eventually could be recovered
+
+### Root cause to remember
+
+- there is still a sync gap between:
+  - message visibility in the public feed
+  - command finalization in delivery state
+- when photo delivery hits that gap, the UI correctly shows the fallback yellow badge, but the system still needs stronger automatic terminal finalization for stalled photo commands
+
+### Decision / prevention
+
+- do not treat the yellow badge itself as a bug; it is a symptom surface
+- the real prevention target is command terminalization:
+  - photo commands must auto-finish as `answered` or `failed`
+  - no long-lived `created` / `processing` / `dispatched` states should survive without maintenance cleanup
+- future regressions of this shape should be logged as `photo-finalization stall`, not as `UI badge regression`
