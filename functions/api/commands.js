@@ -605,7 +605,7 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       id: command.id,
       dispatchMode,
       status: command.status || "queued",
-      progressStage: "dispatching",
+      progressStage: "queued",
       dispatchStartedAt
     });
 
@@ -1141,7 +1141,34 @@ export async function onRequest(context) {
       return json({ error: claimed.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: serializeCommand(claimed.value, { includePhotoData: true }) });
+    let claimDiagnostics = null;
+
+    if (!claimed.value) {
+      const snapshot = await readCommands(env);
+      const queuedLocal = snapshot.filter((command) =>
+        command.dispatchMode === DISPATCH_MODE_LOCAL && command.status === "queued"
+      );
+      const processingLocal = snapshot.filter((command) =>
+        command.dispatchMode === DISPATCH_MODE_LOCAL && command.status === "processing"
+      );
+
+      claimDiagnostics = {
+        queuedLocalCount: queuedLocal.length,
+        processingLocalCount: processingLocal.length,
+        queuedLocalIds: queuedLocal.slice(0, 5).map((command) => command.id),
+        processingLocalIds: processingLocal.slice(0, 5).map((command) => command.id)
+      };
+
+      if (queuedLocal.length || processingLocal.length) {
+        console.error("[codex-links] claim returned null", claimDiagnostics);
+      }
+    }
+
+    return json({
+      ok: true,
+      command: serializeCommand(claimed.value, { includePhotoData: true }),
+      claimDiagnostics
+    });
   }
 
   if (action === "progress") {

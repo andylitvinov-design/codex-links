@@ -682,26 +682,50 @@ async function fetchRecentCommands() {
 }
 
 async function claimNextCommand() {
-  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-write-token": token
-    },
-    body: JSON.stringify({
-      action: "claim",
-      processorId: "launchd-bridge",
-      leaseMs: CLAIM_LEASE_MS
-    })
-  }, FETCH_TIMEOUT_MS, "claimNextCommand");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-write-token": token
+      },
+      body: JSON.stringify({
+        action: "claim",
+        processorId: "launchd-bridge",
+        leaseMs: CLAIM_LEASE_MS
+      })
+    }, FETCH_TIMEOUT_MS, "claimNextCommand");
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to claim command: ${response.status} ${body}`);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Failed to claim command: ${response.status} ${body}`);
+    }
+
+    const data = await response.json();
+
+    if (data.command) {
+      return data.command;
+    }
+
+    const queuedLocalCount = Number(data?.claimDiagnostics?.queuedLocalCount || 0);
+    const processingLocalCount = Number(data?.claimDiagnostics?.processingLocalCount || 0);
+
+    if (queuedLocalCount > 0) {
+      await appendBridgeErrorLog("claimNextCommand.nullWithQueued", new Error("Claim returned null while queued local commands exist."), {
+        attempt,
+        queuedLocalCount,
+        processingLocalCount,
+        queuedLocalIds: Array.isArray(data?.claimDiagnostics?.queuedLocalIds) ? data.claimDiagnostics.queuedLocalIds.join(",") : "",
+        processingLocalIds: Array.isArray(data?.claimDiagnostics?.processingLocalIds) ? data.claimDiagnostics.processingLocalIds.join(",") : ""
+      });
+      await sleep(350);
+      continue;
+    }
+
+    return null;
   }
 
-  const data = await response.json();
-  return data.command || null;
+  return null;
 }
 
 async function updateProgress(commandId, progressStage) {
