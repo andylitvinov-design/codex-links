@@ -218,6 +218,52 @@ New error knowledge recorded:
 
 New fixes prepared:
 
+## 2026-04-18 Live KV And Bridge Photo Follow-Up
+
+### Newly confirmed production errors
+
+- Cloudflare Pages production hit Workers KV free tier limit:
+  - `1000 Workers KV list operations per day`
+  - list-related KV calls returned `429`
+  - result on live: queue visibility and UI refresh became unreliable
+- Photo delivery path was confirmed to reach local bridge correctly:
+  - UI attach present
+  - API create stored photo payload
+  - bridge claim succeeded
+  - `photoSeenByBridge=true`
+- The actual live photo blocker moved downstream:
+  - `codex exec` hung after `waiting-for-codex`
+  - manual retry path `retrying-photo-read` could also hang
+  - commands stayed visually stuck unless manually failed
+
+### Fixes landed
+
+- PR `#49` `Reduce KV hot-path pressure for bridge delivery`
+- commands and messages hot paths were moved away from full-store refresh patterns toward:
+  - key-by-id storage
+  - client indexes
+  - active queue indexes
+- UI polling on the main page now prefers client-scoped delivery snapshot instead of separate full public refresh calls for commands and messages
+- storage APIs now return explicit rate-limited responses instead of silent UI hangs
+
+### Operational discoveries that must not be forgotten
+
+- Even after KV hot-path reduction, the live local bridge still needs a hard timeout around image executor subprocesses.
+- Photo commands can be:
+  - delivered correctly
+  - seen by bridge
+  - still fail because the executor never returns output
+- The correct failure mode for this case is explicit:
+  - code: `bridge_photo_retry_timeout`
+  - detail: bridge saw the image, retry subprocess started, but no final answer came back
+
+### Current recommended next action
+
+1. Add hard timeout and final `mark failed` behavior for:
+   - main photo `codex exec`
+   - retry `Attached image task`
+2. Re-run live photo smoke after that worker change.
+
 - removed automatic `cloud -> bridge` fallback for Slack-cloud execution
 - kept `bridge -> cloud` fallback for stalled bridge commands
 - after Slack photo upload, the app now posts an explicit thread nudge with the uploaded file reference and asks Codex to acknowledge in the same thread

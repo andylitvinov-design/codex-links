@@ -90,6 +90,12 @@ body {
   white-space: nowrap;
 }
 
+.header-link-button.is-active {
+  border-color: rgba(15, 118, 110, 0.22);
+  background: rgba(15, 118, 110, 0.1);
+  color: var(--accent-strong);
+}
+
 .dispatch-toggle {
   position: relative;
   display: inline-flex;
@@ -294,40 +300,25 @@ body {
   color: #9a4d04;
 }
 
-.projects-entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
-  background:
-    linear-gradient(90deg, rgba(15, 118, 110, 0.08), rgba(255, 253, 249, 0.94) 34%, rgba(217, 119, 6, 0.1));
-  border-bottom: 1px solid var(--line);
-}
-
-.projects-entry-copy {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.projects-entry-copy p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-  line-height: 1.45;
-}
-
-.projects-entry-button {
-  min-width: 240px;
-}
-
 .bridge-status-block {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.6);
+}
+
+.bridge-status-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bridge-status-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
 }
 
 .bridge-status,
@@ -463,7 +454,7 @@ input[type="radio"] {
 .thread-settings-inline-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   margin-top: -2px;
   min-width: 0;
@@ -1046,10 +1037,6 @@ code {
     gap: 10px;
   }
 
-  .projects-entry {
-    grid-template-columns: 1fr;
-  }
-
   .submit-progress-wrap {
     width: 100%;
     align-items: stretch;
@@ -1118,10 +1105,6 @@ code {
 
   .header-actions .bridge-status {
     width: 100%;
-  }
-
-  .projects-entry-button {
-    min-width: 0;
   }
 
   .thread-settings-item-inline {
