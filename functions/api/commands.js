@@ -1,6 +1,7 @@
 import {
   acknowledgeCommands,
   claimNextCommand,
+  COMMAND_TIMEOUTS,
   fallbackCommandToLocalBridge,
   markCommandAnswered,
   markCommandDispatched,
@@ -754,7 +755,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     return failed.value || command;
   }
 
-  const waitMs = 15_000;
+  const waitMs = COMMAND_TIMEOUTS.bridgeClaimMs;
   await sleep(waitMs);
   command = await getCommandById(env, commandId);
 
@@ -781,12 +782,12 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
       timeoutPhase: "claim-timeout",
       fallbackReason: "local bridge did not claim the command in time",
       lastDiagnosticCode: "bridge_claim_timeout",
-      lastDiagnosticDetail: "The local bridge did not claim the command before the fast claim timeout.",
+      lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
       errorMessage: stringifyCommandError({
         code: "fallback_to_cloud",
         stage: "switched-to-cloud",
         message: "Local bridge did not claim the command in time. Switched to cloud execution.",
-        detail: "The local bridge did not claim the command before the fast claim timeout.",
+        detail: "The local bridge did not claim the command before the claim timeout.",
         fallback: "cloud"
       })
     });
@@ -802,12 +803,12 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     actualExecutor: "bridge",
     timeoutPhase: "claim-timeout",
     lastDiagnosticCode: "bridge_claim_timeout",
-    lastDiagnosticDetail: "The local bridge did not claim the command before the fast claim timeout.",
+    lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
     errorMessage: stringifyCommandError({
       code: "bridge_claim_timeout",
       stage: "bridge-claim-timeout",
       message: "Local bridge did not claim the command in time.",
-      detail: "The local bridge did not claim the command before the fast claim timeout."
+      detail: "The local bridge did not claim the command before the claim timeout."
     })
   });
 
