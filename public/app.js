@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-1512";
+const BUILD_VERSION = "20260418-1518";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1211,6 +1211,28 @@ function getCommandDeliveryStatus(command) {
   };
 }
 
+function getFallbackMessageDeliveryStatus(commandId) {
+  const normalizedId = String(commandId || "").trim();
+
+  if (!normalizedId) {
+    return null;
+  }
+
+  const hasAssistantMessage = state.messages.some((message) => (
+    String(message?.commandId || "").trim() === normalizedId
+    && String(message?.role || "").trim() === "assistant"
+  ));
+
+  if (hasAssistantMessage) {
+    return null;
+  }
+
+  return {
+    tone: "delivery",
+    text: "Обрабатываю · статус синхронизируется"
+  };
+}
+
 function getVisibleTimelineCommands() {
   const showAllMessages = storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
@@ -2058,7 +2080,9 @@ function renderCommands() {
     const linkedCommand = entry.linkedCommand;
     const isAssistant = entry.role === "assistant";
     const hasPhoto = Boolean(linkedCommand?.photo);
-    const deliveryStatus = isAssistant ? null : getCommandDeliveryStatus(linkedCommand);
+    const deliveryStatus = isAssistant
+      ? null
+      : (getCommandDeliveryStatus(linkedCommand) || getFallbackMessageDeliveryStatus(message?.commandId));
     const failureMessage = isAssistant ? "" : getCommandFailureMessage(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
