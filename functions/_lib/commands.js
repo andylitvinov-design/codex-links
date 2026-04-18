@@ -170,6 +170,34 @@ function normalizeDiagnosticText(rawValue, max = 240) {
   return String(rawValue || "").trim().slice(0, max);
 }
 
+function normalizePhotoUnsupportedReason(rawValue) {
+  return normalizeDiagnosticText(rawValue, 240);
+}
+
+function derivePhotoAttached(command, input = {}) {
+  if (typeof input.photoAttached === "boolean") {
+    return input.photoAttached;
+  }
+
+  if (typeof command?.photoAttached === "boolean") {
+    return command.photoAttached;
+  }
+
+  return Boolean(command?.photo);
+}
+
+function derivePhotoBytesPresent(command, input = {}) {
+  if (typeof input.photoBytesPresent === "boolean") {
+    return input.photoBytesPresent;
+  }
+
+  if (typeof command?.photoBytesPresent === "boolean") {
+    return command.photoBytesPresent;
+  }
+
+  return Boolean(String(command?.photo?.dataUrl || "").trim());
+}
+
 function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispatchMode || command?.dispatchMode) {
   const actualDispatchMode = dispatchModeToExecutionMode(dispatchMode);
   const requestedExecutor = normalizeExecutionMode(
@@ -230,6 +258,15 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
     lastDiagnosticDetail: normalizeDiagnosticText(
       Object.prototype.hasOwnProperty.call(input, "lastDiagnosticDetail") ? input.lastDiagnosticDetail : command?.lastDiagnosticDetail,
       500
+    ),
+    photoAttached: derivePhotoAttached(command, input),
+    photoBytesPresent: derivePhotoBytesPresent(command, input),
+    photoSeenByBridge: normalizeBooleanValue(input.photoSeenByBridge, Boolean(command?.photoSeenByBridge)),
+    photoProcessed: normalizeBooleanValue(input.photoProcessed, Boolean(command?.photoProcessed)),
+    photoUnsupportedReason: normalizePhotoUnsupportedReason(
+      Object.prototype.hasOwnProperty.call(input, "photoUnsupportedReason")
+        ? input.photoUnsupportedReason
+        : command?.photoUnsupportedReason
     ),
     firstAckAt: normalizeDateValue(
       Object.prototype.hasOwnProperty.call(input, "firstAckAt") ? input.firstAckAt : command?.firstAckAt
@@ -426,7 +463,11 @@ function hasActiveLocalProcessorForCommand(command, commands = []) {
   const threadKey = getCommandThreadKey(command);
 
   if (threadKey === "::") {
-    return false;
+    return (Array.isArray(commands) ? commands : []).some((candidate) =>
+      candidate?.id !== command?.id
+      && candidate?.dispatchMode === DISPATCH_MODE_LOCAL
+      && candidate?.status === "processing"
+    );
   }
 
   return (Array.isArray(commands) ? commands : []).some((candidate) =>
@@ -556,6 +597,11 @@ export function createCommandRecord(input) {
       fallbackReason: "",
       lastDiagnosticCode: "",
       lastDiagnosticDetail: "",
+      photoAttached: Boolean(normalizedPhoto?.value),
+      photoBytesPresent: Boolean(String(normalizedPhoto?.value?.dataUrl || "").trim()),
+      photoSeenByBridge: false,
+      photoProcessed: false,
+      photoUnsupportedReason: "",
       firstAckAt: "",
       resultAt: "",
       slackChannelId: "",
@@ -615,6 +661,11 @@ export async function readCommands(env) {
       fallbackReason: normalizeDiagnosticText(entry.fallbackReason),
       lastDiagnosticCode: normalizeDiagnosticText(entry.lastDiagnosticCode, 80),
       lastDiagnosticDetail: normalizeDiagnosticText(entry.lastDiagnosticDetail, 500),
+      photoAttached: derivePhotoAttached(entry),
+      photoBytesPresent: derivePhotoBytesPresent(entry),
+      photoSeenByBridge: normalizeBooleanValue(entry.photoSeenByBridge),
+      photoProcessed: normalizeBooleanValue(entry.photoProcessed),
+      photoUnsupportedReason: normalizePhotoUnsupportedReason(entry.photoUnsupportedReason),
       firstAckAt: normalizeDateValue(entry.firstAckAt),
       resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
       slackChannelId: normalizeSlackValue(entry.slackChannelId),
@@ -822,6 +873,7 @@ export async function claimNextCommand(env, input = {}) {
     dispatchStartedAt: next[nextIndex].dispatchStartedAt || nowIso,
     bridgeClaimedAt: next[nextIndex].bridgeClaimedAt || nowIso,
     firstExecutorAckSeenAt: next[nextIndex].firstExecutorAckSeenAt || nowIso,
+    photoSeenByBridge: Boolean(next[nextIndex].photo),
     processingStartedAt: nowIso,
     processingLeaseUntil: leaseUntil,
     processorId
@@ -1021,6 +1073,7 @@ export async function updateCommandProgress(env, input = {}) {
 
     updated = {
       ...command,
+      ...mergeCommandDebugState(command, input, command.dispatchMode),
       progressStage,
       progressUpdatedAt: normalizeProgressUpdatedAt(input.progressUpdatedAt) || nowIso
     };
@@ -1128,6 +1181,7 @@ export async function markCommandAnswered(env, input = {}) {
       replyMatchedBy: input.replyMatchedBy || command.replyMatchedBy,
       firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt || nowIso,
       resultAt: normalizeDateValue(input.resultAt) || nowIso,
+      photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoAttached || command.photoSeenByBridge),
       timeoutPhase: "",
       lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
       lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
@@ -1159,6 +1213,7 @@ export async function markCommandFailed(env, input = {}) {
       fallbackReason: input.fallbackReason || command.fallbackReason,
       lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
       lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoSeenByBridge),
       firstExecutorAckSeenAt: normalizeDateValue(input.firstExecutorAckSeenAt) || command.firstExecutorAckSeenAt,
       firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt) || command.firstReplySeenAt,
       replyIngestedAt: normalizeDateValue(input.replyIngestedAt) || command.replyIngestedAt
