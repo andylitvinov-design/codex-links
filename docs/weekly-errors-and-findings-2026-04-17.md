@@ -335,3 +335,23 @@ Fix prepared:
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+
+## 2026-04-18 Live Recovery And Rollback Anchor
+
+### Saved rollback point
+
+- current production build explicitly saved as rollback anchor: `20260418-1524`
+- merge commit for that known-good UI state: `d91b56b0654a51d860eadb4fe5eb0bfea7f66031`
+- PR: `#67` `Add visible queue reset button`
+
+### Errors confirmed during live stabilization
+
+- message feed could contain the new `user` message while the linked `command` snapshot lagged behind, which removed the visible yellow processing badge
+- some photo requests reached `waiting-for-codex` and required manual finalization because bridge photo post-processing did not always persist the real assistant answer
+- old cloud-dispatched commands could remain stuck in `dispatched` without a terminal state and had to be manually finalized to clear the queue
+
+### Fixes and operational decisions
+
+- restored the visible yellow processing badge with a fallback UI status when message delivery outruns command snapshot sync
+- added a visible `Сброс` button in the header that triggers queue maintenance for stuck delivery items
+- saved the current production version in repo state so rollback can target one known-good build immediately
