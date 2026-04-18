@@ -11,6 +11,7 @@ import { normalizeLatencyFields } from "./delivery.js";
 const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 const CLOUD_FIRST_ACK_TIMEOUT_MS = 5 * 1000;
+const SLACK_FIRST_ACK_TIMEOUT_MS = 20 * 1000;
 const CLOUD_RESULT_TIMEOUT_MS = 180 * 1000;
 const BRIDGE_CLAIM_TIMEOUT_MS = 90 * 1000;
 const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
@@ -1249,10 +1250,49 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
     return command;
   }
 
+  const usesSlackCloud = command.dispatchMode === DISPATCH_MODE_SLACK;
   const fallbackAllowed = canFallbackToLocal(command, options);
 
   if (command.status !== "processing" && command.status !== "dispatched") {
     return command;
+  }
+
+  if (
+    usesSlackCloud
+    && command.status === "dispatched"
+    && !String(command.firstAckAt || "").trim()
+    && isOlderThan(command.progressUpdatedAt || command.dispatchedAt || command.createdAt, SLACK_FIRST_ACK_TIMEOUT_MS)
+  ) {
+    const detail = "Slack dispatch succeeded, but no Codex acknowledgement was observed before the first-ack timeout.";
+
+    if (fallbackAllowed) {
+      return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+        progressStage: "switched-to-bridge",
+        timeoutPhase: "first-ack-timeout",
+        fallbackReason: "cloud via slack did not acknowledge in time",
+        lastDiagnosticCode: "slack_cloud_first_ack_timeout",
+        lastDiagnosticDetail: detail,
+        errorMessage: stringifyCommandError({
+          code: "fallback_to_bridge",
+          stage: "switched-to-bridge",
+          message: "Cloud via Slack did not acknowledge in time. Switched to local bridge.",
+          detail,
+          fallback: "local-bridge"
+        })
+      });
+    }
+
+    return createFailedMaintenanceState(command, nowIso, {
+      timeoutPhase: "first-ack-timeout",
+      lastDiagnosticCode: "slack_cloud_first_ack_timeout",
+      lastDiagnosticDetail: detail,
+      errorMessage: stringifyCommandError({
+        code: "slack_cloud_first_ack_timeout",
+        stage: "slack-cloud-first-ack-timeout",
+        message: "Cloud via Slack did not acknowledge in time.",
+        detail
+      })
+    });
   }
 
   const staleSince = command.progressUpdatedAt || command.dispatchedAt || command.createdAt;
@@ -1260,7 +1300,6 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
   if (!isOlderThan(staleSince, CLOUD_RESULT_TIMEOUT_MS)) {
     return command;
   }
-  const usesSlackCloud = command.dispatchMode === DISPATCH_MODE_SLACK;
   const detail = usesSlackCloud
     ? "Cloud via Slack did not finish before the command timeout."
     : "Direct cloud execution did not finish before the command timeout.";
