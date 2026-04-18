@@ -681,7 +681,8 @@ function runCodexResume(threadId, prompt, photoPath) {
     execFile(codexBin, args, {
       cwd: process.cwd(),
       timeout: EXEC_TIMEOUT_MS,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"]
     }, async (error, stdout, stderr) => {
       const result = {
         stdout: String(stdout || "").trim(),
@@ -732,7 +733,8 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_
     execFile(codexBin, args, {
       cwd: cwd || process.cwd(),
       timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"]
     }, async (error, stdout, stderr) => {
       const result = {
         stdout: String(stdout || "").trim(),
@@ -907,7 +909,7 @@ async function markAnswered(commandId, assistantText, completedAt) {
     return;
   }
 
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -921,7 +923,7 @@ async function markAnswered(commandId, assistantText, completedAt) {
       actualDispatchMode: "bridge",
       resultAt: completedAt
     })
-  });
+  }, FETCH_TIMEOUT_MS, "markAnswered");
 
   if (!response.ok) {
     const body = await response.text();
@@ -934,7 +936,7 @@ async function markFailed(commandId, errorMessage, completedAt) {
     return;
   }
 
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -949,7 +951,7 @@ async function markFailed(commandId, errorMessage, completedAt) {
       errorMessage,
       resultAt: completedAt
     })
-  });
+  }, FETCH_TIMEOUT_MS, "markFailed");
 
   if (!response.ok) {
     const body = await response.text();
@@ -1158,7 +1160,7 @@ async function getThreadFallbackAssistantText(command, threadId) {
 
 function createAssistantMessage(command, threadId, threadLabel, text, createdAt = new Date().toISOString()) {
   return {
-    id: createMessageId(threadId, createdAt, text),
+    id: `assistant-${command.id}`,
     clientId: command.clientId,
     commandId: command.id,
     threadId,
@@ -1197,22 +1199,24 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
   }
 
   for (const command of batchCompleted) {
+    const message = batchMessages.find((entry) => entry.commandId === command.id) || null;
+
     if (command.result === "failed") {
-      await markFailed(command.id, command.errorMessage, command.completedAt);
+      try {
+        if (message) {
+          await syncMessages([message]);
+        }
+      } finally {
+        await markFailed(command.id, command.errorMessage, command.completedAt);
+      }
       continue;
     }
 
+    if (message) {
+      await syncMessages([message]);
+    }
+
     await markAnswered(command.id, command.assistantText, command.completedAt);
-  }
-
-  if (!batchMessages.length) {
-    return;
-  }
-
-  try {
-    await syncMessages(batchMessages);
-  } catch (error) {
-    console.error(`Bridge message sync failed after finalization: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
