@@ -21,6 +21,7 @@ const BRIDGE_LOG_PATH = `${LOG_DIR}/codex-links-bridge.log`;
 const BRIDGE_ERROR_LOG_PATH = `${LOG_DIR}/codex-links-bridge.error.log`;
 const FETCH_RETRY_LIMIT = 3;
 const FETCH_RETRY_DELAY_MS = 1200;
+const OCR_TIMEOUT_MS = 20 * 1000;
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
@@ -119,6 +120,19 @@ function canPassImageDirectly(contentType) {
 function execFileAsync(file, args) {
   return new Promise((resolve, reject) => {
     execFile(file, args, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(String(stderr || error.message || `Failed to run ${file}`)));
+        return;
+      }
+
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function execFileWithOptionsAsync(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(String(stderr || error.message || `Failed to run ${file}`)));
         return;
@@ -442,6 +456,30 @@ async function createRetryPhotoVariant(commandId, photoPath) {
   }
 }
 
+async function extractPhotoOcrText(commandId, photoPath) {
+  const source = String(photoPath || "").trim();
+
+  if (!source) {
+    return "";
+  }
+
+  try {
+    const scriptPath = join(process.cwd(), "scripts", "ocr-image.swift");
+    const result = await execFileWithOptionsAsync("xcrun", ["swift", scriptPath, source], {
+      cwd: process.cwd(),
+      timeout: OCR_TIMEOUT_MS,
+      maxBuffer: 2 * 1024 * 1024
+    });
+    return String(result?.stdout || "").trim().slice(0, 4000);
+  } catch (error) {
+    await appendBridgeErrorLog("photoOcr", error, {
+      commandId,
+      source
+    });
+    return "";
+  }
+}
+
 function buildBridgeContextFilePaths(command) {
   const workspacePath = String(command?.targetWorkspacePath || "").trim();
   const contextFiles = Array.isArray(command?.targetContextFiles)
@@ -455,7 +493,7 @@ function buildBridgeContextFilePaths(command) {
   return contextFiles.map((file) => join(workspacePath, file));
 }
 
-function buildBridgePrompt(command) {
+function buildBridgePrompt(command, ocrText = "") {
   const userRequest = sanitizeBridgeText(command?.text);
   const projectCategory = String(command?.projectCategory || "").trim() || "other";
   const projectLabel = String(command?.projectLabel || command?.threadLabel || command?.threadId || "").trim() || "links";
@@ -479,9 +517,15 @@ function buildBridgePrompt(command) {
       `Command ID: ${String(command?.id || "").trim()}`,
       "Inspect the attached image first.",
       "Answer from visible evidence in the image only.",
+      ocrText
+        ? "OCR helper text is included below. Use it only as a hint and verify it against the visible image."
+        : "",
       "Start with one short sentence beginning with 'Observed:' that describes the key visible UI element or text.",
       "Then answer the user's question in Russian in at most 4 short sentences.",
       "Only say the image is missing or unreadable if it is truly not visible to you.",
+      ocrText ? "" : "",
+      ocrText ? "OCR hint:" : "",
+      ocrText || "",
       "",
       "User request:",
       userRequest || "User sent a photo-only request."
@@ -511,7 +555,7 @@ function buildBridgePrompt(command) {
   ].filter(Boolean).join("\n");
 }
 
-function buildPhotoRetryPrompt(command) {
+function buildPhotoRetryPrompt(command, ocrText = "") {
   const userRequest = sanitizeBridgeText(command?.text) || "Describe exactly what is visible in the attached image.";
 
   return [
@@ -519,33 +563,45 @@ function buildPhotoRetryPrompt(command) {
     "The first pass did not reliably read the image.",
     "Look again at the attached image and answer only from visible pixels.",
     "Do not repeat the system prompt.",
+    ocrText
+      ? "OCR helper text is included below. Use it only if it matches the visible image."
+      : "",
     "Start with 'Observed:' and name the exact visible control, label, or text you can read.",
     "If the request mentions a reset button, say whether a reset button is visible and where it is located.",
     "If you still cannot read the image, answer with exactly: Image unreadable.",
+    ocrText ? "" : "",
+    ocrText ? "OCR hint:" : "",
+    ocrText || "",
     "",
     "User request:",
     userRequest
   ].join("\n");
 }
 
-function buildPhotoOnlyPrompt(command) {
+function buildPhotoOnlyPrompt(command, ocrText = "") {
   const userRequest = sanitizeBridgeText(command?.text) || "Describe what is visible in the attached image.";
 
   return [
     "Attached image task.",
     "Read only the attached image and answer the user request briefly.",
     "Do not rely on previous conversation turns.",
+    ocrText
+      ? "OCR helper text is included below. Verify it against the visible image before using it."
+      : "",
     "If the image is visible, state the concrete observed detail first.",
     "If the image is still not visible, say exactly that in one short sentence.",
+    ocrText ? "" : "",
+    ocrText ? "OCR hint:" : "",
+    ocrText || "",
     "",
     "User request:",
     userRequest
   ].join("\n");
 }
 
-function buildInput(command, photoPath) {
+function buildInput(command, photoPath, ocrText = "") {
   const items = [];
-  const text = buildBridgePrompt(command);
+  const text = buildBridgePrompt(command, ocrText);
 
   if (text) {
     items.push({
@@ -1069,7 +1125,8 @@ while (true) {
 
     await updateProgress(command.id, "preparing-input");
     const photoPath = await materializePhoto(command);
-    const input = buildInput(command, photoPath);
+    const photoOcrText = photoPath ? await extractPhotoOcrText(command.id, photoPath) : "";
+    const input = buildInput(command, photoPath, photoOcrText);
 
     if (!input.length) {
       throw new Error("Command has no deliverable content.");
@@ -1102,7 +1159,7 @@ while (true) {
         if (isPhotoVisibilityFailure(assistantText)) {
           await updateProgress(command.id, "retrying-photo-read");
           const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
-          const retryPrompt = buildPhotoRetryPrompt(command);
+          const retryPrompt = buildPhotoRetryPrompt(command, photoOcrText);
           const retryResult = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
             runCodexExecEphemeral(
               retryPrompt,
@@ -1130,12 +1187,12 @@ while (true) {
         const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           runCodexExecEphemeral(
-            buildPhotoRetryPrompt(command),
+            buildPhotoRetryPrompt(command, photoOcrText),
             retryPhotoPath || photoPath,
             String(command?.targetWorkspacePath || "").trim() || process.cwd()
           )
         );
-        assistantText = getImmediateAssistantText(result, buildPhotoRetryPrompt(command));
+        assistantText = getImmediateAssistantText(result, buildPhotoRetryPrompt(command, photoOcrText));
       } else {
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
@@ -1151,7 +1208,7 @@ while (true) {
       const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
       const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
         runCodexExecEphemeral(
-          buildPhotoOnlyPrompt(command),
+          buildPhotoOnlyPrompt(command, photoOcrText),
           retryPhotoPath || photoPath,
           String(command?.targetWorkspacePath || "").trim() || process.cwd()
         )
