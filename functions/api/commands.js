@@ -28,7 +28,7 @@ import {
   getSlackCodexMention
 } from "../_lib/dispatch.js";
 import { isAuthorized } from "../_lib/security.js";
-import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
+import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isIgnorableSlackReplyText, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
 import { upsertMessages } from "../_lib/messages.js";
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
@@ -183,7 +183,12 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
 
   const replies = await fetchSlackThreadReplies(env, channelId, threadTs);
   const rootTs = String(command?.slackMessageTs || "").trim();
-  const threadReplies = replies.filter((reply) => reply.ts && reply.ts !== rootTs && reply.text);
+  const threadReplies = replies.filter((reply) => (
+    reply.ts
+    && reply.ts !== rootTs
+    && reply.text
+    && !isIgnorableSlackReplyText(reply.text)
+  ));
 
   let latestReply = threadReplies.at(-1) || null;
   let progressStage = "slack-reply-received";
@@ -196,6 +201,7 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
       reply.ts
       && reply.ts !== rootTs
       && reply.text
+      && !isIgnorableSlackReplyText(reply.text)
       && (!reply.threadTs || reply.threadTs === reply.ts)
       && isLikelyCodexSlackActor(runtimeConfig, reply, { candidateCount: 1 })
     );

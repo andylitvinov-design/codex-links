@@ -5,6 +5,7 @@ import { DISPATCH_MODE_SLACK, getDispatchModeLabel } from "../_lib/dispatch.js";
 import {
   classifySlackReply,
   extractSlackMessageText,
+  isIgnorableSlackReplyText,
   isLikelyCodexSlackActor,
   isSlackMessageEvent,
   verifySlackRequestSignature
@@ -159,6 +160,18 @@ async function ingestSlackReply(env, command, event, options = {}) {
   const replyThreadTs = String(event?.thread_ts || "").trim();
   const effectiveThreadTs = replyThreadTs || String(command.slackThreadTs || command.slackMessageTs || "").trim();
   const text = extractSlackMessageText(event);
+
+  if (isIgnorableSlackReplyText(text)) {
+    return {
+      ok: true,
+      command,
+      classification: {
+        status: String(command.status || "").trim().toLowerCase() || "processing",
+        progressStage: String(command.progressStage || "").trim() || "processing"
+      }
+    };
+  }
+
   const classification = classifySlackReply(text);
   const progressStage = options.progressStage || "slack-reply-received";
 
