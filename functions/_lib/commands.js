@@ -371,6 +371,21 @@ function getCommandIntentKey(command) {
   return `${threadKey}::${textKey}`;
 }
 
+function hasActiveLocalProcessorForCommand(command, commands = []) {
+  const threadKey = getCommandThreadKey(command);
+
+  if (threadKey === "::") {
+    return false;
+  }
+
+  return (Array.isArray(commands) ? commands : []).some((candidate) =>
+    candidate?.id !== command?.id
+    && candidate?.dispatchMode === DISPATCH_MODE_LOCAL
+    && candidate?.status === "processing"
+    && getCommandThreadKey(candidate) === threadKey
+  );
+}
+
 function isSameCommandIntent(left, right) {
   const leftKey = getCommandIntentKey(left);
   const rightKey = getCommandIntentKey(right);
@@ -1344,8 +1359,13 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   }
 
   const fallbackAllowed = canFallbackToSlack(command, options);
+  const blockedByActiveLocalProcessor = Boolean(options.hasActiveLocalProcessor);
 
   if (command.status === "queued") {
+    if (blockedByActiveLocalProcessor) {
+      return command;
+    }
+
     if (!isOlderThan(command.progressUpdatedAt || command.createdAt, BRIDGE_CLAIM_TIMEOUT_MS)) {
       return command;
     }
@@ -1442,7 +1462,10 @@ export async function runCommandMaintenance(env, options = {}) {
     if (command.dispatchMode === DISPATCH_MODE_SLACK) {
       updated = evaluateCloudMaintenance(command, nowIso, options);
     } else if (command.dispatchMode === DISPATCH_MODE_LOCAL) {
-      updated = evaluateBridgeMaintenance(command, nowIso, options);
+      updated = evaluateBridgeMaintenance(command, nowIso, {
+        ...options,
+        hasActiveLocalProcessor: hasActiveLocalProcessorForCommand(command, current)
+      });
     }
 
     if (
