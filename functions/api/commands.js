@@ -18,7 +18,7 @@ import {
   updateCommandProgress,
   writeCommands
 } from "../_lib/commands.js";
-import { handleOptions, json } from "../_lib/http.js";
+import { handleOptions, json, jsonStorageError } from "../_lib/http.js";
 import {
   DISPATCH_MODE_CLOUD,
   DISPATCH_MODE_LOCAL,
@@ -976,6 +976,7 @@ export async function onRequest(context) {
     return preflight;
   }
 
+  try {
   if (request.method === "GET") {
     const url = new URL(request.url);
     const commandId = url.searchParams.get("id");
@@ -1308,4 +1309,7 @@ export async function onRequest(context) {
   })());
 
   return json({ ok: true, command: serializeCommand(command) }, { status: 201 });
+  } catch (error) {
+    return jsonStorageError(error, "Storage is rate limited. Command state is temporarily unavailable.");
+  }
 }

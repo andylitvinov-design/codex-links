@@ -8,7 +8,7 @@ import {
   isCloudDispatchConfigured,
   isSlackDispatchConfigured
 } from "./dispatch.js";
-import { readCommands } from "./commands.js";
+import { readActiveCommands } from "./commands.js";
 import { readRuntimeConfig } from "./config.js";
 
 export const BRIDGE_HEARTBEAT_STALE_MS = 75 * 1000;
@@ -123,7 +123,7 @@ export async function writeBridgeStatus(env, input) {
 export async function deriveBridgeStatusFromCommands(env, patch = {}) {
   const runtimeConfig = await readRuntimeConfig(env);
   const configuredDispatchMode = getConfiguredDispatchMode(runtimeConfig);
-  const commands = await readCommands(env);
+  const commands = await readActiveCommands(env);
   const current = await readBridgeStatus(env);
   const active = commands
     .filter((command) => ["queued", "dispatched", "processing"].includes(String(command?.status || "").trim().toLowerCase()))
