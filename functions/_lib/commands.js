@@ -1411,8 +1411,14 @@ function canFallbackToLocal(command, options = {}) {
 }
 
 function canFallbackToSlack(command, options = {}) {
+  const hasPhoto = Boolean(command?.photo?.dataUrl)
+    || Boolean(command?.photo?.hasDataUrl)
+    || Boolean(command?.photoAttached)
+    || Boolean(command?.photoBytesPresent);
+
   return Boolean(options.preferSlack)
     && Number(command?.fallbackCount || 0) < 1
+    && !hasPhoto
     && Boolean(String(command?.targetRepo || "").trim());
 }
 
