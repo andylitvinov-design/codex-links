@@ -192,6 +192,25 @@ function serializeCommands(commands, options = {}) {
   return (Array.isArray(commands) ? commands : []).map((command) => serializeCommand(command, options));
 }
 
+function buildUserMessageFromCommand(command) {
+  if (!command || typeof command !== "object") {
+    return null;
+  }
+
+  const text = String(command.text || "").trim() || (command.photo ? "Фото" : "Сообщение без текста");
+
+  return {
+    id: `command:${String(command.id || "").trim()}`,
+    clientId: String(command.clientId || "").trim(),
+    threadId: String(command.threadId || "").trim(),
+    threadLabel: String(command.threadLabel || "").trim(),
+    commandId: String(command.id || "").trim(),
+    role: "user",
+    text,
+    createdAt: String(command.createdAt || new Date().toISOString()).trim()
+  };
+}
+
 export async function syncSlackCommandReplies(env, command, runtimeConfig, options = {}) {
   const channelId = String(command?.slackChannelId || "").trim();
   const threadTs = String(command?.slackThreadTs || command?.slackMessageTs || "").trim();
@@ -1299,6 +1318,8 @@ export async function onRequest(context) {
   }
 
   const command = created.value;
+  await upsertMessages(env, [buildUserMessageFromCommand(command)]);
+
   context.waitUntil((async () => {
     try {
       await dispatchCreatedCommand(env, command.id, runtimeConfig);
