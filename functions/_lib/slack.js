@@ -603,6 +603,11 @@ export function isIgnorableSlackReplyText(text) {
     || /\battached image from codex links request\b/i.test(value)
     || /\backnowledge in this same thread before starting the work\b/i.test(value)
     || /\bfile:\s*<https:\/\/[^>]+>\b/i.test(value)
+    || /\bnew codex links task\.\b/i.test(value)
+    || /\bconversation label:\b/i.test(value)
+    || /\brepository url:\s*<https:\/\/github\.com\/[^>]+>\b/i.test(value)
+    || /\bmode:\s*work in codex cloud only inside the selected repository boundary\b/i.test(value)
+    || /\breply in this slack thread with progress updates\./i.test(value)
   );
 }
 
