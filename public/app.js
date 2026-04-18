@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-1532";
+const BUILD_VERSION = "20260418-1512";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -245,7 +245,6 @@ const storage = {
 
 const refreshButton = document.querySelector("#refresh-button");
 const deliveryResetButton = document.querySelector("#delivery-reset-button");
-const queueResetButton = document.querySelector("#queue-reset-button");
 const dispatchModeBridgeButton = document.querySelector("#dispatch-mode-bridge");
 const dispatchModeCloudButton = document.querySelector("#dispatch-mode-cloud");
 const projectNav = document.querySelector("#project-nav");
@@ -1212,28 +1211,6 @@ function getCommandDeliveryStatus(command) {
   };
 }
 
-function getFallbackMessageDeliveryStatus(commandId) {
-  const normalizedId = String(commandId || "").trim();
-
-  if (!normalizedId) {
-    return null;
-  }
-
-  const hasAssistantMessage = state.messages.some((message) => (
-    String(message?.commandId || "").trim() === normalizedId
-    && String(message?.role || "").trim() === "assistant"
-  ));
-
-  if (hasAssistantMessage) {
-    return null;
-  }
-
-  return {
-    tone: "delivery",
-    text: "Обрабатываю · статус синхронизируется"
-  };
-}
-
 function getVisibleTimelineCommands() {
   const showAllMessages = storage.showAllMessages;
   const activeThreadId = showAllMessages ? "" : getActiveThreadId();
@@ -1289,28 +1266,14 @@ function getCommandAnswerTitle(command) {
   const executor = getCommandActualExecutor(command);
 
   if (executor === "bridge") {
-    return "Ответ Codex";
+    return "Ответ Codex bridge";
   }
 
   if (executor === "cloud") {
-    return "Ответ Codex";
+    return "Ответ Codex сдщгв";
   }
 
   return "Ответ Codex";
-}
-
-function getCommandAnswerExecutorLabel(command) {
-  const executor = getCommandActualExecutor(command);
-
-  if (executor === "bridge") {
-    return "Bridge";
-  }
-
-  if (executor === "cloud") {
-    return "Cloud";
-  }
-
-  return "";
 }
 
 function getCommandProjectPath(command) {
@@ -1856,14 +1819,14 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
-  const title = getCommandAnswerTitle(linkedCommand);
-  const executorLabel = getCommandAnswerExecutorLabel(linkedCommand);
+  const title = linkedCommand?.threadLabel
+    ? `Ответ Codex · ${linkedCommand.threadLabel}`
+    : getCommandAnswerTitle(linkedCommand);
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
         <span class="command-answer-title">${escapeHtml(title)}</span>
-        ${executorLabel ? `<span class="command-answer-badge">${escapeHtml(executorLabel)}</span>` : ""}
       </summary>
       <div class="command-answer-body">
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
@@ -2095,9 +2058,7 @@ function renderCommands() {
     const linkedCommand = entry.linkedCommand;
     const isAssistant = entry.role === "assistant";
     const hasPhoto = Boolean(linkedCommand?.photo);
-    const deliveryStatus = isAssistant
-      ? null
-      : (getCommandDeliveryStatus(linkedCommand) || getFallbackMessageDeliveryStatus(message?.commandId));
+    const deliveryStatus = isAssistant ? null : getCommandDeliveryStatus(linkedCommand);
     const failureMessage = isAssistant ? "" : getCommandFailureMessage(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
@@ -2330,14 +2291,12 @@ function toggleVoiceRecognition() {
 }
 
 function setResetButtonBusy(isBusy) {
-  [deliveryResetButton, queueResetButton].forEach((button) => {
-    if (!button) {
-      return;
-    }
+  if (!deliveryResetButton) {
+    return;
+  }
 
-    button.disabled = Boolean(isBusy);
-    button.textContent = isBusy ? "Сброс…" : "Сброс";
-  });
+  deliveryResetButton.disabled = Boolean(isBusy);
+  deliveryResetButton.textContent = isBusy ? "Reset…" : "Reset";
 }
 
 function syncPhotoClearButton() {
@@ -3187,12 +3146,6 @@ function bindEvents() {
       threadSettingsPanel.hidden = true;
       threadSettingsToggle?.setAttribute("aria-expanded", "false");
     }
-  });
-
-  queueResetButton?.addEventListener("click", () => {
-    triggerDeliveryReset().catch((error) => {
-      setCommandStatusMessage(String(error?.message || "Reset maintenance не выполнился."), { tone: "error" });
-    });
   });
 
   threadSettingsSelectAll?.addEventListener("click", () => {
