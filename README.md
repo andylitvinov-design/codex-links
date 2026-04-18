@@ -1,12 +1,13 @@
 # Codex Links
 
-Cloudflare Pages inbox for links and Codex tasks, with production cloud execution routed directly through the OpenAI Responses API.
+Cloudflare Pages inbox for links and Codex tasks, with production cloud execution routed through Slack-backed Codex Cloud by default and direct OpenAI kept as an optional path.
 
 ## Current Architecture
 
 - Public UI and API: Cloudflare Pages
-- Primary executor: `Direct OpenAI cloud`
+- Primary executor: `Codex Cloud via Slack`
 - Secondary executor: local bridge on Mac
+- Optional executor: `Direct OpenAI cloud`
 - Source repo for cloud tasks: `andylitvinov-design/codex-links`
 
 Delivery pipeline is intentionally narrow:
@@ -18,15 +19,15 @@ Operational rules now are:
 - `POST /api/commands` creates and dispatches only the new command
 - `GET /api/commands` and `GET /api/status` are read-only
 - `POST /api/commands` is the primary cloud execution path
-- fallback is one-shot only; no `cloud -> bridge -> cloud` or `bridge -> cloud -> bridge`
+- fallback is one-shot only and ordered as `direct-openai -> cloud-via-slack -> local-bridge`
 - stale timeout recovery and legacy reply sync moved out of hot paths into admin maintenance
 
 ## What The App Does
 
 - Stores links in Cloudflare KV
 - Accepts commands from the mobile UI through `POST /api/commands`
-- Dispatches cloud commands directly to OpenAI Responses API
-- Keeps `/api/slack` only for legacy maintenance flows
+- Dispatches cloud commands to Slack-backed Codex Cloud by default
+- Keeps direct OpenAI Responses API available for explicit opt-in
 - Mirrors assistant replies and PR links back into the mobile timeline
 
 ## Delivery Maintenance
@@ -121,7 +122,7 @@ npx wrangler pages secret put OPENAI_API_KEY --project-name codex-links
 npx wrangler pages secret put COMMAND_DISPATCH_MODE --project-name codex-links
 ```
 
-Optional legacy-only Slack secrets:
+Slack cloud secrets:
 
 ```bash
 npx wrangler pages secret put SLACK_BOT_TOKEN --project-name codex-links
@@ -132,22 +133,25 @@ npx wrangler pages secret put SLACK_CODEX_USER_ID --project-name codex-links
 
 Recommended values:
 
-- `COMMAND_DISPATCH_MODE=cloud`
-- Keep `OPENAI_API_KEY` only in the Pages environment
-- Slack variables are optional and kept only for legacy maintenance
+- `COMMAND_DISPATCH_MODE=cloud-via-slack`
+- `COMMAND_DISPATCH_MODE=direct-openai` only when you explicitly want direct OpenAI as default
+- Keep `OPENAI_API_KEY` only in the Pages environment when direct mode is needed
+- Slack variables are the default production route
 
-## Direct Cloud Setup
+## Cloud Setup
 
-1. Set `OPENAI_API_KEY` in the Cloudflare Pages project.
-2. Set `COMMAND_DISPATCH_MODE=cloud`.
-3. Run `npm run cloud:check`.
-4. Run `npm run cloud:smoke`.
+1. Set Slack secrets in the Cloudflare Pages project.
+2. Set `COMMAND_DISPATCH_MODE=cloud-via-slack`.
+3. If you need the optional direct path, also set `OPENAI_API_KEY`.
+4. Run `npm run cloud:check`.
+5. Run `npm run cloud:smoke`.
 
 Quick helpers added to this repo:
 
 - Slack app manifest for legacy maintenance: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
 - Local/prod setup check: `npm run cloud:check`
-- End-to-end text smoke: `npm run cloud:smoke`
+- End-to-end text smoke for the default Slack cloud path: `npm run cloud:smoke`
+- End-to-end text smoke for the optional direct path: `CODEX_LINKS_SMOKE_CLOUD_ROUTE=direct npm run cloud:smoke`
 - Bulk Pages secret upload from `.dev.vars`: `npm run cloud:install-secrets`
 - KV-backed runtime config upload from `.dev.vars`: `npm run cloud:save-config`
 

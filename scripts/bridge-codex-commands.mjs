@@ -853,6 +853,61 @@ async function acknowledge(ids) {
   }
 }
 
+async function markAnswered(commandId, assistantText, completedAt) {
+  if (!commandId) {
+    return;
+  }
+
+  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-write-token": token
+    },
+    body: JSON.stringify({
+      action: "answer",
+      id: commandId,
+      progressStage: "answered",
+      completedAt,
+      actualDispatchMode: "bridge",
+      resultAt: completedAt
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to mark command answered: ${response.status} ${body}`);
+  }
+}
+
+async function markFailed(commandId, errorMessage, completedAt) {
+  if (!commandId) {
+    return;
+  }
+
+  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-write-token": token
+    },
+    body: JSON.stringify({
+      action: "fail",
+      id: commandId,
+      progressStage: "failed",
+      completedAt,
+      actualDispatchMode: "bridge",
+      errorMessage,
+      resultAt: completedAt
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to mark command failed: ${response.status} ${body}`);
+  }
+}
+
 async function syncMessages(messages) {
   if (!messages.length) {
     return;
@@ -1092,12 +1147,23 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
     return;
   }
 
-  if (batchCompleted.length) {
-    await acknowledge(batchCompleted.map((command) => command.id));
+  for (const command of batchCompleted) {
+    if (command.result === "failed") {
+      await markFailed(command.id, command.errorMessage, command.completedAt);
+      continue;
+    }
+
+    await markAnswered(command.id, command.assistantText, command.completedAt);
   }
 
-  if (batchMessages.length) {
+  if (!batchMessages.length) {
+    return;
+  }
+
+  try {
     await syncMessages(batchMessages);
+  } catch (error) {
+    console.error(`Bridge message sync failed after finalization: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -1283,7 +1349,9 @@ while (true) {
       id: command.id,
       threadId: deliveryThreadId,
       threadLabel: deliveryThreadLabel,
-      ackedAt
+      completedAt: ackedAt,
+      assistantText,
+      result: "answered"
     };
     const syncedMessage = createAssistantMessage(command, deliveryThreadId, deliveryThreadLabel, assistantText, ackedAt);
 
@@ -1332,13 +1400,16 @@ while (true) {
       id: command.id,
       threadId,
       threadLabel,
-      ackedAt
+      completedAt: ackedAt,
+      assistantText: assistantText || getFailureAssistantText(error),
+      errorMessage: error.message || getFailureAssistantText(error),
+      result: assistantText ? "answered" : "failed"
     };
     const syncedMessage = createAssistantMessage(
       command,
       threadId,
       threadLabel,
-      assistantText || getFailureAssistantText(error),
+      completedEntry.assistantText,
       ackedAt
     );
 

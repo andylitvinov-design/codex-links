@@ -1413,7 +1413,6 @@ function canFallbackToLocal(command, options = {}) {
 function canFallbackToSlack(command, options = {}) {
   return Boolean(options.preferSlack)
     && Number(command?.fallbackCount || 0) < 1
-    && !command?.photo
     && Boolean(String(command?.targetRepo || "").trim());
 }
 
@@ -1548,18 +1547,18 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     }
 
     if (fallbackAllowed) {
-      return createFallbackState(command, DISPATCH_MODE_CLOUD, nowIso, {
+      return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
         progressStage: "switched-to-cloud",
         timeoutPhase: "claim-timeout",
         fallbackReason: "local bridge did not claim the command in time",
         lastDiagnosticCode: "bridge_claim_timeout",
         lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
         errorMessage: stringifyCommandError({
-          code: "fallback_to_cloud",
+          code: "fallback_to_slack",
           stage: "switched-to-cloud",
-          message: "Local bridge did not claim the command in time. Switched to direct cloud execution.",
+          message: "Local bridge did not claim the command in time. Switched to cloud via Slack.",
           detail: "The local bridge did not claim the command before the claim timeout.",
-          fallback: "cloud"
+          fallback: "slack-codex-cloud"
         })
       });
     }
@@ -1596,18 +1595,18 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     : "The local bridge stopped heartbeating before the command completed.";
 
   if (fallbackAllowed) {
-    return createFallbackState(command, DISPATCH_MODE_CLOUD, nowIso, {
+    return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
       progressStage: "switched-to-cloud",
       timeoutPhase: "result-timeout",
       fallbackReason: "local bridge stopped heartbeating",
       lastDiagnosticCode: "bridge_result_timeout",
       lastDiagnosticDetail: detail,
       errorMessage: stringifyCommandError({
-        code: "fallback_to_cloud",
+        code: "fallback_to_slack",
         stage: "switched-to-cloud",
-        message: "Local bridge timed out. Switched to direct cloud execution.",
+        message: "Local bridge timed out. Switched to cloud via Slack.",
         detail,
-        fallback: "cloud"
+        fallback: "slack-codex-cloud"
       })
     });
   }

@@ -59,6 +59,7 @@ function logCommandError(context, error, extra = {}) {
 }
 
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
+  const hasPhoto = Boolean(payload?.photo && typeof payload.photo === "object");
   const requestedExecutor = String(
     payload?.targetExecutionMode
     || payload?.requestedExecutor
@@ -66,6 +67,7 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
     || ""
   ).trim().toLowerCase();
   const requestedDispatchMode = String(payload?.dispatchMode || "").trim().toLowerCase();
+  const configuredDispatchMode = getConfiguredDispatchMode(runtimeConfig);
 
   if (requestedDispatchMode === DISPATCH_MODE_LOCAL || requestedExecutor === "bridge") {
     return DISPATCH_MODE_LOCAL;
@@ -75,7 +77,35 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
     return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
   }
 
+  if (requestedDispatchMode === "direct-openai") {
+    if (hasPhoto) {
+      return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
+    }
+
+    if (isCloudDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_CLOUD;
+    }
+
+    if (isSlackDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_SLACK;
+    }
+
+    return DISPATCH_MODE_LOCAL;
+  }
+
   if (requestedExecutor === "cloud" || requestedDispatchMode === DISPATCH_MODE_CLOUD) {
+    if (hasPhoto) {
+      return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
+    }
+
+    if (configuredDispatchMode === DISPATCH_MODE_SLACK && isSlackDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_SLACK;
+    }
+
+    if (configuredDispatchMode === DISPATCH_MODE_CLOUD && isCloudDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_CLOUD;
+    }
+
     if (isSlackDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_SLACK;
     }
@@ -83,9 +113,11 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
     if (isCloudDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_CLOUD;
     }
+
+    return DISPATCH_MODE_LOCAL;
   }
 
-  return getConfiguredDispatchMode(runtimeConfig);
+  return configuredDispatchMode;
 }
 
 function normalizeEntryText(entry) {
@@ -425,13 +457,7 @@ function canFallbackToLocalBridge(command) {
 function canFallbackToCloud(command, runtimeConfig) {
   return Number(command?.fallbackCount || 0) < 1
     && Boolean(String(command?.targetRepo || "").trim())
-    && (
-      isSlackDispatchConfigured(runtimeConfig)
-      || (
-        !command?.photo
-        && isCloudDispatchConfigured(runtimeConfig)
-      )
-    );
+    && isSlackDispatchConfigured(runtimeConfig);
 }
 
 async function markCloudCommandFailed(env, command, commandError) {
@@ -566,6 +592,32 @@ async function executeDirectCloudCommand(env, command) {
     return answerCloudCommand(env, latest, result);
   }
 
+  const runtimeConfig = await readRuntimeConfig(env);
+
+  if (result.retryable && canFallbackToCloud(latest, runtimeConfig)) {
+    const rerouted = await rerouteCommandToSlack(env, {
+      id: latest.id,
+      progressStage: "switched-to-cloud",
+      fallbackReason: "direct cloud execution unavailable",
+      lastDiagnosticCode: result.commandError?.code || "cloud_execution_failed",
+      lastDiagnosticDetail: result.commandError?.detail || result.commandError?.message || "Direct cloud execution failed.",
+      errorMessage: stringifyCommandError({
+        ...(result.commandError || {}),
+        code: "fallback_to_slack",
+        stage: "switched-to-cloud-via-slack",
+        message: "Direct cloud execution failed. Switched to cloud via Slack.",
+        detail: result.commandError?.detail || result.commandError?.message || "Direct cloud execution failed.",
+        fallback: "slack-codex-cloud"
+      })
+    });
+
+    const redispatched = await getCommandById(env, rerouted.value?.id || latest.id);
+    if (redispatched) {
+      const reroutedResult = await dispatchCommandIfNeeded(env, redispatched, runtimeConfig);
+      return reroutedResult?.command || redispatched;
+    }
+  }
+
   if (result.retryable && canFallbackToLocalBridge(latest)) {
     const fallbackCommand = await fallbackToLocalBridge(env, latest, {
       ...(result.commandError || {}),
@@ -578,7 +630,7 @@ async function executeDirectCloudCommand(env, command) {
 
     const redispatched = await getCommandById(env, fallbackCommand.id);
     if (redispatched) {
-      const rerouted = await dispatchCommandIfNeeded(env, redispatched, await readRuntimeConfig(env));
+      const rerouted = await dispatchCommandIfNeeded(env, redispatched, runtimeConfig);
       return rerouted?.command || redispatched;
     }
 
@@ -926,11 +978,11 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
       lastDiagnosticCode: "bridge_claim_timeout",
       lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
       errorMessage: stringifyCommandError({
-        code: "fallback_to_cloud",
+        code: "fallback_to_slack",
         stage: "switched-to-cloud",
-        message: "Local bridge did not claim the command in time. Switched to cloud execution.",
+        message: "Local bridge did not claim the command in time. Switched to cloud via Slack.",
         detail: "The local bridge did not claim the command before the claim timeout.",
-        fallback: "cloud"
+        fallback: "slack-codex-cloud"
       })
     });
 

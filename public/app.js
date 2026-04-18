@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0940";
+const BUILD_VERSION = "20260418-1435";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -2937,9 +2937,14 @@ async function submitCommand(event) {
   renderCommands();
   syncCommandStatusFromState();
   setSubmitProgress("queued", "processing");
+  const createdDispatchMode = String(result?.command?.dispatchMode || "").trim();
   setCommandStatusMessage(
     dispatchMode === "cloud"
-      ? "Команда создана, выполняю direct cloud dispatch…"
+      ? (
+          createdDispatchMode === "slack-codex-cloud"
+            ? "Команда создана, отправляю в cloud via Slack…"
+            : "Команда создана, запускаю cloud executor…"
+        )
       : "Команда создана, жду bridge claim…",
     { tone: "processing" }
   );
