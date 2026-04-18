@@ -45,10 +45,10 @@ import {
 } from "../_lib/delivery.js";
 
 const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
-const SLACK_DISPATCH_GRACE_MS = 15_000;
-const SLACK_FIRST_ACK_TIMEOUT_MS = 20_000;
-const SLACK_RESULT_WAIT_MS = 60_000;
-const SLACK_SYNC_POLL_MS = 5_000;
+const SLACK_DISPATCH_GRACE_MS = 10_000;
+const SLACK_FIRST_ACK_TIMEOUT_MS = 12_000;
+const SLACK_RESULT_WAIT_MS = 30_000;
+const SLACK_SYNC_POLL_MS = 2_000;
 
 function logCommandError(context, error, extra = {}) {
   const message = error instanceof Error ? error.message : String(error || "Unknown error");
@@ -150,7 +150,7 @@ function filterPublicCommands(commands) {
   return (Array.isArray(commands) ? commands : []).filter((command) => !isHiddenPublicCommand(command));
 }
 
-function serializeCommand(command) {
+function serializeCommand(command, options = {}) {
   if (!command || typeof command !== "object") {
     return command;
   }
@@ -160,7 +160,10 @@ function serializeCommand(command) {
         contentType: String(command.photo.contentType || "").trim(),
         fileName: String(command.photo.fileName || "").trim(),
         size: Number(command.photo.size || 0),
-        hasDataUrl: Boolean(String(command.photo.dataUrl || "").trim())
+        hasDataUrl: Boolean(String(command.photo.dataUrl || "").trim()),
+        ...(options.includePhotoData && String(command.photo.dataUrl || "").trim()
+          ? { dataUrl: String(command.photo.dataUrl || "").trim() }
+          : {})
       }
     : null;
 
@@ -180,8 +183,8 @@ function serializeCommand(command) {
   };
 }
 
-function serializeCommands(commands) {
-  return (Array.isArray(commands) ? commands : []).map((command) => serializeCommand(command));
+function serializeCommands(commands, options = {}) {
+  return (Array.isArray(commands) ? commands : []).map((command) => serializeCommand(command, options));
 }
 
 export async function syncSlackCommandReplies(env, command, runtimeConfig, options = {}) {
@@ -570,6 +573,25 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   const config = runtimeConfig || await readRuntimeConfig(env);
   const dispatchMode = command?.dispatchMode || getConfiguredDispatchMode(config);
   const dispatchStartedAt = new Date().toISOString();
+
+  if (dispatchMode === DISPATCH_MODE_SLACK && command?.photo) {
+    const rerouted = await fallbackCommandToLocalBridge(env, {
+      id: command.id,
+      progressStage: "switched-to-bridge",
+      fallbackReason: "photo requests use local bridge",
+      lastDiagnosticCode: "cloud_photo_rerouted_to_bridge",
+      lastDiagnosticDetail: "Photo requests are routed directly to the local bridge to avoid Slack cloud acknowledgement stalls.",
+      errorMessage: stringifyCommandError({
+        code: "photo_rerouted_to_bridge",
+        stage: "switched-to-bridge",
+        message: "Photo requests use the local bridge.",
+        detail: "Slack-backed cloud dispatch is skipped for photo requests because the local bridge handles image input more reliably.",
+        fallback: "local-bridge"
+      })
+    });
+
+    return dispatchCommandIfNeeded(env, rerouted.value || command, config);
+  }
 
   if (dispatchMode === DISPATCH_MODE_CLOUD) {
     return {
