@@ -210,6 +210,12 @@ body {
   background: linear-gradient(180deg, rgba(250, 248, 241, 0.98), rgba(255, 255, 255, 0.94));
 }
 
+.project-nav-inline {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
 .project-nav-field {
   min-width: 0;
 }
@@ -609,6 +615,10 @@ input[type="radio"] {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: stretch;
+}
+
+.dispatch-toggle-inline {
+  justify-self: start;
 }
 
 .command-compose-row textarea {
@@ -1082,6 +1092,15 @@ code {
   .project-nav {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch;
+  }
+
+  .project-nav-inline {
+    padding: 0;
+  }
+
+  .dispatch-toggle-inline {
+    width: 100%;
+    justify-content: center;
   }
 
   .bridge-status {
