@@ -78,10 +78,6 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   if (requestedDispatchMode === "direct-openai") {
-    if (hasPhoto) {
-      return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
-    }
-
     if (isCloudDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_CLOUD;
     }
@@ -94,8 +90,8 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   if (requestedExecutor === "cloud" || requestedDispatchMode === DISPATCH_MODE_CLOUD) {
-    if (hasPhoto) {
-      return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
+    if (hasPhoto && isCloudDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_CLOUD;
     }
 
     if (configuredDispatchMode === DISPATCH_MODE_SLACK && isSlackDispatchConfigured(runtimeConfig)) {
@@ -115,6 +111,14 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
     }
 
     return DISPATCH_MODE_LOCAL;
+  }
+
+  if (hasPhoto && configuredDispatchMode === DISPATCH_MODE_CLOUD) {
+    if (isCloudDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_CLOUD;
+    }
+
+    return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
   }
 
   return configuredDispatchMode;
@@ -649,25 +653,6 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   const config = runtimeConfig || await readRuntimeConfig(env);
   const dispatchMode = command?.dispatchMode || getConfiguredDispatchMode(config);
   const dispatchStartedAt = new Date().toISOString();
-
-  if (dispatchMode === DISPATCH_MODE_SLACK && command?.photo) {
-    const rerouted = await fallbackCommandToLocalBridge(env, {
-      id: command.id,
-      progressStage: "switched-to-bridge",
-      fallbackReason: "photo requests use local bridge",
-      lastDiagnosticCode: "cloud_photo_rerouted_to_bridge",
-      lastDiagnosticDetail: "Photo requests are routed directly to the local bridge to avoid Slack cloud acknowledgement stalls.",
-      errorMessage: stringifyCommandError({
-        code: "photo_rerouted_to_bridge",
-        stage: "switched-to-bridge",
-        message: "Photo requests use the local bridge.",
-        detail: "Slack-backed cloud dispatch is skipped for photo requests because the local bridge handles image input more reliably.",
-        fallback: "local-bridge"
-      })
-    });
-
-    return dispatchCommandIfNeeded(env, rerouted.value || command, config);
-  }
 
   if (dispatchMode === DISPATCH_MODE_CLOUD) {
     return {
