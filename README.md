@@ -194,6 +194,12 @@ Emergency rollback flow:
 - Git rollback: `node scripts/revert-last-good.mjs --commit <bad-commit-sha> --push`
 - Platform rollback: redeploy the previous known-good Cloudflare Pages deployment, then merge the revert PR
 
+Current saved rollback point:
+
+- production build: `20260418-1532`
+- merge commit: `b98f2d2f7184e70270f5104bdede731c2f994fa7`
+- PR: `#69` `Show executor in Codex answer badge`
+
 Manual `npm run deploy` remains available as an operator fallback, not as the normal release path.
 
 ```bash

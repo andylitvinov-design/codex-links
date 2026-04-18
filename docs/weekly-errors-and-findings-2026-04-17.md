@@ -335,3 +335,9 @@ Fix prepared:
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+
+## 2026-04-18 Current Saved Site Version
+
+- latest explicit rollback point saved as production build `20260418-1532`
+- merge commit: `b98f2d2f7184e70270f5104bdede731c2f994fa7`
+- PR: `#69` `Show executor in Codex answer badge`
