@@ -1,5 +1,6 @@
 import { constantTimeEqual } from "./security.js";
 import { createCommandError } from "./command-debug.js";
+import { readThreads } from "./threads.js";
 
 const encoder = new TextEncoder();
 
@@ -24,6 +25,13 @@ function buildSlackHeaders(token) {
   return {
     authorization: `Bearer ${token}`,
     "content-type": "application/json; charset=utf-8"
+  };
+}
+
+function buildSlackFormHeaders(token) {
+  return {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/x-www-form-urlencoded; charset=utf-8"
   };
 }
 
@@ -85,6 +93,43 @@ async function callSlackApi(token, method, body = null, query = null) {
   return data;
 }
 
+async function callSlackApiForm(token, method, body = null, query = null) {
+  const url = new URL(`https://slack.com/api/${method}`);
+
+  if (query && typeof query === "object") {
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        url.searchParams.set(key, String(value));
+      }
+    });
+  }
+
+  const form = new URLSearchParams();
+
+  if (body && typeof body === "object") {
+    Object.entries(body).forEach(([key, value]) => {
+      if (value === undefined || value === null) {
+        return;
+      }
+
+      form.set(key, typeof value === "string" ? value : JSON.stringify(value));
+    });
+  }
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: buildSlackFormHeaders(token),
+    body: form
+  });
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || `Slack API ${method} failed with ${response.status}.`);
+  }
+
+  return data;
+}
+
 function decodeSlackDataUrl(dataUrl) {
   const value = normalizeText(dataUrl);
   const match = value.match(/^data:([^;,]+)?;base64,(.+)$/i);
@@ -116,7 +161,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   const decoded = decodeSlackDataUrl(photo.dataUrl);
   const contentType = normalizeText(photo.contentType) || decoded.contentType;
   const length = Number(photo.size || decoded.bytes.byteLength || 0) || decoded.bytes.byteLength;
-  const upload = await callSlackApi(token, "files.getUploadURLExternal", {
+  const upload = await callSlackApiForm(token, "files.getUploadURLExternal", {
     filename: fileName,
     length
   });
@@ -134,7 +179,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
     throw new Error(`Slack file upload failed with ${uploadResponse.status}.`);
   }
 
-  await callSlackApi(token, "files.completeUploadExternal", {
+  const completed = await callSlackApiForm(token, "files.completeUploadExternal", {
     files: [
       {
         id: normalizeText(upload.file_id),
@@ -142,18 +187,20 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
       }
     ],
     channel_id: channel,
-    thread_ts: threadTs,
     initial_comment: "Attached image from Codex Links request."
   });
 
-  let permalink = "";
+  const completedFile = Array.isArray(completed?.files) ? completed.files[0] : null;
+  let permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
 
-  try {
-    const info = await callSlackApi(token, "files.info", null, {
-      file: normalizeText(upload.file_id)
-    });
-    permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
-  } catch {}
+  if (!permalink) {
+    try {
+      const info = await callSlackApi(token, "files.info", null, {
+        file: normalizeText(upload.file_id)
+      });
+      permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
+    } catch {}
+  }
 
   return {
     fileId: normalizeText(upload.file_id),
@@ -273,7 +320,43 @@ async function validateSlackTarget(token, channel, targetUserId) {
   }
 }
 
-export function buildSlackCommandPrompt(command, env) {
+async function resolveStoredCodexThreadId(env, command) {
+  const directThreadId = normalizeText(command?.threadId);
+
+  if (/^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(directThreadId)) {
+    return directThreadId;
+  }
+
+  const projectId = normalizeText(command?.projectId || command?.threadId).toLowerCase();
+  const projectLabel = normalizeText(command?.projectLabel || command?.threadLabel).toLowerCase();
+
+  if (!projectId && !projectLabel) {
+    return "";
+  }
+
+  try {
+    const threads = await readThreads(env);
+    const matched = threads
+      .filter((thread) => /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(normalizeText(thread?.id)))
+      .filter((thread) => {
+        const category = normalizeText(thread?.category).toLowerCase();
+        const label = normalizeText(thread?.label).toLowerCase();
+        const displayLabel = normalizeText(thread?.displayLabel).toLowerCase();
+
+        return (
+          (projectId && (category === projectId || label === projectId || displayLabel.startsWith(`${projectId} /`)))
+          || (projectLabel && (category === projectLabel || label === projectLabel || displayLabel.startsWith(`${projectLabel} /`)))
+        );
+      })
+      .sort((left, right) => Number(right?.updatedAt || right?.createdAt || 0) - Number(left?.updatedAt || left?.createdAt || 0))[0];
+
+    return normalizeText(matched?.id);
+  } catch {
+    return "";
+  }
+}
+
+export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = "") {
   const threadId = normalizeText(command?.threadId);
   const threadLabel = normalizeText(command?.threadLabel) || threadId || "Links";
   const projectCategory = normalizeText(command?.projectCategory) || "other";
@@ -282,7 +365,7 @@ export function buildSlackCommandPrompt(command, env) {
   const targetRepo = normalizeText(command?.targetRepo);
   const targetRepoUrl = normalizeText(command?.targetRepoUrl);
   const targetWorkspacePath = normalizeText(command?.targetWorkspacePath);
-  const codexThreadId = /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(threadId) ? threadId : "";
+  const codexThreadId = normalizeText(resolvedCodexThreadId) || (/^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(threadId) ? threadId : "");
   const contextFiles = Array.isArray(command?.targetContextFiles) && command.targetContextFiles.length
     ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
     : ["AGENTS.md", "README.md", "STATE.md"];
@@ -346,10 +429,11 @@ export async function postSlackCommand(env, command, mention) {
 
   await validateSlackTarget(token, channel, targetUserId);
 
+  const resolvedCodexThreadId = await resolveStoredCodexThreadId(env, command);
   const text = buildSlackCommandPrompt(command, {
     ...env,
     SLACK_CODEX_MENTION: mention
-  });
+  }, resolvedCodexThreadId);
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: buildSlackHeaders(token),

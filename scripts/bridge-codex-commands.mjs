@@ -77,7 +77,66 @@ function isRealThreadId(value) {
   return /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(String(value || "").trim());
 }
 
-function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
+function normalizeThreadLookupValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+let cachedStoredThreadsPromise = null;
+
+async function fetchStoredThreads() {
+  if (!cachedStoredThreadsPromise) {
+    cachedStoredThreadsPromise = (async () => {
+      try {
+        const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/api/threads`, {
+          headers: {
+            accept: "application/json"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load stored threads: ${response.status}`);
+        }
+
+        const data = await response.json().catch(() => ({}));
+        return Array.isArray(data?.threads) ? data.threads : [];
+      } catch {
+        return [];
+      }
+    })();
+  }
+
+  return cachedStoredThreadsPromise;
+}
+
+async function findStoredProjectThreadId(command) {
+  const projectId = normalizeThreadLookupValue(command?.projectId || command?.threadId);
+  const projectLabel = normalizeThreadLookupValue(command?.projectLabel || command?.threadLabel);
+
+  if (!projectId && !projectLabel) {
+    return "";
+  }
+
+  const threads = await fetchStoredThreads();
+  const candidates = threads
+    .filter((thread) => isRealThreadId(thread?.id))
+    .filter((thread) => {
+      const category = normalizeThreadLookupValue(thread?.category);
+      const displayLabel = normalizeThreadLookupValue(thread?.displayLabel);
+      const label = normalizeThreadLookupValue(thread?.label);
+
+      return (
+        (projectId && (category === projectId || displayLabel.startsWith(`${projectId} /`) || label === projectId))
+        || (projectLabel && (category === projectLabel || displayLabel.startsWith(`${projectLabel} /`) || label === projectLabel))
+      );
+    })
+    .sort((left, right) =>
+      Number(right?.updatedAt || right?.createdAt || 0) - Number(left?.updatedAt || left?.createdAt || 0)
+    );
+
+  return String(candidates[0]?.id || "").trim();
+}
+
+async function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
   const sourceThreadId = String(command?.threadId || "").trim();
   const sourceThreadLabel = String(command?.threadLabel || "").trim();
   const fallbackThreadId = String(command?.fallbackThreadId || "").trim();
@@ -96,6 +155,8 @@ function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
       || threadLabel.toLowerCase() === "links"
     ) {
       threadId = legacyLinksThreadId || "";
+    } else {
+      threadId = await findStoredProjectThreadId(command);
     }
   }
 
@@ -712,7 +773,7 @@ while (true) {
       executionThreadId,
       sourceThreadId,
       sourceThreadLabel
-    } = getResolvedExecutionThread(command, legacyLinksThreadId);
+    } = await getResolvedExecutionThread(command, legacyLinksThreadId);
     let threadId = executionThreadId;
 
     if (!threadId) {
@@ -786,7 +847,10 @@ while (true) {
     idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
   } catch (error) {
     const ackedAt = new Date().toISOString();
-    const threadId = String(command?.threadId || "").trim() || legacyLinksThreadId || "";
+    const threadId = (await getResolvedExecutionThread(command, legacyLinksThreadId)).executionThreadId
+      || String(command?.threadId || "").trim()
+      || legacyLinksThreadId
+      || "";
     const threadLabel = String(command?.threadLabel || "").trim() || threadId;
     let assistantText = "";
 

@@ -43,8 +43,8 @@ import {
 } from "../_lib/delivery.js";
 
 const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
-const SLACK_DISPATCH_GRACE_MS = 30_000;
-const SLACK_RESULT_WAIT_MS = 3 * 60_000;
+const SLACK_DISPATCH_GRACE_MS = 15_000;
+const SLACK_RESULT_WAIT_MS = 60_000;
 const SLACK_SYNC_POLL_MS = 5_000;
 
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
@@ -393,6 +393,31 @@ async function markCloudCommandFailed(env, command, commandError) {
   return failed.value || command;
 }
 
+async function markSlackCloudCommandFailed(env, command, commandError) {
+  const normalizedError = stringifyCommandError(commandError);
+  const failed = await markCommandFailed(env, {
+    id: command.id,
+    dispatchMode: DISPATCH_MODE_SLACK,
+    progressStage: "failed",
+    actualExecutor: "cloud",
+    timeoutPhase: String(commandError?.stage || "").trim().includes("timeout") ? "result-timeout" : "",
+    lastDiagnosticCode: commandError?.code || "slack_cloud_dispatch_failed",
+    lastDiagnosticDetail: commandError?.detail || commandError?.message || "Cloud via Slack failed.",
+    errorMessage: normalizedError,
+    resultAt: new Date().toISOString()
+  });
+
+  await refreshBridgeStatusFromCommands(env, {
+    dispatchMode: DISPATCH_MODE_SLACK,
+    executorLabel: getDispatchModeLabel(DISPATCH_MODE_SLACK),
+    bridgeOnline: true,
+    lastRunAt: new Date().toISOString(),
+    lastError: normalizedError
+  });
+
+  return failed.value || command;
+}
+
 async function answerCloudCommand(env, command, result) {
   const nowIso = new Date().toISOString();
 
@@ -581,23 +606,19 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       : {
           code: "slack_dispatch_failed",
           stage: "slack-dispatch-failed",
-          message: "Slack dispatch failed. Falling back to local bridge.",
+          message: "Cloud via Slack dispatch failed.",
           detail: errorMessage,
-          fallback: "local-bridge"
+          fallback: ""
         };
-    const fallbackCommand = await fallbackToLocalBridge(
-      env,
-      command,
-      {
-        ...detail,
-        message: detail.message || "Slack dispatch failed. Falling back to local bridge.",
-        detail: detail.detail || errorMessage
-      }
-    );
 
     return {
       ok: true,
-      command: fallbackCommand
+      command: await markSlackCloudCommandFailed(env, command, {
+        ...detail,
+        message: detail.message || "Cloud via Slack dispatch failed.",
+        detail: detail.detail || errorMessage,
+        fallback: ""
+      })
     };
   }
 }

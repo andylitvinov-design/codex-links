@@ -222,6 +222,65 @@ New fixes prepared:
 - kept `bridge -> cloud` fallback for stalled bridge commands
 - after Slack photo upload, the app now posts an explicit thread nudge with the uploaded file reference and asks Codex to acknowledge in the same thread
 
+## 2026-04-17 Slack Photo Upload Argument Fix
+
+Newly confirmed error knowledge:
+
+- after Slack app reinstall and `files:write`, `cloud + photo` no longer failed with `missing_scope`
+- the next confirmed blocker for `cloud + photo` became:
+  - code: `slack_photo_upload_failed`
+  - detail: `invalid_arguments`
+- most likely cause in app code:
+  - the photo handoff used Slack file-upload API methods through the generic JSON helper
+  - Slack `files.getUploadURLExternal` rejected that transport and returned:
+    - `invalid_arguments`
+    - response metadata: missing required field `length`
+    - response metadata: missing required field `filename`
+  - result: image never became available to the Codex cloud worker even though thread creation succeeded
+
+Fix prepared:
+
+- simplify Slack photo handoff:
+  - call Slack external file-upload methods with form-encoded payloads instead of the generic JSON helper
+  - complete external upload into the channel
+  - do not rely on thread-specific completion arguments during `files.completeUploadExternal`
+  - then post an explicit thread reply with the uploaded file permalink and instructions for Codex to read the image in the same thread
+- follow-up fix:
+  - use the permalink returned directly by `files.completeUploadExternal`
+  - avoid depending on a later `files.info` round-trip to build the thread nudge
+- remove hidden Slack-dispatch fallback:
+  - if a task was selected as cloud-only and Slack dispatch fails, mark it failed
+  - do not silently convert it into `local-bridge`
+
+Product rule retained:
+
+- `Bridge` selected:
+  - start on bridge
+  - fallback to cloud only if bridge stalls
+- `Bridge` not selected:
+  - run cloud-only
+  - do not auto-fallback back into bridge, so cloud-worker failures stay visible
+
+## 2026-04-17 Bridge Thread Resolution And UI Refresh Reliability
+
+Newly confirmed error knowledge:
+
+- bridge-only commands for non-UUID project ids such as `ezohata` could reach the local bridge with `threadId=ezohata`
+- Codex app server expects a real thread UUID, so bridge returned:
+  - `invalid thread id`
+  - `expected an optional prefix of \`urn:uuid:\` ... found 'z'`
+- the red UI warning `Часть данных не обновилась...` can also be triggered by any one transient failure across the separate `status`, `commands`, `messages`, or `repos` refresh calls, even when cached data is otherwise usable
+
+Fix prepared:
+
+- bridge now resolves bridge-only project ids through stored `/api/threads` metadata and chooses the latest matching real Codex thread UUID for that project/category
+- UI polling now retries the critical JSON refresh requests once before showing partial-refresh degradation
+- Slack cloud prompt now also resolves the latest stored real Codex thread UUID for the selected project and includes it in the Slack task when available, instead of sending only a human project label
+- Slack cloud wait window was reduced so the UI does not sit in `waiting (cloud)` for several minutes when the external worker is not replying:
+  - dispatch grace: `15s`
+  - total result wait: `60s`
+  - after that the command fails explicitly instead of hanging silently
+
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
