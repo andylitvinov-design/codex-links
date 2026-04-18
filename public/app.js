@@ -945,7 +945,11 @@ function formatProgressStage(progressStage, status) {
     dispatching: "Отправляется исполнителю",
     sent: "Отправлено в cloud",
     accepted: "Исполнитель подтвердил задачу",
+    claimed: "Bridge забрал сообщение",
     processing: "Исполнитель работает",
+    "waiting-for-codex": "Codex обрабатывает сообщение",
+    "saving-reply": "Сохраняю ответ",
+    "retrying-photo-read": "Повторно читаю фото",
     "switched-to-bridge": "Переведено на bridge",
     "switched-to-cloud": "Переведено в cloud",
     dispatched: "Команда отправлена",
@@ -1098,6 +1102,7 @@ function getCommandDeliveryStatus(command) {
   }
 
   const lifecycleState = getCommandLifecycleState(command);
+  const stageLabel = formatProgressStage(command?.progressStage, String(command?.status || "").trim().toLowerCase());
   const errorMessage = String(command?.errorMessage || "").trim();
   const errorDetails = parseCommandErrorDetails(command);
   const deliveryLabel = getCommandActualExecutor(command) === "pending"
@@ -1122,23 +1127,7 @@ function getCommandDeliveryStatus(command) {
     };
   }
 
-  const transportTextByKey = {
-    created: "Команда создана",
-    dispatching: "Отправляется",
-    accepted: "Исполнитель подтверждён",
-    processing: "Обрабатывается",
-    "switched-to-bridge": "Переведено на bridge",
-    "switched-to-cloud": "Переведено в cloud",
-    done: "Ответ сохранён"
-  };
-
-  const text = transportTextByKey[lifecycleState] || "";
-
-  if (!text) {
-    return null;
-  }
-
-  if (lifecycleState === "done") {
+  if (!lifecycleState || lifecycleState === "done") {
     return null;
   }
 
@@ -1158,7 +1147,11 @@ function getCommandDeliveryStatus(command) {
 
   return {
     tone: errorDetails ? "error" : "delivery",
-    text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || text)
+    text: withDeliveryLabel(
+      diagnosticMessage
+      || errorDetails?.message
+      || `Обрабатываю · ${stageLabel || "В очереди"}`
+    )
   };
 }
 
@@ -1872,6 +1865,13 @@ function renderCommands() {
     }
   });
 
+  const threadedAssistantMessageIds = new Set(
+    [...assistantRepliesByCommandId.values()]
+      .flat()
+      .map((reply) => String(reply?.message?.id || "").trim())
+      .filter(Boolean)
+  );
+
   const timelineItems = [
     ...visibleCommands
       .filter((command) => !commandIdsWithUserMessages.has(String(command.id || "").trim()))
@@ -1889,7 +1889,7 @@ function renderCommands() {
     ...visibleMessages
       .filter((message) => {
         const commandId = String(message.commandId || "").trim();
-        if (message.role === "assistant" && commandId) {
+        if (message.role === "assistant" && (commandId || threadedAssistantMessageIds.has(String(message.id || "").trim()))) {
           return false;
         }
 
