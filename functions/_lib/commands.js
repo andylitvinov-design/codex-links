@@ -17,9 +17,8 @@ import { normalizeLatencyFields } from "./delivery.js";
 const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 const CLOUD_FIRST_ACK_TIMEOUT_MS = 5 * 1000;
-const SLACK_FIRST_ACK_TIMEOUT_MS = 20 * 1000;
 const CLOUD_RESULT_TIMEOUT_MS = 180 * 1000;
-const BRIDGE_CLAIM_TIMEOUT_MS = 90 * 1000;
+const BRIDGE_CLAIM_TIMEOUT_MS = 15 * 1000;
 const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
 
 export const COMMAND_TIMEOUTS = {
@@ -45,9 +44,23 @@ function uniqIds(ids, max = MAX_COMMANDS) {
   )].slice(-max);
 }
 
+function isKvRateLimitError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("429")
+    && message.includes("kv")
+    && (message.includes("limit") || message.includes("rate"));
+}
+
 async function readIdIndex(env, key) {
-  const existing = await env.LINKS_STORE.get(key, "json");
-  return uniqIds(existing);
+  try {
+    const existing = await env.LINKS_STORE.get(key, "json");
+    return uniqIds(existing);
+  } catch (error) {
+    if (isKvRateLimitError(error)) {
+      error.kvRateLimited = true;
+    }
+    throw error;
+  }
 }
 
 async function writeIdIndex(env, key, ids) {
@@ -56,11 +69,18 @@ async function writeIdIndex(env, key, ids) {
 
 async function readStoredCommand(env, id) {
   const normalizedId = String(id || "").trim();
-  return normalizedId ? await env.LINKS_STORE.get(commandItemKey(normalizedId), "json") : null;
+
+  if (!normalizedId) {
+    return null;
+  }
+
+  const entry = await env.LINKS_STORE.get(commandItemKey(normalizedId), "json");
+  return entry && typeof entry === "object" ? entry : null;
 }
 
 async function readStoredCommandsByIds(env, ids) {
-  const entries = await Promise.all(uniqIds(ids).map((id) => readStoredCommand(env, id)));
+  const normalizedIds = uniqIds(ids);
+  const entries = await Promise.all(normalizedIds.map((id) => readStoredCommand(env, id)));
   return entries.filter(Boolean);
 }
 
@@ -86,6 +106,98 @@ async function appendIndexedCommandId(env, key, id) {
 
   const current = await readIdIndex(env, key).catch(() => []);
   await writeIdIndex(env, key, [...current, normalizedId]);
+}
+
+async function rebuildCommandIndexes(env, commands) {
+  const normalized = (Array.isArray(commands) ? commands : [])
+    .map((command) => compactCommandForStorage(command))
+    .filter((command) => isWithinRetentionWindow(command?.createdAt))
+    .slice(-MAX_COMMANDS);
+
+  const recentIds = [];
+  const activeIds = [];
+  const localQueueIds = [];
+  const localProcessingIds = [];
+  const clientIds = new Map();
+
+  for (const command of normalized) {
+    if (!command?.id) {
+      continue;
+    }
+
+    await env.LINKS_STORE.put(commandItemKey(command.id), JSON.stringify(command));
+    recentIds.push(command.id);
+
+    const clientId = normalizeClientId(command.clientId);
+    if (clientId) {
+      const bucket = clientIds.get(clientId) || [];
+      bucket.push(command.id);
+      clientIds.set(clientId, bucket);
+    }
+
+    if (isActiveCommandStatus(command.status)) {
+      activeIds.push(command.id);
+    }
+
+    if (isLocalQueueCommand(command)) {
+      localQueueIds.push(command.id);
+    }
+
+    if (isLocalProcessingCommand(command)) {
+      localProcessingIds.push(command.id);
+    }
+  }
+
+  await Promise.all([
+    writeIdIndex(env, COMMANDS_RECENT_STORAGE_KEY, recentIds),
+    writeIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY, activeIds),
+    writeIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, localQueueIds),
+    writeIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, localProcessingIds),
+    ...[...clientIds.entries()].map(([clientId, ids]) => writeIdIndex(env, commandClientIndexKey(clientId), ids))
+  ]);
+}
+
+async function persistCommand(env, command) {
+  if (!command?.id) {
+    return command;
+  }
+
+  const normalized = compactCommandForStorage(command);
+  await env.LINKS_STORE.put(commandItemKey(normalized.id), JSON.stringify(normalized));
+  await appendIndexedCommandId(env, COMMANDS_RECENT_STORAGE_KEY, normalized.id);
+  await appendIndexedCommandId(env, commandClientIndexKey(normalized.clientId), normalized.id);
+
+  const [activeIds, queueIds, processingIds] = await Promise.all([
+    readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => [])
+  ]);
+
+  await Promise.all([
+    writeIdIndex(
+      env,
+      COMMAND_ACTIVE_STORAGE_KEY,
+      isActiveCommandStatus(normalized.status)
+        ? [...activeIds, normalized.id]
+        : activeIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_LOCAL_QUEUE_STORAGE_KEY,
+      isLocalQueueCommand(normalized)
+        ? [...queueIds, normalized.id]
+        : queueIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_LOCAL_PROCESSING_STORAGE_KEY,
+      isLocalProcessingCommand(normalized)
+        ? [...processingIds, normalized.id]
+        : processingIds.filter((id) => id !== normalized.id)
+    )
+  ]);
+
+  return normalized;
 }
 
 function normalizeCommandStatus(rawStatus) {
@@ -491,85 +603,6 @@ function normalizeStoredCommandEntry(entry) {
   };
 }
 
-async function rebuildCommandIndexes(env, commands) {
-  const normalized = (Array.isArray(commands) ? commands : [])
-    .map((command) => compactCommandForStorage(command))
-    .filter((command) => isWithinRetentionWindow(command?.createdAt))
-    .slice(-MAX_COMMANDS);
-  const recentIds = [];
-  const activeIds = [];
-  const localQueueIds = [];
-  const localProcessingIds = [];
-  const clientBuckets = new Map();
-
-  for (const command of normalized) {
-    if (!command?.id) {
-      continue;
-    }
-
-    await env.LINKS_STORE.put(commandItemKey(command.id), JSON.stringify(command));
-    recentIds.push(command.id);
-
-    const clientId = normalizeClientId(command.clientId);
-    if (clientId) {
-      const bucket = clientBuckets.get(clientId) || [];
-      bucket.push(command.id);
-      clientBuckets.set(clientId, bucket);
-    }
-
-    if (isActiveCommandStatus(command.status)) {
-      activeIds.push(command.id);
-    }
-
-    if (isLocalQueueCommand(command)) {
-      localQueueIds.push(command.id);
-    }
-
-    if (isLocalProcessingCommand(command)) {
-      localProcessingIds.push(command.id);
-    }
-  }
-
-  await Promise.all([
-    writeIdIndex(env, COMMANDS_RECENT_STORAGE_KEY, recentIds),
-    writeIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY, activeIds),
-    writeIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, localQueueIds),
-    writeIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, localProcessingIds),
-    ...[...clientBuckets.entries()].map(([clientId, ids]) => writeIdIndex(env, commandClientIndexKey(clientId), ids))
-  ]);
-}
-
-async function persistCommand(env, command) {
-  if (!command?.id) {
-    return command;
-  }
-
-  const normalized = compactCommandForStorage(command);
-  await env.LINKS_STORE.put(commandItemKey(normalized.id), JSON.stringify(normalized));
-  await appendIndexedCommandId(env, COMMANDS_RECENT_STORAGE_KEY, normalized.id);
-  await appendIndexedCommandId(env, commandClientIndexKey(normalized.clientId), normalized.id);
-
-  const [activeIds, queueIds, processingIds] = await Promise.all([
-    readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY).catch(() => []),
-    readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
-    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => [])
-  ]);
-
-  await Promise.all([
-    writeIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY, isActiveCommandStatus(normalized.status)
-      ? [...activeIds, normalized.id]
-      : activeIds.filter((id) => id !== normalized.id)),
-    writeIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, isLocalQueueCommand(normalized)
-      ? [...queueIds, normalized.id]
-      : queueIds.filter((id) => id !== normalized.id)),
-    writeIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, isLocalProcessingCommand(normalized)
-      ? [...processingIds, normalized.id]
-      : processingIds.filter((id) => id !== normalized.id))
-  ]);
-
-  return normalized;
-}
-
 function isWithinRetentionWindow(value) {
   const timestamp = Date.parse(String(value || "").trim());
 
@@ -658,25 +691,6 @@ function getCommandIntentKey(command) {
   return `${threadKey}::${textKey}`;
 }
 
-function hasActiveLocalProcessorForCommand(command, commands = []) {
-  const threadKey = getCommandThreadKey(command);
-
-  if (threadKey === "::") {
-    return (Array.isArray(commands) ? commands : []).some((candidate) =>
-      candidate?.id !== command?.id
-      && candidate?.dispatchMode === DISPATCH_MODE_LOCAL
-      && candidate?.status === "processing"
-    );
-  }
-
-  return (Array.isArray(commands) ? commands : []).some((candidate) =>
-    candidate?.id !== command?.id
-    && candidate?.dispatchMode === DISPATCH_MODE_LOCAL
-    && candidate?.status === "processing"
-    && getCommandThreadKey(candidate) === threadKey
-  );
-}
-
 function isSameCommandIntent(left, right) {
   const leftKey = getCommandIntentKey(left);
   const rightKey = getCommandIntentKey(right);
@@ -694,7 +708,10 @@ function findRecentDuplicate(commands, candidate) {
       return false;
     }
 
-    if (!["queued", "dispatched", "processing", "answered", "acked"].includes(normalizeCommandStatus(command.status))) {
+    // Deduplicate only while an identical command is still in flight.
+    // Once a dialog message has already been answered/acked, the user must be
+    // able to send the same text again and get a new saved entry in history.
+    if (!isActiveCommandStatus(command.status)) {
       return false;
     }
 
@@ -821,8 +838,8 @@ export function createCommandRecord(input) {
 }
 
 export async function readCommands(env) {
-  const indexedIds = await readIdIndex(env, COMMANDS_RECENT_STORAGE_KEY).catch(() => []);
   let existing = [];
+  const indexedIds = await readIdIndex(env, COMMANDS_RECENT_STORAGE_KEY).catch(() => []);
 
   if (indexedIds.length) {
     existing = await readStoredCommandsByIds(env, indexedIds);
@@ -833,7 +850,6 @@ export async function readCommands(env) {
 
   return existing
     .map((entry) => normalizeStoredCommandEntry(entry))
-    .filter(Boolean)
     .filter((entry) => isWithinRetentionWindow(entry.createdAt))
     .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
 }
@@ -989,7 +1005,6 @@ export async function claimNextCommand(env, input = {}) {
     processingLeaseUntil: leaseUntil,
     processorId
   };
-
   await persistCommand(env, claimed);
 
   return {
@@ -1468,53 +1483,14 @@ function createFailedMaintenanceState(command, nowIso, input = {}) {
 }
 
 function evaluateCloudMaintenance(command, nowIso, options = {}) {
-  if (command.dispatchMode !== DISPATCH_MODE_CLOUD && command.dispatchMode !== DISPATCH_MODE_SLACK) {
+  if (command.dispatchMode !== DISPATCH_MODE_CLOUD) {
     return command;
   }
 
-  const usesSlackCloud = command.dispatchMode === DISPATCH_MODE_SLACK;
   const fallbackAllowed = canFallbackToLocal(command, options);
 
   if (command.status !== "processing" && command.status !== "dispatched") {
     return command;
-  }
-
-  if (
-    usesSlackCloud
-    && command.status === "dispatched"
-    && !String(command.firstAckAt || "").trim()
-    && isOlderThan(command.progressUpdatedAt || command.dispatchedAt || command.createdAt, SLACK_FIRST_ACK_TIMEOUT_MS)
-  ) {
-    const detail = "Slack dispatch succeeded, but no Codex acknowledgement was observed before the first-ack timeout.";
-
-    if (fallbackAllowed) {
-      return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
-        progressStage: "switched-to-bridge",
-        timeoutPhase: "first-ack-timeout",
-        fallbackReason: "cloud via slack did not acknowledge in time",
-        lastDiagnosticCode: "slack_cloud_first_ack_timeout",
-        lastDiagnosticDetail: detail,
-        errorMessage: stringifyCommandError({
-          code: "fallback_to_bridge",
-          stage: "switched-to-bridge",
-          message: "Cloud via Slack did not acknowledge in time. Switched to local bridge.",
-          detail,
-          fallback: "local-bridge"
-        })
-      });
-    }
-
-    return createFailedMaintenanceState(command, nowIso, {
-      timeoutPhase: "first-ack-timeout",
-      lastDiagnosticCode: "slack_cloud_first_ack_timeout",
-      lastDiagnosticDetail: detail,
-      errorMessage: stringifyCommandError({
-        code: "slack_cloud_first_ack_timeout",
-        stage: "slack-cloud-first-ack-timeout",
-        message: "Cloud via Slack did not acknowledge in time.",
-        detail
-      })
-    });
   }
 
   const staleSince = command.progressUpdatedAt || command.dispatchedAt || command.createdAt;
@@ -1522,23 +1498,19 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
   if (!isOlderThan(staleSince, CLOUD_RESULT_TIMEOUT_MS)) {
     return command;
   }
-  const detail = usesSlackCloud
-    ? "Cloud via Slack did not finish before the command timeout."
-    : "Direct cloud execution did not finish before the command timeout.";
+  const detail = "Direct cloud execution did not finish before the command timeout.";
 
   if (fallbackAllowed) {
     return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
       progressStage: "switched-to-bridge",
       timeoutPhase: "result-timeout",
-      fallbackReason: usesSlackCloud ? "cloud via slack timed out" : "direct cloud execution timed out",
-      lastDiagnosticCode: usesSlackCloud ? "slack_cloud_result_timeout" : "cloud_result_timeout",
+      fallbackReason: "direct cloud execution timed out",
+      lastDiagnosticCode: "cloud_result_timeout",
       lastDiagnosticDetail: detail,
       errorMessage: stringifyCommandError({
         code: "fallback_to_bridge",
         stage: "switched-to-bridge",
-        message: usesSlackCloud
-          ? "Cloud via Slack timed out. Switched to local bridge."
-          : "Direct cloud execution timed out. Switched to local bridge.",
+        message: "Direct cloud execution timed out. Switched to local bridge.",
         detail,
         fallback: "local-bridge"
       })
@@ -1547,14 +1519,12 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
 
   return createFailedMaintenanceState(command, nowIso, {
     timeoutPhase: "result-timeout",
-    lastDiagnosticCode: usesSlackCloud ? "slack_cloud_result_timeout" : "cloud_result_timeout",
+    lastDiagnosticCode: "cloud_result_timeout",
     lastDiagnosticDetail: detail,
     errorMessage: stringifyCommandError({
-      code: usesSlackCloud ? "slack_cloud_result_timeout" : "cloud_result_timeout",
-      stage: usesSlackCloud ? "slack-cloud-result-timeout" : "cloud-result-timeout",
-      message: usesSlackCloud
-        ? "Cloud via Slack did not produce a result in time."
-        : "Direct cloud execution did not produce a result in time.",
+      code: "cloud_result_timeout",
+      stage: "cloud-result-timeout",
+      message: "Direct cloud execution did not produce a result in time.",
       detail
     })
   });
@@ -1566,10 +1536,10 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   }
 
   const fallbackAllowed = canFallbackToSlack(command, options);
-  const blockedByActiveLocalProcessor = Boolean(options.hasActiveLocalProcessor);
+  const hasFreshProcessingBridgeCommand = Boolean(options.hasFreshProcessingBridgeCommand);
 
   if (command.status === "queued") {
-    if (blockedByActiveLocalProcessor) {
+    if (hasFreshProcessingBridgeCommand) {
       return command;
     }
 
@@ -1661,30 +1631,45 @@ export async function runCommandMaintenance(env, options = {}) {
   const nowIso = new Date().toISOString();
   let changedCount = 0;
   const commandsToDispatch = [];
+  const hasFreshProcessingBridgeCommand = current.some((command) => {
+    if (command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "processing") {
+      return false;
+    }
+
+    const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
+    const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
+    const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
+    const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
+
+    return !isLeaseExpired && !isResultStale;
+  });
 
   const next = current.map((command) => {
     const previous = command;
     let updated = command;
 
-    if (command.dispatchMode === DISPATCH_MODE_SLACK) {
+    if (command.dispatchMode === DISPATCH_MODE_CLOUD) {
       updated = evaluateCloudMaintenance(command, nowIso, options);
     } else if (command.dispatchMode === DISPATCH_MODE_LOCAL) {
       updated = evaluateBridgeMaintenance(command, nowIso, {
         ...options,
-        hasActiveLocalProcessor: hasActiveLocalProcessorForCommand(command, current)
+        hasFreshProcessingBridgeCommand
       });
-    }
-
-    if (
-      updated.dispatchMode === DISPATCH_MODE_SLACK
-      && updated.status === "queued"
-      && !String(updated.slackChannelId || "").trim()
-    ) {
-      commandsToDispatch.push(updated.id);
     }
 
     if (updated !== previous) {
       changedCount += 1;
+    }
+
+    if (
+      updated.dispatchMode !== DISPATCH_MODE_LOCAL
+      && updated.status === "queued"
+      && (
+        updated.dispatchMode === DISPATCH_MODE_CLOUD
+        || !String(updated.slackChannelId || "").trim()
+      )
+    ) {
+      commandsToDispatch.push(updated.id);
     }
 
     return updated;
@@ -1717,7 +1702,8 @@ export async function getCommandsForClient(env, clientId) {
   const indexedIds = await readIdIndex(env, commandClientIndexKey(normalizedClientId)).catch(() => []);
 
   if (indexedIds.length) {
-    return (await readStoredCommandsByIds(env, indexedIds))
+    const commands = await readStoredCommandsByIds(env, indexedIds);
+    return commands
       .map((command) => normalizeStoredCommandEntry(command))
       .filter(Boolean)
       .filter((command) => command.clientId === normalizedClientId)
@@ -1735,10 +1721,10 @@ export async function getCommandById(env, id) {
     return null;
   }
 
-  const stored = await readStoredCommand(env, normalizedId);
+  const direct = await readStoredCommand(env, normalizedId);
 
-  if (stored) {
-    return normalizeStoredCommandEntry(stored);
+  if (direct) {
+    return normalizeStoredCommandEntry(direct);
   }
 
   const commands = await readCommands(env);

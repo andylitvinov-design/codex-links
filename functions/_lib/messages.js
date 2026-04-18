@@ -100,6 +100,17 @@ async function writeIdIndex(env, key, ids) {
   await env.LINKS_STORE.put(key, JSON.stringify(uniqIds(ids)));
 }
 
+async function appendIndexedMessageId(env, key, id) {
+  const normalizedId = normalizeId(id);
+
+  if (!normalizedId) {
+    return;
+  }
+
+  const current = await readIdIndex(env, key).catch(() => []);
+  await writeIdIndex(env, key, [...current, normalizedId]);
+}
+
 async function readStoredMessage(env, id) {
   const normalizedId = normalizeId(id);
   return normalizedId ? (await env.LINKS_STORE.get(messageItemKey(normalizedId), "json")) : null;
@@ -133,6 +144,22 @@ async function rebuildMessageIndexes(env, messages) {
   ]);
 }
 
+async function persistMessage(env, message) {
+  const normalized = normalizeMessage(message);
+
+  if (!normalized || !isWithinRetentionWindow(normalized.createdAt)) {
+    return null;
+  }
+
+  await env.LINKS_STORE.put(messageItemKey(normalized.id), JSON.stringify(normalized));
+  await Promise.all([
+    appendIndexedMessageId(env, INBOX_MESSAGES_RECENT_STORAGE_KEY, normalized.id),
+    appendIndexedMessageId(env, clientMessageIndexKey(normalized.clientId), normalized.id)
+  ]);
+
+  return normalized;
+}
+
 export async function readMessages(env) {
   const indexedIds = await readIdIndex(env, INBOX_MESSAGES_RECENT_STORAGE_KEY).catch(() => []);
   let existing = [];
@@ -162,25 +189,13 @@ export async function writeMessages(env, messages) {
 }
 
 export async function upsertMessages(env, messages) {
-  const current = await readMessages(env);
-  const next = new Map(current.map((message) => [message.id, message]));
-
-  for (const message of Array.isArray(messages) ? messages : []) {
-    const normalized = normalizeMessage(message);
-
-    if (!normalized) {
-      continue;
-    }
-
-    next.set(normalized.id, normalized);
-  }
-
-  const ordered = [...next.values()].sort((left, right) =>
-    String(left.createdAt || "").localeCompare(String(right.createdAt || ""))
+  const persisted = await Promise.all(
+    (Array.isArray(messages) ? messages : []).map((message) => persistMessage(env, message))
   );
 
-  await writeMessages(env, ordered);
-  return ordered;
+  return persisted.filter(Boolean).sort((left, right) =>
+    String(left.createdAt || "").localeCompare(String(right.createdAt || ""))
+  );
 }
 
 export async function replaceMessages(env, messages) {

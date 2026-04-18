@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0656";
+const BUILD_VERSION = "20260418-0940";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1038,6 +1038,7 @@ function parseCommandErrorDetails(command) {
 }
 
 function getCommandDiagnosticMessage(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
   const fallbackReason = String(command?.fallbackReason || "").trim().toLowerCase();
   const timeoutPhase = String(command?.timeoutPhase || "").trim().toLowerCase();
   const diagnosticCode = String(command?.lastDiagnosticCode || "").trim().toLowerCase();
@@ -1052,6 +1053,26 @@ function getCommandDiagnosticMessage(command) {
 
   if (diagnosticCode === "openai_request_failed" || diagnosticCode === "openai_response_failed" || diagnosticCode === "openai_empty_response") {
     return "Direct cloud execution не завершился успешно.";
+  }
+
+  if (diagnosticCode === "bridge_finalization_timeout") {
+    return "Bridge обработал задачу, но завис на сохранении ответа.";
+  }
+
+  if (diagnosticCode === "cloud_fallback_not_dispatched") {
+    return "Bridge перевёл задачу в cloud, но cloud fallback не был запущен.";
+  }
+
+  if (diagnosticCode === "bridge_result_timeout") {
+    return "Bridge не завершил выполнение вовремя.";
+  }
+
+  if (diagnosticCode === "bridge_claim_timeout") {
+    return "Bridge не забрал сообщение из очереди вовремя.";
+  }
+
+  if (status === "failed" && fallbackReason === "local bridge stopped heartbeating") {
+    return "Bridge перестал heartbeat'ить во время обработки.";
   }
 
   if (fallbackReason === "direct cloud execution timed out" || timeoutPhase === "result-timeout") {
