@@ -270,6 +270,10 @@ Newly confirmed error knowledge:
   - `invalid thread id`
   - `expected an optional prefix of \`urn:uuid:\` ... found 'z'`
 - the red UI warning `Часть данных не обновилась...` can also be triggered by any one transient failure across the separate `status`, `commands`, `messages`, or `repos` refresh calls, even when cached data is otherwise usable
+- UI command refresh had an additional hard client bug:
+  - `mergeCommandCollection()` compared command freshness using `getCommandFreshnessTs(...)`
+  - but that helper function was missing from `public/app.js`
+  - result: once an existing command was refreshed, the browser could throw during merge and keep showing stale cards such as `stage: created` even while server-side status had already advanced to `processing` or `dispatched`
 
 Fix prepared:
 
@@ -280,6 +284,7 @@ Fix prepared:
   - dispatch grace: `15s`
   - total result wait: `60s`
   - after that the command fails explicitly instead of hanging silently
+- client merge now has a concrete command freshness helper, so refreshed server status can replace stale local cards instead of freezing them
 
 ## Related Notes
 
