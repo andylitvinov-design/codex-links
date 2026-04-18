@@ -705,6 +705,55 @@ function runCodexResume(threadId, prompt, photoPath) {
   });
 }
 
+function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
+  const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
+  return new Promise((resolve, reject) => {
+    const outputPath = join(tmpdir(), `codex-links-output-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+    const args = [
+      "exec",
+      prompt,
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-c",
+      'service_tier="fast"',
+      "-o",
+      outputPath
+    ];
+
+    if (cwd) {
+      args.push("-C", cwd);
+    }
+
+    if (photoPath) {
+      args.push("-i", photoPath);
+    }
+
+    execFile(codexBin, args, {
+      cwd: cwd || process.cwd(),
+      timeout: timeoutMs,
+      maxBuffer: 10 * 1024 * 1024
+    }, async (error, stdout, stderr) => {
+      const result = {
+        stdout: String(stdout || "").trim(),
+        stderr: String(stderr || "").trim(),
+        output: ""
+      };
+
+      try {
+        result.output = String(await readFile(outputPath, "utf8") || "").trim();
+      } catch {}
+
+      if (error) {
+        reject(new Error(result.stderr || result.stdout || error.message));
+        return;
+      }
+
+      resolve(result);
+    });
+  });
+}
+
 async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC_TIMEOUT_MS, options = {}) {
   const startedAt = Date.now();
   let lastHeartbeatAt = 0;
