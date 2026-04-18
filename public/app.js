@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-1518";
+const BUILD_VERSION = "20260418-1524";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -245,6 +245,7 @@ const storage = {
 
 const refreshButton = document.querySelector("#refresh-button");
 const deliveryResetButton = document.querySelector("#delivery-reset-button");
+const queueResetButton = document.querySelector("#queue-reset-button");
 const dispatchModeBridgeButton = document.querySelector("#dispatch-mode-bridge");
 const dispatchModeCloudButton = document.querySelector("#dispatch-mode-cloud");
 const projectNav = document.querySelector("#project-nav");
@@ -2315,12 +2316,14 @@ function toggleVoiceRecognition() {
 }
 
 function setResetButtonBusy(isBusy) {
-  if (!deliveryResetButton) {
-    return;
-  }
+  [deliveryResetButton, queueResetButton].forEach((button) => {
+    if (!button) {
+      return;
+    }
 
-  deliveryResetButton.disabled = Boolean(isBusy);
-  deliveryResetButton.textContent = isBusy ? "Reset…" : "Reset";
+    button.disabled = Boolean(isBusy);
+    button.textContent = isBusy ? "Сброс…" : "Сброс";
+  });
 }
 
 function syncPhotoClearButton() {
@@ -3170,6 +3173,12 @@ function bindEvents() {
       threadSettingsPanel.hidden = true;
       threadSettingsToggle?.setAttribute("aria-expanded", "false");
     }
+  });
+
+  queueResetButton?.addEventListener("click", () => {
+    triggerDeliveryReset().catch((error) => {
+      setCommandStatusMessage(String(error?.message || "Reset maintenance не выполнился."), { tone: "error" });
+    });
   });
 
   threadSettingsSelectAll?.addEventListener("click", () => {
