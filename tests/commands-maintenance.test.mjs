@@ -138,3 +138,46 @@ test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", asyn
   assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
   assert.match(updated.errorMessage, /fallback_to_slack/);
 });
+
+test("runCommandMaintenance fails stale photo bridge commands instead of rerouting them", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-bridge-photo-timeout",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "bridge",
+    status: "processing",
+    progressStage: "waiting-for-codex",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() - 1000).toISOString(),
+    targetRepo: "andylitvinov-design/codex-links",
+    photoAttached: true,
+    photoBytesPresent: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.changedCount, 1);
+  assert.deepEqual(result.commandsToDispatch, []);
+
+  const updated = result.commands.find((command) => command.id === "cmd-bridge-photo-timeout");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "failed");
+  assert.equal(updated.progressStage, "failed");
+  assert.equal(updated.timeoutPhase, "result-timeout");
+  assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
+  assert.match(updated.errorMessage, /bridge_result_timeout/);
+});
