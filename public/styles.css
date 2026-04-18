@@ -1128,7 +1128,6 @@ input[type="radio"] {
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  text-transform: lowercase;
 }
 
 .command-answer-actions {
@@ -1292,7 +1291,4 @@ code {
     justify-content: center;
   }
 
-  .command-answer-badge {
-    display: none;
-  }
 }
