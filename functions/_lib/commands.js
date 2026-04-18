@@ -1245,7 +1245,7 @@ function createFailedMaintenanceState(command, nowIso, input = {}) {
 }
 
 function evaluateCloudMaintenance(command, nowIso, options = {}) {
-  if (command.dispatchMode !== DISPATCH_MODE_CLOUD) {
+  if (command.dispatchMode !== DISPATCH_MODE_CLOUD && command.dispatchMode !== DISPATCH_MODE_SLACK) {
     return command;
   }
 
@@ -1260,19 +1260,24 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
   if (!isOlderThan(staleSince, CLOUD_RESULT_TIMEOUT_MS)) {
     return command;
   }
-  const detail = "Direct cloud execution did not finish before the command timeout.";
+  const usesSlackCloud = command.dispatchMode === DISPATCH_MODE_SLACK;
+  const detail = usesSlackCloud
+    ? "Cloud via Slack did not finish before the command timeout."
+    : "Direct cloud execution did not finish before the command timeout.";
 
   if (fallbackAllowed) {
     return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
       progressStage: "switched-to-bridge",
       timeoutPhase: "result-timeout",
-      fallbackReason: "direct cloud execution timed out",
-      lastDiagnosticCode: "cloud_result_timeout",
+      fallbackReason: usesSlackCloud ? "cloud via slack timed out" : "direct cloud execution timed out",
+      lastDiagnosticCode: usesSlackCloud ? "slack_cloud_result_timeout" : "cloud_result_timeout",
       lastDiagnosticDetail: detail,
       errorMessage: stringifyCommandError({
         code: "fallback_to_bridge",
         stage: "switched-to-bridge",
-        message: "Direct cloud execution timed out. Switched to local bridge.",
+        message: usesSlackCloud
+          ? "Cloud via Slack timed out. Switched to local bridge."
+          : "Direct cloud execution timed out. Switched to local bridge.",
         detail,
         fallback: "local-bridge"
       })
@@ -1281,12 +1286,14 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
 
   return createFailedMaintenanceState(command, nowIso, {
     timeoutPhase: "result-timeout",
-    lastDiagnosticCode: "cloud_result_timeout",
+    lastDiagnosticCode: usesSlackCloud ? "slack_cloud_result_timeout" : "cloud_result_timeout",
     lastDiagnosticDetail: detail,
     errorMessage: stringifyCommandError({
-      code: "cloud_result_timeout",
-      stage: "cloud-result-timeout",
-      message: "Direct cloud execution did not produce a result in time.",
+      code: usesSlackCloud ? "slack_cloud_result_timeout" : "cloud_result_timeout",
+      stage: usesSlackCloud ? "slack-cloud-result-timeout" : "cloud-result-timeout",
+      message: usesSlackCloud
+        ? "Cloud via Slack did not produce a result in time."
+        : "Direct cloud execution did not produce a result in time.",
       detail
     })
   });

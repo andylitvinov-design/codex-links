@@ -12,6 +12,7 @@ import {
   requeueCommand,
   readCommands,
   rerouteCommandToSlack,
+  runCommandMaintenance,
   upsertCommandDispatchState,
   updateCommandProgress,
   writeCommands
@@ -813,6 +814,31 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
   return failed.value || command;
 }
 
+async function reconcileCommandsForRead(env, runtimeConfig) {
+  try {
+    await syncRecentSlackReplies(env, runtimeConfig);
+  } catch {}
+
+  let maintenance = null;
+  try {
+    maintenance = await runCommandMaintenance(env, {
+      preferSlack: isSlackDispatchConfigured(runtimeConfig),
+      fallbackToLocal: true
+    });
+  } catch {
+    return;
+  }
+
+  for (const commandId of maintenance?.commandsToDispatch || []) {
+    try {
+      const command = await getCommandById(env, commandId);
+      if (command) {
+        await dispatchCommandIfNeeded(env, command, runtimeConfig);
+      }
+    } catch {}
+  }
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const preflight = handleOptions(request);
@@ -828,6 +854,7 @@ export async function onRequest(context) {
     const status = url.searchParams.get("status");
     const catalog = url.searchParams.get("catalog");
     const scope = url.searchParams.get("scope");
+    const runtimeConfig = await readRuntimeConfig(env);
 
     if (catalog === "threads") {
       if (!isAuthorized(request, env)) {
@@ -839,6 +866,7 @@ export async function onRequest(context) {
     }
 
     if (commandId) {
+      await reconcileCommandsForRead(env, runtimeConfig);
       const command = await getCommandById(env, commandId);
       return json({ command: serializeCommand(command) });
     }
@@ -848,6 +876,7 @@ export async function onRequest(context) {
         return json({ error: "Unauthorized." }, { status: 401 });
       }
 
+      await reconcileCommandsForRead(env, runtimeConfig);
       const commands = await readCommands(env);
       const filtered = status
         ? commands.filter((command) => command.status === status)
@@ -857,6 +886,7 @@ export async function onRequest(context) {
     }
 
     if (scope === "public") {
+      await reconcileCommandsForRead(env, runtimeConfig);
       const commands = await readCommands(env);
       const filtered = filterPublicCommands(status
         ? commands.filter((command) => command.status === status)
@@ -866,6 +896,7 @@ export async function onRequest(context) {
     }
 
     if (clientId) {
+      await reconcileCommandsForRead(env, runtimeConfig);
       const commands = await getCommandsForClient(env, clientId);
       const filtered = filterPublicCommands(status
         ? commands.filter((command) => command.status === status)
@@ -878,6 +909,7 @@ export async function onRequest(context) {
       return json({ error: "Unauthorized." }, { status: 401 });
     }
 
+    await reconcileCommandsForRead(env, runtimeConfig);
     const commands = await readCommands(env);
     const filtered = status
       ? commands.filter((command) => command.status === status)
