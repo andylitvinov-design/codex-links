@@ -354,7 +354,58 @@ function isRecentEnough(value, windowMs) {
   return timestamp >= Date.now() - windowMs;
 }
 
+function isParallelVisionCommand(command) {
+  if (!command?.photo) {
+    return false;
+  }
+
+  const text = canonicalizeText(command?.text);
+
+  if (!text) {
+    return true;
+  }
+
+  const mutationHints = [
+    "исправ",
+    "fix",
+    "сделай",
+    "сделать",
+    "перенеси",
+    "добавь",
+    "update",
+    "deploy",
+    "commit",
+    "pr",
+    "код",
+    "code",
+    "repo",
+    "branch"
+  ];
+
+  if (mutationHints.some((hint) => text.includes(hint))) {
+    return false;
+  }
+
+  const visionHints = [
+    "что на фото",
+    "прочти фото",
+    "кнопка",
+    "what color",
+    "read the image",
+    "what is in the image",
+    "reset",
+    "photo",
+    "screenshot"
+  ];
+
+  return visionHints.some((hint) => text.includes(hint));
+}
+
 function getCommandThreadKey(command) {
+  if (isParallelVisionCommand(command)) {
+    return "::";
+  }
+
   const threadId = normalizeThreadId(command?.threadId);
   const clientId = normalizeClientId(command?.clientId);
   return `${threadId}::${clientId}`;
