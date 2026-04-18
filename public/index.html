@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260418-0011" />
+    <link rel="stylesheet" href="/styles.css?v=20260418-0022" />
   </head>
   <body>
     <main class="page">
@@ -40,8 +40,14 @@
           <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
         </section>
         <section class="bridge-status-block">
-          <p id="bridge-status-text" class="bridge-status">Подключаю статус Codex Cloud…</p>
-          <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
+          <div class="bridge-status-row">
+            <div class="bridge-status-copy">
+              <p id="bridge-status-text" class="bridge-status">Подключаю статус cloud execution…</p>
+              <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
+            </div>
+            <button class="button button-secondary bridge-reset-button" id="delivery-reset-button" type="button">Reset</button>
+          </div>
+          <p class="bridge-reset-help">Резервный запуск maintenance для зависших cloud/bridge сообщений.</p>
         </section>
 
         <section class="projects-entry">
@@ -117,6 +123,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260418-0011"></script>
+    <script type="module" src="/app.js?v=20260418-0022"></script>
   </body>
 </html>

@@ -9,8 +9,10 @@ const TARGET_WORKSPACE_PATH = process.env.CODEX_LINKS_SMOKE_WORKSPACE_PATH || "/
 const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"]
 const FALLBACK_THREAD_ID = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_ID || ""
 const FALLBACK_THREAD_LABEL = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_LABEL || ""
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || ""
 const clientId = `smoke-${Date.now()}`
 const text = "delivery-probe: reply with OK only"
+const pollStartedAt = Date.now()
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -27,6 +29,34 @@ async function fetchAssistantReplies(commandId) {
         String(message?.commandId || "").trim() === String(commandId || "").trim()
         && String(message?.role || "").trim() === "assistant"
       )
+    : []
+}
+
+async function fetchSlackThreadReplies(channelId, threadTs) {
+  if (!SLACK_BOT_TOKEN || !channelId || !threadTs) {
+    return []
+  }
+
+  const url = new URL("https://slack.com/api/conversations.replies")
+  url.searchParams.set("channel", channelId)
+  url.searchParams.set("ts", threadTs)
+  url.searchParams.set("inclusive", "true")
+  url.searchParams.set("limit", "100")
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+      accept: "application/json"
+    }
+  })
+  const data = await response.json().catch(() => ({}))
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(`Slack replies fetch failed: ${String(data?.error || response.status).trim()}`)
+  }
+
+  return Array.isArray(data?.messages)
+    ? data.messages.filter((message) => String(message?.ts || "").trim() !== String(threadTs || "").trim())
     : []
 }
 
@@ -68,7 +98,18 @@ function assertManifestContext(command, label) {
   }
 }
 
+function assertDirectCloudState(command, label) {
+  if (String(command?.requestedExecutor || "").trim() !== "cloud") {
+    throw new Error(`${label}: expected requestedExecutor=cloud, got ${String(command?.requestedExecutor || "").trim() || "empty"}.`)
+  }
+
+  if (String(command?.status || "").trim().toLowerCase() === "answered" && String(command?.actualExecutor || "").trim() !== "cloud") {
+    throw new Error(`${label}: expected actualExecutor=cloud on answered command, got ${String(command?.actualExecutor || "").trim() || "empty"}.`)
+  }
+}
+
 async function postCommand() {
+  const startedAt = Date.now()
   const response = await fetch(`${BASE_URL}/api/commands`, {
     method: "POST",
     headers: {
@@ -82,7 +123,7 @@ async function postCommand() {
       fallbackThreadId: FALLBACK_THREAD_ID,
       fallbackThreadLabel: FALLBACK_THREAD_LABEL,
       text,
-      dispatchMode: "slack-codex-cloud",
+      dispatchMode: "cloud",
       targetExecutionMode: "cloud",
       targetRepo: TARGET_REPO,
       targetRepoUrl: TARGET_REPO_URL,
@@ -97,7 +138,11 @@ async function postCommand() {
   }
 
   assertManifestContext(data.command, "cloud create")
-  return data.command
+  assertDirectCloudState(data.command, "cloud create")
+  return {
+    command: data.command,
+    createAckMs: Date.now() - startedAt
+  }
 }
 
 async function pollCommand(id) {
@@ -112,6 +157,7 @@ async function pollCommand(id) {
 
     if (command) {
       assertManifestContext(command, "cloud poll")
+      assertDirectCloudState(command, "cloud poll")
       const status = String(command.status || "").trim().toLowerCase()
       const stage = String(command.progressStage || "").trim()
 
@@ -119,6 +165,22 @@ async function pollCommand(id) {
 
       if (status === "answered") {
         return command
+      }
+
+      if (
+        String(command?.slackChannelId || "").trim()
+        && String(command?.slackThreadTs || command?.slackMessageTs || "").trim()
+        && SLACK_BOT_TOKEN
+      ) {
+        const replies = await fetchSlackThreadReplies(
+          String(command.slackChannelId || "").trim(),
+          String(command.slackThreadTs || command.slackMessageTs || "").trim()
+        )
+        const matched = replies.find((reply) => /(^|\b)OK(\b|$)/i.test(String(reply?.text || "").trim()))
+
+        if (matched) {
+          return command
+        }
       }
 
       if (status === "acked") {
@@ -137,14 +199,24 @@ async function pollCommand(id) {
     await sleep(5000)
   }
 
-  throw new Error("Smoke test timed out waiting for a Codex Cloud reply or fallback-matched reply.")
+  throw new Error("Smoke test timed out waiting for a direct cloud reply or fallback-matched reply.")
 }
 
 async function main() {
   console.log(`Submitting cloud smoke command to ${BASE_URL}`)
   const created = await postCommand()
-  console.log(`commandId=${created.id}`)
-  const answered = await pollCommand(created.id)
+  console.log(`commandId=${created.command.id}`)
+  const answered = await pollCommand(created.command.id)
+  const report = {
+    path: "cloud",
+    createAckMs: created.createAckMs,
+    executorVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstAckMs ?? null),
+    firstReplyVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstReplyMs ?? null),
+    doneMs: Date.now() - pollStartedAt,
+    stage: answered?.deliveryStage || answered?.progressStage || answered?.status || "unknown",
+    dispatchMode: String(answered?.dispatchMode || "").trim() || "unknown"
+  }
+  console.log(JSON.stringify({ latencyReport: report }, null, 2))
   console.log(`Smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`)
 }
 

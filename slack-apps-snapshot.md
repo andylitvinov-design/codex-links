@@ -1,0 +1,144 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - text: 
+      - link "Slack API" [ref=e5] [cursor=pointer]:
+        - /url: https://api.slack.com/
+        - img "Slack API" [ref=e6]
+      - generic [ref=e7]:
+        - generic:
+          - link "Go to Slack" [ref=e8] [cursor=pointer]:
+            - /url: https://slack.com/signin
+          - generic [ref=e9]:
+            - link "Documentation" [ref=e10] [cursor=pointer]:
+              - /url: /#read_the_docs
+            - link "Tutorials" [ref=e11] [cursor=pointer]:
+              - /url: /tutorials
+            - link "Twitter" [ref=e12] [cursor=pointer]:
+              - /url: https://twitter.com/@slackapi
+  - generic [ref=e16]:
+    - heading "Your Apps" [level=1] [ref=e17]
+    - paragraph [ref=e19]:
+      - text: You'll need to
+      - link "sign in to your Slack account" [ref=e20] [cursor=pointer]:
+        - /url: https://slack.com/signin
+      - text: to create an application.
+    - generic [ref=e23]:
+      - generic [ref=e24]:
+        - heading "Your App Configuration Tokens" [level=4] [ref=e25]
+        - link "Learn about tokens" [ref=e26] [cursor=pointer]:
+          - /url: https://docs.slack.dev/authentication/tokens
+      - generic [ref=e27]:
+        - button "Generate Token" [disabled]
+    - paragraph [ref=e28]:
+      - text: Don't see an app you're looking for?
+      - link "Sign in to another workspace" [ref=e29] [cursor=pointer]:
+        - /url: https://slack.com/signin
+      - text: .
+  - contentinfo [ref=e30]:
+    - generic [ref=e32]:
+      - list [ref=e34]:
+        - listitem [ref=e35]: Using Slack
+        - listitem [ref=e36]:
+          - link "Product" [ref=e37] [cursor=pointer]:
+            - /url: https://slack.com/is
+        - listitem [ref=e38]:
+          - link "Enterprise" [ref=e39] [cursor=pointer]:
+            - /url: https://slack.com/enterprise
+        - listitem [ref=e40]:
+          - link "Pricing" [ref=e41] [cursor=pointer]:
+            - /url: https://slack.com/pricing?ui_step=28&ui_element=5
+        - listitem [ref=e42]:
+          - link "Support" [ref=e43] [cursor=pointer]:
+            - /url: https://get.slack.help/hc/en-us
+        - listitem [ref=e44]:
+          - link "Slack Guides" [ref=e45] [cursor=pointer]:
+            - /url: https://slack.com/guides
+        - listitem [ref=e46]:
+          - link "Slack Marketplace" [ref=e47] [cursor=pointer]:
+            - /url: https://slack.com/marketplace
+        - listitem [ref=e48]:
+          - link "API" [ref=e49] [cursor=pointer]:
+            - /url: https://api.slack.com/
+      - list [ref=e51]:
+        - listitem [ref=e52]:
+          - text: Slack
+          - generic [ref=e53]: 
+        - listitem [ref=e54]:
+          - link "Jobs" [ref=e55] [cursor=pointer]:
+            - /url: https://slack.com/careers
+        - listitem [ref=e56]:
+          - link "Customers" [ref=e57] [cursor=pointer]:
+            - /url: https://slack.com/customers
+        - listitem [ref=e58]:
+          - link "Developers" [ref=e59] [cursor=pointer]:
+            - /url: https://slack.com/developers
+        - listitem [ref=e60]:
+          - link "Events" [ref=e61] [cursor=pointer]:
+            - /url: https://slack.com/events
+        - listitem [ref=e62]:
+          - link "Blog" [ref=e63] [cursor=pointer]:
+            - /url: https://slackhq.com/
+      - list [ref=e65]:
+        - listitem [ref=e66]: Legal
+        - listitem [ref=e67]:
+          - link "Privacy" [ref=e68] [cursor=pointer]:
+            - /url: https://slack.com/privacy-policy
+        - listitem [ref=e69]:
+          - link "Security" [ref=e70] [cursor=pointer]:
+            - /url: https://slack.com/trust/security
+        - listitem [ref=e71]:
+          - link "Terms of Service" [ref=e72] [cursor=pointer]:
+            - /url: https://slack.com/terms-of-service
+        - listitem [ref=e73]:
+          - link "Policies" [ref=e74] [cursor=pointer]:
+            - /url: https://slack.com/legal
+      - list [ref=e76]:
+        - listitem [ref=e77]: Handy Links
+        - listitem [ref=e78]:
+          - link "Download desktop app" [ref=e79] [cursor=pointer]:
+            - /url: https://slack.com/downloads
+        - listitem [ref=e80]:
+          - link "Download mobile app" [ref=e81] [cursor=pointer]:
+            - /url: https://slack.com/downloads
+        - listitem [ref=e82]:
+          - link "Brand Guidelines" [ref=e83] [cursor=pointer]:
+            - /url: https://slack.com/brand-guidelines
+        - listitem [ref=e84]:
+          - link "Slack at Work" [ref=e85] [cursor=pointer]:
+            - /url: https://slackatwork.com
+        - listitem [ref=e86]:
+          - link "Status" [ref=e87] [cursor=pointer]:
+            - /url: https://slack-status.com
+    - generic [ref=e89]:
+      - link "Slack homepage" [ref=e90] [cursor=pointer]:
+        - /url: https://slack.com
+        - generic [ref=e91]: 
+      - list [ref=e92]:
+        - listitem [ref=e93]:
+          - link "Contact Us" [ref=e94] [cursor=pointer]:
+            - /url: https://slack.com/help/requests/new
+        - listitem [ref=e95]:
+          - link "Slack on Twitter" [ref=e96] [cursor=pointer]:
+            - /url: https://twitter.com/SlackHQ
+            - generic [ref=e97]: 
+        - listitem [ref=e98]:
+          - link "Slack on YouTube" [ref=e99] [cursor=pointer]:
+            - /url: https://www.youtube.com/channel/UCY3YECgeBcLCzIrFLP4gblw
+            - generic [ref=e100]: 
+  - generic [ref=e101]:
+    - alert [ref=e102]
+    - log [ref=e103]
+  - generic [ref=e104]:
+    - alert [ref=e105]
+    - log [ref=e106]
+  - region "Cookie banner" [ref=e107]:
+    - alertdialog "Privacy" [ref=e108]:
+      - generic [ref=e110]:
+        - generic [ref=e113]:
+          - text: This website uses cookies to enhance user experience and to analyze performance and traffic on our website. We also share information about your use of our site with our social media, advertising and analytics partners.
+          - link "More Info" [ref=e114] [cursor=pointer]:
+            - /url: https://slack.com/cookie-policy
+        - generic [ref=e116]:
+          - button "Cookies Settings" [ref=e117] [cursor=pointer]
+          - button "Accept All Cookies" [active] [ref=e118] [cursor=pointer]

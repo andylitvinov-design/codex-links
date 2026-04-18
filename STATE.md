@@ -1,5 +1,5 @@
 # STATE
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: удерживать API ссылок и команд в простом, стабильном виде без зависимости от локального Mac
-- next step: подключить или проверить GitHub-репозиторий, использовать deploy `codex-links.pages.dev` как основной browser entrypoint, и при необходимости вынести long-range export из текущего retention-окна в отдельный архивный слой
+- current task: держать direct cloud pipeline в одном предсказуемом виде `create -> direct API dispatch -> result -> UI`, без Slack в hot path
+- next step: прогнать локальный и production smoke на direct cloud, bridge fallback и UI retry actions

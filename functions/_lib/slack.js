@@ -142,13 +142,40 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
       }
     ],
     channel_id: channel,
-    thread_ts: threadTs,
     initial_comment: "Attached image from Codex Links request."
   });
 
+  let permalink = "";
+
+  try {
+    const info = await callSlackApi(token, "files.info", null, {
+      file: normalizeText(upload.file_id)
+    });
+    permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
+  } catch {}
+
   return {
-    fileId: normalizeText(upload.file_id)
+    fileId: normalizeText(upload.file_id),
+    permalink,
+    fileName
   };
+}
+
+async function postSlackThreadNudge(token, channel, threadTs, text) {
+  const value = normalizeText(text);
+
+  if (!value) {
+    return null;
+  }
+
+  return callSlackApi(token, "chat.postMessage", {
+    channel,
+    thread_ts: threadTs,
+    text: value,
+    mrkdwn: true,
+    unfurl_links: false,
+    unfurl_media: false
+  });
 }
 
 export async function fetchSlackThreadReplies(env, channel, threadTs) {
@@ -353,7 +380,17 @@ export async function postSlackCommand(env, command, mention) {
 
   if (command?.photo) {
     try {
-      await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo);
+      const uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo);
+      await postSlackThreadNudge(
+        token,
+        resolvedChannel,
+        resolvedThreadTs,
+        [
+          mention ? `${mention} image uploaded in this thread.` : "Image uploaded in this thread.",
+          uploaded?.permalink ? `File: <${uploaded.permalink}|${uploaded.fileName || "uploaded image"}>.` : "",
+          "Acknowledge in this same thread before starting the work."
+        ].filter(Boolean).join(" ")
+      );
     } catch (error) {
       throw withCommandError(
         new Error(error instanceof Error ? error.message : "Slack photo upload failed."),
@@ -458,10 +495,34 @@ function isLikelyProgressOnlySlackReply(text) {
     || /(проверяю|смотрю|изучаю|читаю|готовлю|запускаю|жду|обрабатываю|анализирую|ищу|синхронизирую|открываю|разбираю|дебажу|повторяю|в очереди|в работе|работаю)/i.test(value);
 }
 
+export function isIgnorableSlackReplyText(text) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return true;
+  }
+
+  return (
+    /\bimage uploaded in this thread\b/i.test(value)
+    || /\battached image from codex links request\b/i.test(value)
+    || /\backnowledge in this same thread before starting the work\b/i.test(value)
+    || /\bfile:\s*<https:\/\/[^>]+>\b/i.test(value)
+  );
+}
+
 export function classifySlackReply(text) {
   const value = String(text || "").trim();
   const lower = value.toLowerCase();
   const prUrl = extractGithubPrUrl(value);
+
+  if (isIgnorableSlackReplyText(value)) {
+    return {
+      status: "processing",
+      progressStage: "ignored-helper",
+      prUrl,
+      branchName: ""
+    };
+  }
 
   if (
     /\b(error|failed|failure|unable|blocked|need access|permission denied|could not|can'?t complete)\b/i.test(value)

@@ -102,6 +102,14 @@ function normalizeProjectId(value) {
   return normalizeText(value, 120).toLowerCase();
 }
 
+function normalizeAliases(values, fallback = []) {
+  return [...new Set(
+    [...(Array.isArray(values) ? values : []), ...(Array.isArray(fallback) ? fallback : [])]
+      .map((value) => normalizeProjectId(value))
+      .filter(Boolean)
+  )];
+}
+
 function normalizeProjectEntry(project) {
   if (!project || typeof project !== "object") {
     return null;
@@ -114,6 +122,7 @@ function normalizeProjectEntry(project) {
   const targetRepo = normalizeText(project.targetRepo, 240);
   const targetRepoUrl = normalizeText(project.targetRepoUrl, 400);
   const contextFiles = normalizeContextFiles(project.contextFiles);
+  const aliases = normalizeAliases(project.aliases, [id, label]);
   const visible = normalizeBoolean(project.visible);
   const cloudReady = normalizeBoolean(project.cloudReady) && Boolean(targetRepo);
 
@@ -138,6 +147,7 @@ function normalizeProjectEntry(project) {
     displayLabel: label,
     targetRepo,
     targetRepoUrl,
+    aliases,
     visible,
     cloudReady,
     statusLabel: cloudReady ? "cloud-ready" : "bridge-only"
@@ -157,7 +167,9 @@ export function findProjectTargetById(projectId) {
     return null;
   }
 
-  return getNormalizedManifestProjects().find((project) => project.id === normalizedId) || null;
+  return getNormalizedManifestProjects().find((project) =>
+    project.id === normalizedId || (Array.isArray(project.aliases) && project.aliases.includes(normalizedId))
+  ) || null;
 }
 
 export function resolveProjectDispatchTarget(input = {}) {
@@ -190,7 +202,9 @@ export function resolveProjectDispatchTarget(input = {}) {
   const effectiveWorkspacePath = providedWorkspacePath || project?.workspacePath || "";
   const effectiveContextFiles = providedContextFiles.length ? providedContextFiles : (project?.contextFiles || []);
 
-  if (dispatchMode === "slack-codex-cloud" && !effectiveTargetRepo) {
+  const needsCloudRepo = dispatchMode === "cloud" || dispatchMode === "slack-codex-cloud";
+
+  if (needsCloudRepo && !effectiveTargetRepo) {
     return {
       ok: false,
       error: `Project ${projectLabel} is bridge-only until a manifest-backed GitHub repository is confirmed.`

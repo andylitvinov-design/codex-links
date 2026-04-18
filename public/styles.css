@@ -324,11 +324,37 @@ body {
   background: rgba(255, 255, 255, 0.6);
 }
 
+.bridge-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bridge-status-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
 .bridge-status,
 .bridge-watchdog {
   margin: 0;
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.bridge-reset-button {
+  min-width: 96px;
+  min-height: 38px;
+  flex: 0 0 auto;
+}
+
+.bridge-reset-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .field-label {
@@ -868,6 +894,12 @@ input[type="radio"] {
   color: #355449;
 }
 
+.command-context-latency {
+  margin-top: 2px;
+  color: #5f6f66;
+  font-size: 0.76rem;
+}
+
 .command-fallback-note {
   margin: 0;
   padding: 10px 12px;
@@ -993,6 +1025,8 @@ input[type="radio"] {
 .command-answer-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .command-reply-link {
@@ -1001,6 +1035,18 @@ input[type="radio"] {
   border-radius: 999px;
   border: 1px solid rgba(15, 118, 110, 0.2);
   background: rgba(255, 255, 255, 0.76);
+  color: var(--accent-strong);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.command-retry-link {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  background: rgba(15, 118, 110, 0.08);
   color: var(--accent-strong);
   font: inherit;
   font-weight: 700;

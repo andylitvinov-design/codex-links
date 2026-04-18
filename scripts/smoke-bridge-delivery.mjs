@@ -9,6 +9,7 @@ const TARGET_WORKSPACE_PATH = process.env.CODEX_LINKS_SMOKE_WORKSPACE_PATH || "/
 const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"]
 const clientId = `bridge-smoke-${Date.now()}`
 const text = "bridge delivery-probe: reply with OK only"
+const pollStartedAt = Date.now()
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -67,6 +68,7 @@ async function fetchAssistantReplies(commandId) {
 }
 
 async function postCommand() {
+  const startedAt = Date.now()
   const response = await fetch(`${BASE_URL}/api/commands`, {
     method: "POST",
     headers: {
@@ -94,7 +96,10 @@ async function postCommand() {
   }
 
   assertManifestContext(data.command, "bridge create")
-  return data.command
+  return {
+    command: data.command,
+    createAckMs: Date.now() - startedAt
+  }
 }
 
 async function pollCommand(id) {
@@ -140,8 +145,21 @@ async function pollCommand(id) {
 async function main() {
   console.log(`Submitting bridge smoke command to ${BASE_URL}`)
   const created = await postCommand()
-  console.log(`commandId=${created.id}`)
-  const answered = await pollCommand(created.id)
+  console.log(`commandId=${created.command.id}`)
+  const answered = await pollCommand(created.command.id)
+  const report = {
+    path: "bridge",
+    createAckMs: created.createAckMs,
+    executorVisibleMs: Number(
+      answered?.latencyBreakdown?.dispatchToFirstAckMs
+      ?? answered?.latencyBreakdown?.dispatchStartToBridgeClaimMs
+      ?? null
+    ),
+    firstReplyVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstReplyMs ?? null),
+    doneMs: Date.now() - pollStartedAt,
+    stage: answered?.deliveryStage || answered?.progressStage || answered?.status || "unknown"
+  }
+  console.log(JSON.stringify({ latencyReport: report }, null, 2))
   console.log(`Bridge smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`)
 }
 

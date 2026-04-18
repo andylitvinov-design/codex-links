@@ -1,9 +1,11 @@
 import { BRIDGE_STATUS_STORAGE_KEY } from "./constants.js";
 import {
+  DISPATCH_MODE_CLOUD,
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
   getConfiguredDispatchMode,
   getDispatchModeLabel,
+  isCloudDispatchConfigured,
   isSlackDispatchConfigured
 } from "./dispatch.js";
 import { readCommands } from "./commands.js";
@@ -77,28 +79,28 @@ export async function readBridgeStatus(env) {
   const status = normalizeStatus(raw);
 
   if (!status.dispatchMode || (
-    configuredDispatchMode === DISPATCH_MODE_SLACK
-    && isSlackDispatchConfigured(runtimeConfig)
-    && status.dispatchMode !== DISPATCH_MODE_SLACK
+    configuredDispatchMode === DISPATCH_MODE_CLOUD
+    && isCloudDispatchConfigured(runtimeConfig)
+    && status.dispatchMode === DISPATCH_MODE_LOCAL
   )) {
     status.dispatchMode = configuredDispatchMode;
   }
 
   if (!status.executorLabel || (
-    status.dispatchMode === DISPATCH_MODE_SLACK
-    && status.executorLabel !== getDispatchModeLabel(DISPATCH_MODE_SLACK)
+    status.dispatchMode === DISPATCH_MODE_CLOUD
+    && status.executorLabel !== getDispatchModeLabel(DISPATCH_MODE_CLOUD)
   )) {
     status.executorLabel = getDispatchModeLabel(status.dispatchMode);
   }
 
-  if (!raw && status.dispatchMode === DISPATCH_MODE_SLACK) {
+  if (!raw && (status.dispatchMode === DISPATCH_MODE_CLOUD || status.dispatchMode === DISPATCH_MODE_SLACK)) {
     status.bridgeOnline = true;
     status.state = "idle";
   }
 
-  if (status.dispatchMode === DISPATCH_MODE_LOCAL && !isSlackDispatchConfigured(runtimeConfig)) {
+  if (status.dispatchMode === DISPATCH_MODE_LOCAL && !isCloudDispatchConfigured(runtimeConfig)) {
     status.executorLabel = "Cloud not configured; local bridge fallback";
-    status.lastError = status.lastError || "Missing Slack secrets in Pages project.";
+    status.lastError = status.lastError || "Missing OPENAI_API_KEY in Pages project.";
   }
 
   return status;
@@ -110,7 +112,7 @@ export async function writeBridgeStatus(env, input) {
   const dispatchMode = status.dispatchMode || getConfiguredDispatchMode(runtimeConfig);
   status.dispatchMode = dispatchMode;
   status.executorLabel = status.executorLabel || (
-    dispatchMode === DISPATCH_MODE_LOCAL && !isSlackDispatchConfigured(runtimeConfig)
+    dispatchMode === DISPATCH_MODE_LOCAL && !isCloudDispatchConfigured(runtimeConfig)
       ? "Cloud not configured; local bridge fallback"
       : getDispatchModeLabel(dispatchMode)
   );
@@ -136,7 +138,7 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
   });
   const bridgeOnline = typeof patch.bridgeOnline === "boolean"
     ? patch.bridgeOnline
-    : nextDispatchMode === DISPATCH_MODE_SLACK
+    : nextDispatchMode === DISPATCH_MODE_CLOUD
       ? true
       : (current.bridgeOnline && freshHeartbeat);
   const derivedState = nextDispatchMode === DISPATCH_MODE_LOCAL && localActive.length > 0 && !bridgeOnline
