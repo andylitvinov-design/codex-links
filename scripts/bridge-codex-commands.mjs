@@ -311,9 +311,68 @@ async function materializePhoto(command) {
   }
 }
 
+function buildBridgeContextFilePaths(command) {
+  const workspacePath = String(command?.targetWorkspacePath || "").trim();
+  const contextFiles = Array.isArray(command?.targetContextFiles)
+    ? command.targetContextFiles.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+
+  if (!workspacePath || !contextFiles.length) {
+    return [];
+  }
+
+  return contextFiles.map((file) => join(workspacePath, file));
+}
+
+function buildBridgePrompt(command) {
+  const userRequest = sanitizeBridgeText(command?.text);
+  const projectCategory = String(command?.projectCategory || "").trim() || "other";
+  const projectLabel = String(command?.projectLabel || command?.threadLabel || command?.threadId || "").trim() || "links";
+  const projectId = String(command?.projectId || command?.threadId || "").trim() || "links";
+  const targetRepo = String(command?.targetRepo || "").trim();
+  const targetRepoUrl = String(command?.targetRepoUrl || "").trim();
+  const workspacePath = String(command?.targetWorkspacePath || "").trim();
+  const contextFilePaths = buildBridgeContextFilePaths(command);
+  const contextLine = contextFilePaths.length
+    ? `Start by reading these project context files in order: ${contextFilePaths.join(" -> ")}.`
+    : "Start by reading the selected project context files first.";
+  const photoNote = command?.photo
+    ? [
+        "A photo is attached to this request.",
+        "Inspect the attached image before answering.",
+        "Base your answer on concrete visual evidence from the image, not on guesses.",
+        "If the user's request is about what is shown in the image, explicitly mention the relevant visible detail you read from it.",
+        "If the image is unreadable or missing, say that clearly instead of pretending you saw it."
+      ].join(" ")
+    : "";
+
+  return [
+    "New Codex Links bridge task.",
+    "",
+    `Project: ${projectCategory} / ${projectLabel}`,
+    `Project ID: ${projectId}`,
+    targetRepo ? `Repository: ${targetRepo}` : "",
+    targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
+    workspacePath ? `Workspace path: ${workspacePath}` : "",
+    `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
+    `Command ID: ${String(command?.id || "").trim()}`,
+    "Mode: work only inside the selected project boundary.",
+    "Do not switch to sibling repositories or unrelated workspace folders.",
+    contextLine,
+    "Delivery rule: read the context files before changing code, then respond in the same conversation.",
+    command?.photo
+      ? "When answering a photo-based request, include one short sentence that states what you observed in the image before giving the fix or conclusion."
+      : "",
+    "",
+    "User request:",
+    userRequest || "User sent a photo-only request.",
+    photoNote
+  ].filter(Boolean).join("\n");
+}
+
 function buildInput(command, photoPath) {
   const items = [];
-  const text = sanitizeBridgeText(command?.text);
+  const text = buildBridgePrompt(command);
 
   if (text) {
     items.push({
