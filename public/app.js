@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0642";
+const BUILD_VERSION = "20260418-0649";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -546,6 +546,41 @@ function formatExecutorStatus(status = {}) {
   }
 
   return `Статус: ${selectedModeLabel} selected · backend ${executorLabel} · ${executorState}`;
+}
+
+function formatWatchdogMessage(rawValue) {
+  const raw = String(rawValue || "").trim();
+
+  if (!raw) {
+    return "ошибок нет";
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return raw;
+    }
+
+    const message = String(parsed.message || "").trim();
+    const detail = String(parsed.detail || "").trim();
+
+    if (message && detail) {
+      return `${message} ${detail}`;
+    }
+
+    if (message) {
+      return message;
+    }
+
+    if (detail) {
+      return detail;
+    }
+  } catch {
+    return raw;
+  }
+
+  return raw;
 }
 
 function formatProjectPath(repo) {
@@ -2681,7 +2716,7 @@ function applyDeliverySnapshot(snapshot) {
   }
 
   if (bridgeWatchdogText) {
-    bridgeWatchdogText.textContent = `Watchdog: ${status.lastError || "ошибок нет"}`;
+    bridgeWatchdogText.textContent = `Watchdog: ${formatWatchdogMessage(status.lastError)}`;
   }
 }
 
