@@ -370,7 +370,15 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
     ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
     : ["AGENTS.md", "README.md", "STATE.md"];
   const photoNote = command?.photo
-    ? "\n\nAn image from Codex Links is attached in a file reply inside this same Slack thread. Read the attached image before doing the work. If the image is missing, say so in-thread and wait."
+    ? [
+        "",
+        "",
+        "An image from Codex Links is attached in a file reply inside this same Slack thread.",
+        "Read the attached image before doing the work.",
+        "Base your answer on concrete visual evidence from the image, not on guesses.",
+        "If the task is about what is shown in the image, explicitly mention the relevant visible detail you observed before giving the fix or conclusion.",
+        "If the image is missing or unreadable, say that clearly in-thread instead of pretending you saw it."
+      ].join("\n")
     : "";
   const repoUrlLine = targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "";
   const workspacePathLine = targetWorkspacePath ? `Workspace path: ${targetWorkspacePath}` : "";
@@ -398,6 +406,9 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
     "Immediately reply in this Slack thread with a short acknowledgement before doing the work.",
     "Keep every progress update and the final result in the same Slack thread.",
     "Delivery rule: create a branch and PR, never push directly to main.",
+    command?.photo
+      ? "For photo-based requests, the final answer must start with one short sentence describing what you observed in the image."
+      : "",
     "",
     "User request:",
     normalizeText(command?.text) || "User sent a photo-only request.",
