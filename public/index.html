@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
     <script>
       (function () {
-        var build = "20260418-1532";
+        var build = "20260418-1512";
         var current = new URL(window.location.href);
         var requested = String(current.searchParams.get("v") || "").trim();
         if (requested === build) {
@@ -24,7 +24,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260418-1532" />
+    <link rel="stylesheet" href="/styles.css?v=20260418-1512" />
   </head>
   <body>
     <main class="page">
@@ -37,7 +37,6 @@
               <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
               <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
               <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
-              <button class="button button-secondary queue-reset-button" id="queue-reset-button" type="button">Сброс</button>
             </div>
             <a class="button button-primary header-projects-button" href="/projects.html">Мои проекты</a>
           </div>
@@ -132,6 +131,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260418-1532"></script>
+    <script type="module" src="/app.js?v=20260418-1512"></script>
   </body>
 </html>
