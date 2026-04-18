@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0628";
+const BUILD_VERSION = "20260418-0642";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1978,6 +1978,8 @@ function renderCommands() {
       const command = entry.command;
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
+      const deliveryStatus = getCommandDeliveryStatus(command);
+      const failureMessage = getCommandFailureMessage(command);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
 
       element.innerHTML = `
@@ -1987,6 +1989,8 @@ function renderCommands() {
         </div>
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
+        ${failureMessage ? `<div class="command-delivery-note" data-tone="error">${escapeHtml(failureMessage)}</div>` : ""}
+        ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
         ${repliesMarkup}
       `;
 
@@ -1998,9 +2002,18 @@ function renderCommands() {
     const message = entry.message;
     const linkedCommand = entry.linkedCommand;
     const isAssistant = entry.role === "assistant";
+    const hasPhoto = Boolean(linkedCommand?.photo);
+    const deliveryStatus = isAssistant ? null : getCommandDeliveryStatus(linkedCommand);
+    const failureMessage = isAssistant ? "" : getCommandFailureMessage(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
-      : `<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
+      : `
+        <p>${escapeHtml(entry.text || "")}</p>
+        ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
+        ${failureMessage ? `<div class="command-delivery-note" data-tone="error">${escapeHtml(failureMessage)}</div>` : ""}
+        ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
+        ${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}
+      `;
 
     element.innerHTML = `
       <div class="command-item-top">
