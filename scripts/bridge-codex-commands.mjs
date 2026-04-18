@@ -1157,10 +1157,12 @@ async function getThreadFallbackAssistantText(command, threadId) {
 }
 
 function createAssistantMessage(command, threadId, threadLabel, text, createdAt = new Date().toISOString()) {
+  const commandId = String(command?.id || "").trim();
+
   return {
-    id: createMessageId(threadId, createdAt, text),
+    id: commandId ? `assistant:${commandId}` : createMessageId(threadId, createdAt, text),
     clientId: command.clientId,
-    commandId: command.id,
+    commandId,
     threadId,
     threadLabel,
     role: "assistant",
@@ -1196,16 +1198,15 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
     return;
   }
 
-  for (const command of batchCompleted) {
-    if (command.result === "failed") {
-      await markFailed(command.id, command.errorMessage, command.completedAt);
-      continue;
-    }
-
-    await markAnswered(command.id, command.assistantText, command.completedAt);
-  }
-
   if (!batchMessages.length) {
+    for (const command of batchCompleted) {
+      if (command.result === "failed") {
+        await markFailed(command.id, command.errorMessage, command.completedAt);
+        continue;
+      }
+
+      await markAnswered(command.id, command.assistantText, command.completedAt);
+    }
     return;
   }
 
@@ -1213,6 +1214,19 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
     await syncMessages(batchMessages);
   } catch (error) {
     console.error(`Bridge message sync failed after finalization: ${error instanceof Error ? error.message : String(error)}`);
+    for (const command of batchCompleted) {
+      await markFailed(command.id, "Bridge timed out while saving the assistant reply.", command.completedAt);
+    }
+    return;
+  }
+
+  for (const command of batchCompleted) {
+    if (command.result === "failed") {
+      await markFailed(command.id, command.errorMessage, command.completedAt);
+      continue;
+    }
+
+    await markAnswered(command.id, command.assistantText, command.completedAt);
   }
 }
 
@@ -1386,7 +1400,11 @@ while (true) {
     }
 
     if (!assistantText) {
-      assistantText = "Codex принял команду, но не вернул текст ответа. Я остановил запрос, чтобы очередь не зависала. Повторите запрос ещё раз.";
+      throw new Error(
+        photoPath
+          ? "Bridge photo executor did not return a final answer text."
+          : "Codex did not return a final answer text."
+      );
     }
 
     await updateProgress(command.id, "saving-reply");
