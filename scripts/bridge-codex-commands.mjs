@@ -46,7 +46,9 @@ async function appendBridgeErrorLog(context, error, extra = {}) {
 
   try {
     await writeFile(BRIDGE_ERROR_LOG_PATH, line, { flag: "a" });
-  } catch {}
+  } catch (writeError) {
+    console.error("Failed to write bridge error log", writeError instanceof Error ? writeError.message : String(writeError));
+  }
 }
 
 async function appendBridgeLog(path, level, message, meta = {}) {
@@ -58,7 +60,9 @@ async function appendBridgeLog(path, level, message, meta = {}) {
       message,
       ...meta
     })}\n`, "utf8");
-  } catch {}
+  } catch (writeError) {
+    console.error("Failed to write bridge log", writeError instanceof Error ? writeError.message : String(writeError));
+  }
 }
 
 async function logBridgeInfo(message, meta = {}) {
@@ -301,7 +305,9 @@ async function getLegacyLinksThreadId() {
     if (match?.[1]) {
       return match[1];
     }
-  } catch {}
+  } catch (error) {
+    await appendBridgeErrorLog("getLegacyLinksThreadId.readAutomationToml", error);
+  }
 
   try {
     return await withCodexAppServer(async ({ request }) => {
@@ -522,7 +528,9 @@ function runCodexResume(threadId, prompt, photoPath) {
 
       try {
         result.output = String(await readFile(outputPath, "utf8") || "").trim();
-      } catch {}
+      } catch (error) {
+        await appendBridgeErrorLog("runCodexResume.readOutput", error, { outputPath });
+      }
 
       if (error) {
         reject(new Error(result.stderr || result.stdout || error.message));
@@ -995,7 +1003,12 @@ while (true) {
     if (threadId) {
       try {
         assistantText = await getThreadFallbackAssistantText(command, threadId);
-      } catch {}
+      } catch (error) {
+        await appendBridgeErrorLog("bridgeCommandFailure.threadFallback", error, {
+          commandId: command?.id || "",
+          threadId
+        });
+      }
     }
 
     const completedEntry = {

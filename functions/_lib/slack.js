@@ -199,7 +199,12 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
         file: normalizeText(upload.file_id)
       });
       permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
-    } catch {}
+    } catch (error) {
+      console.error("[codex-links][slack] files.info fallback failed", {
+        fileId: normalizeText(upload.file_id),
+        error: error instanceof Error ? error.message : String(error || "Unknown error")
+      });
+    }
   }
 
   return {
