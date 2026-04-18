@@ -65,3 +65,35 @@ test("runCommandMaintenance marks stale cloud commands as failed", async () => {
   assert.match(updated.errorMessage, /cloud_result_timeout/);
   assert.ok(updated.completedAt);
 });
+
+test("runCommandMaintenance schedules queued cloud fallback commands for dispatch", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-cloud-fallback",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "cloud",
+    requestedExecutor: "bridge",
+    actualExecutor: "bridge",
+    status: "queued",
+    progressStage: "switched-to-cloud",
+    fallbackCount: 1,
+    fallbackApplied: true,
+    fallbackReason: "local bridge stopped heartbeating",
+    targetRepo: "andylitvinov-design/codex-links"
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: false
+  });
+
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.commandsToDispatch, ["cmd-cloud-fallback"]);
+});

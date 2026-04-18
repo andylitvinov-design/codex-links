@@ -1659,14 +1659,17 @@ export async function runCommandMaintenance(env, options = {}) {
 
     if (updated !== previous) {
       changedCount += 1;
+    }
 
-      if (
-        updated.dispatchMode === DISPATCH_MODE_SLACK
-        && updated.status === "queued"
-        && !String(updated.slackChannelId || "").trim()
-      ) {
-        commandsToDispatch.push(updated.id);
-      }
+    if (
+      updated.dispatchMode !== DISPATCH_MODE_LOCAL
+      && updated.status === "queued"
+      && (
+        updated.dispatchMode === DISPATCH_MODE_CLOUD
+        || !String(updated.slackChannelId || "").trim()
+      )
+    ) {
+      commandsToDispatch.push(updated.id);
     }
 
     return updated;
