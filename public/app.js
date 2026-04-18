@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-1458";
+const BUILD_VERSION = "20260418-1512";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1948,8 +1948,7 @@ function renderCommands() {
         if (message.role === "assistant" && (commandId || threadedAssistantMessageIds.has(String(message.id || "").trim()))) {
           return false;
         }
-
-        return !(message.role === "user" && commandId && commandsById.has(commandId));
+        return true;
       })
       .map((message) => ({
         id: `message:${message.id}`,
