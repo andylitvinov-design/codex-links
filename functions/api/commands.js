@@ -172,6 +172,11 @@ function serializeCommand(command, options = {}) {
     deliveryStage: getVisibleDeliveryStage(command),
     latencyBreakdown: buildLatencyBreakdown(command),
     photo,
+    photoAttached: Boolean(command.photoAttached),
+    photoBytesPresent: Boolean(command.photoBytesPresent),
+    photoSeenByBridge: Boolean(command.photoSeenByBridge),
+    photoProcessed: Boolean(command.photoProcessed),
+    photoUnsupportedReason: String(command.photoUnsupportedReason || "").trim(),
     projectId: String(command.projectId || "").trim(),
     projectLabel: String(command.projectLabel || "").trim(),
     projectCategory: String(command.projectCategory || "").trim(),
@@ -1180,7 +1185,14 @@ export async function onRequest(context) {
       id: payload?.id,
       progressStage: payload?.progressStage,
       progressUpdatedAt: payload?.progressUpdatedAt,
-      processingLeaseUntil: payload?.processingLeaseUntil
+      processingLeaseUntil: payload?.processingLeaseUntil,
+      photoAttached: payload?.photoAttached,
+      photoBytesPresent: payload?.photoBytesPresent,
+      photoSeenByBridge: payload?.photoSeenByBridge,
+      photoProcessed: payload?.photoProcessed,
+      photoUnsupportedReason: payload?.photoUnsupportedReason,
+      lastDiagnosticCode: payload?.lastDiagnosticCode,
+      lastDiagnosticDetail: payload?.lastDiagnosticDetail
     });
 
     if (!updated.ok) {

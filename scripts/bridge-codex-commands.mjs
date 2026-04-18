@@ -435,6 +435,24 @@ function isPhotoVisibilityFailure(text) {
   ].some((pattern) => value.includes(pattern));
 }
 
+function getPhotoUnsupportedReason(value) {
+  const text = String(value || "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  if (isPhotoVisibilityFailure(text) || /^image unreadable\.?$/i.test(text)) {
+    return "Bridge attached the image, but Codex could not read visible image content.";
+  }
+
+  if (/unsupported photo format/i.test(text)) {
+    return text;
+  }
+
+  return "";
+}
+
 async function createRetryPhotoVariant(commandId, photoPath) {
   const source = String(photoPath || "").trim();
 
@@ -784,7 +802,7 @@ async function claimNextCommand() {
   return null;
 }
 
-async function updateProgress(commandId, progressStage) {
+async function updateProgress(commandId, progressStage, extras = {}) {
   if (!commandId || !progressStage) {
     return;
   }
@@ -801,7 +819,8 @@ async function updateProgress(commandId, progressStage) {
       id: commandId,
       progressStage,
       progressUpdatedAt: new Date().toISOString(),
-      processingLeaseUntil
+      processingLeaseUntil,
+      ...extras
     })
   }, FETCH_TIMEOUT_MS, "updateProgress");
 
@@ -1110,7 +1129,13 @@ while (true) {
   idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
 
   try {
-    await updateProgress(command.id, "claimed");
+    await updateProgress(command.id, "claimed", command.photo
+      ? {
+          photoAttached: true,
+          photoBytesPresent: Boolean(command.photo.hasDataUrl || command.photo.dataUrl),
+          photoSeenByBridge: true
+        }
+      : {});
 
     const {
       executionThreadId,
@@ -1142,7 +1167,14 @@ while (true) {
       throw new Error(`Command ${command.id} has no CLI-deliverable content.`);
     }
 
-    await updateProgress(command.id, "sending-to-codex");
+    await updateProgress(command.id, "sending-to-codex", photoPath
+      ? {
+          photoAttached: true,
+          photoBytesPresent: true,
+          photoSeenByBridge: true,
+          photoProcessed: true
+        }
+      : {});
     let assistantText = "";
 
     try {
@@ -1223,6 +1255,21 @@ while (true) {
 
     assistantText = stripPromptEcho(assistantText, prompt);
 
+    const photoUnsupportedReason = photoPath ? getPhotoUnsupportedReason(assistantText) : "";
+
+    if (photoUnsupportedReason) {
+      await updateProgress(command.id, "failed", {
+        photoAttached: true,
+        photoBytesPresent: true,
+        photoSeenByBridge: true,
+        photoProcessed: false,
+        photoUnsupportedReason,
+        lastDiagnosticCode: "bridge_photo_unreadable",
+        lastDiagnosticDetail: photoUnsupportedReason
+      });
+      throw new Error(photoUnsupportedReason);
+    }
+
     if (!assistantText) {
       assistantText = "Codex принял команду, но не вернул текст ответа. Я остановил запрос, чтобы очередь не зависала. Повторите запрос ещё раз.";
     }
@@ -1246,6 +1293,22 @@ while (true) {
     idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
   } catch (error) {
     await appendBridgeErrorLog("bridgeCommandFailure", error, { commandId: command?.id || "" });
+    const photoUnsupportedReason = command?.photo ? getPhotoUnsupportedReason(error?.message || "") : "";
+
+    if (photoUnsupportedReason) {
+      try {
+        await updateProgress(command.id, "failed", {
+          photoAttached: true,
+          photoBytesPresent: Boolean(command.photo?.hasDataUrl || command.photo?.dataUrl || command.photoBytesPresent),
+          photoSeenByBridge: true,
+          photoProcessed: false,
+          photoUnsupportedReason,
+          lastDiagnosticCode: "bridge_photo_unreadable",
+          lastDiagnosticDetail: photoUnsupportedReason
+        });
+      } catch {}
+    }
+
     const ackedAt = new Date().toISOString();
     const threadId = (await getResolvedExecutionThread(command, legacyLinksThreadId)).executionThreadId
       || String(command?.threadId || "").trim()
