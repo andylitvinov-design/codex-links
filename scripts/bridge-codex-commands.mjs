@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
@@ -16,6 +16,11 @@ const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
 const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
+const LOG_DIR = `${process.env.HOME || ""}/Library/Logs`;
+const BRIDGE_LOG_PATH = `${LOG_DIR}/codex-links-bridge.log`;
+const BRIDGE_ERROR_LOG_PATH = `${LOG_DIR}/codex-links-bridge.error.log`;
+const FETCH_RETRY_LIMIT = 3;
+const FETCH_RETRY_DELAY_MS = 1200;
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
@@ -23,11 +28,58 @@ if (!token) {
 }
 
 const bridgeRunWatchdog = setTimeout(() => {
+  void appendBridgeErrorLog("bridgeRunWatchdog", new Error(`Bridge run exceeded ${BRIDGE_RUN_TIMEOUT_MS}ms and was aborted.`));
   console.error(`Bridge run exceeded ${BRIDGE_RUN_TIMEOUT_MS}ms and was aborted.`);
   process.exit(1);
 }, BRIDGE_RUN_TIMEOUT_MS);
 
 bridgeRunWatchdog.unref();
+
+async function appendBridgeErrorLog(context, error, extra = {}) {
+  const message = error instanceof Error ? error.stack || error.message : String(error || "Unknown error");
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    context,
+    ...extra,
+    error: message
+  }) + "\n";
+
+  try {
+    await writeFile(BRIDGE_ERROR_LOG_PATH, line, { flag: "a" });
+  } catch {}
+}
+
+async function appendBridgeLog(path, level, message, meta = {}) {
+  try {
+    await mkdir(LOG_DIR, { recursive: true });
+    await appendFile(path, `${JSON.stringify({
+      at: new Date().toISOString(),
+      level,
+      message,
+      ...meta
+    })}\n`, "utf8");
+  } catch {}
+}
+
+async function logBridgeInfo(message, meta = {}) {
+  await appendBridgeLog(BRIDGE_LOG_PATH, "info", message, meta);
+}
+
+async function logBridgeError(message, error, meta = {}) {
+  const details = error instanceof Error
+    ? {
+        errorName: error.name,
+        errorMessage: error.message,
+        stack: error.stack
+      }
+    : {
+        errorMessage: String(error || "Unknown error")
+      };
+  await appendBridgeLog(BRIDGE_ERROR_LOG_PATH, "error", message, {
+    ...meta,
+    ...details
+  });
+}
 
 function getPendingUrl() {
   const url = new URL("/api/commands", baseUrl);
@@ -87,11 +139,11 @@ async function fetchStoredThreads() {
   if (!cachedStoredThreadsPromise) {
     cachedStoredThreadsPromise = (async () => {
       try {
-        const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/api/threads`, {
+        const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/api/threads`, {
           headers: {
             accept: "application/json"
           }
-        });
+        }, FETCH_TIMEOUT_MS, "fetchStoredThreads");
 
         if (!response.ok) {
           throw new Error(`Failed to load stored threads: ${response.status}`);
@@ -213,6 +265,32 @@ async function fetchWithTimeout(resource, init = {}, timeoutMs = FETCH_TIMEOUT_M
     ...init,
     signal: AbortSignal.timeout(timeoutMs)
   });
+}
+
+function isRetryableFetchError(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /fetch failed|ECONNRESET|ETIMEDOUT|timeout|aborted/i.test(message);
+}
+
+async function fetchWithRetry(resource, init = {}, timeoutMs = FETCH_TIMEOUT_MS, context = "fetch") {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= FETCH_RETRY_LIMIT; attempt += 1) {
+    try {
+      return await fetchWithTimeout(resource, init, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      await appendBridgeErrorLog(context, error, { attempt, url: String(resource || "") });
+
+      if (attempt >= FETCH_RETRY_LIMIT || !isRetryableFetchError(error)) {
+        throw error;
+      }
+
+      await sleep(FETCH_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError || new Error(`${context} failed`);
 }
 
 async function getLegacyLinksThreadId() {
@@ -492,11 +570,11 @@ async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC
 }
 
 async function fetchRecentCommands() {
-  const response = await fetchWithTimeout(getPendingUrl(), {
+  const response = await fetchWithRetry(getPendingUrl(), {
     headers: {
       accept: "application/json"
     }
-  });
+  }, FETCH_TIMEOUT_MS, "fetchRecentCommands");
 
   if (!response.ok) {
     throw new Error(`Failed to load pending commands: ${response.status}`);
@@ -507,7 +585,7 @@ async function fetchRecentCommands() {
 }
 
 async function claimNextCommand() {
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -518,7 +596,7 @@ async function claimNextCommand() {
       processorId: "launchd-bridge",
       leaseMs: CLAIM_LEASE_MS
     })
-  });
+  }, FETCH_TIMEOUT_MS, "claimNextCommand");
 
   if (!response.ok) {
     const body = await response.text();
@@ -535,7 +613,7 @@ async function updateProgress(commandId, progressStage) {
   }
 
   const processingLeaseUntil = new Date(Date.now() + LEASE_EXTENSION_MS).toISOString();
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -548,7 +626,7 @@ async function updateProgress(commandId, progressStage) {
       progressUpdatedAt: new Date().toISOString(),
       processingLeaseUntil
     })
-  });
+  }, FETCH_TIMEOUT_MS, "updateProgress");
 
   if (!response.ok) {
     const body = await response.text();
@@ -561,7 +639,7 @@ async function acknowledge(ids) {
     return;
   }
 
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -571,7 +649,7 @@ async function acknowledge(ids) {
       action: "ack",
       ids
     })
-  });
+  }, FETCH_TIMEOUT_MS, "acknowledge");
 
   if (!response.ok) {
     const body = await response.text();
@@ -584,14 +662,14 @@ async function syncMessages(messages) {
     return;
   }
 
-  const response = await fetchWithTimeout(getMessagesUrl(), {
+  const response = await fetchWithRetry(getMessagesUrl(), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-write-token": token
     },
     body: JSON.stringify({ messages })
-  });
+  }, FETCH_TIMEOUT_MS, "syncMessages");
 
   if (!response.ok) {
     const body = await response.text();
@@ -600,14 +678,14 @@ async function syncMessages(messages) {
 }
 
 async function publishBridgeStatus(status) {
-  const response = await fetchWithTimeout(getStatusUrl(), {
+  const response = await fetchWithRetry(getStatusUrl(), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-write-token": token
     },
     body: JSON.stringify({ status })
-  });
+  }, FETCH_TIMEOUT_MS, "publishBridgeStatus");
 
   if (!response.ok) {
     const body = await response.text();
@@ -905,6 +983,7 @@ while (true) {
     await flushCompletedBatch([completedEntry], [syncedMessage]);
     idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
   } catch (error) {
+    await appendBridgeErrorLog("bridgeCommandFailure", error, { commandId: command?.id || "" });
     const ackedAt = new Date().toISOString();
     const threadId = (await getResolvedExecutionThread(command, legacyLinksThreadId)).executionThreadId
       || String(command?.threadId || "").trim()
