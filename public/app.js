@@ -548,6 +548,41 @@ function formatExecutorStatus(status = {}) {
   return `Статус: ${selectedModeLabel} selected · backend ${executorLabel} · ${executorState}`;
 }
 
+function formatWatchdogMessage(rawValue) {
+  const raw = String(rawValue || "").trim();
+
+  if (!raw) {
+    return "ошибок нет";
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return raw;
+    }
+
+    const message = String(parsed.message || "").trim();
+    const detail = String(parsed.detail || "").trim();
+
+    if (message && detail) {
+      return `${message} ${detail}`;
+    }
+
+    if (message) {
+      return message;
+    }
+
+    if (detail) {
+      return detail;
+    }
+  } catch {
+    return raw;
+  }
+
+  return raw;
+}
+
 function formatProjectPath(repo) {
   if (!repo) {
     return "";
@@ -710,16 +745,7 @@ function getSelectedMenuRepoIds() {
 }
 
 function getFilteredMenuOptions() {
-  const activeCategories = new Set(state.activeThreadCategories);
-  const selectedRepoIds = new Set(getSelectedMenuRepoIds());
-
-  return getAllMenuOptions().filter((option) => {
-    if (activeCategories.size && !activeCategories.has(option.category)) {
-      return false;
-    }
-
-    return selectedRepoIds.has(option.id);
-  });
+  return getAllMenuOptions();
 }
 
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
@@ -1352,8 +1378,9 @@ function buildTimelineSignature(items, context = {}) {
       createdAt: entry.createdAt,
       threadId: entry.threadId,
       threadLabel: entry.threadLabel,
-      status: entry.status || "",
-      progressStage: entry.progressStage || "",
+      status: entry.status || entry.command?.status || entry.linkedCommand?.status || "",
+      progressStage: entry.progressStage || entry.command?.progressStage || entry.linkedCommand?.progressStage || "",
+      deliveryStage: entry.command?.deliveryStage || entry.linkedCommand?.deliveryStage || "",
       projectCategory: entry.command?.projectCategory || entry.linkedCommand?.projectCategory || "",
       projectLabel: entry.command?.projectLabel || entry.linkedCommand?.projectLabel || "",
       targetRepo: entry.command?.targetRepo || entry.linkedCommand?.targetRepo || "",
@@ -1792,39 +1819,23 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
-  const deliveryLabel = getCommandDeliveryLabel(linkedCommand);
-  const contextMeta = renderCommandContextMarkup(linkedCommand);
-  const commandMeta = linkedCommand?.branchName
-    ? `<p class="command-answer-meta">Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
-    : "";
-  const prMeta = linkedCommand?.prUrl
-    ? `<p class="command-answer-meta"><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
-    : "";
+  const title = linkedCommand?.threadLabel
+    ? `Ответ Codex · ${linkedCommand.threadLabel}`
+    : getCommandAnswerTitle(linkedCommand);
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
-        <span class="command-answer-title">${escapeHtml(getCommandAnswerTitle(linkedCommand))}</span>
-        <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
+        <span class="command-answer-title">${escapeHtml(title)}</span>
       </summary>
       <div class="command-answer-body">
-        ${contextMeta}
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
-        ${prMeta}
-        ${commandMeta}
-        <div class="command-answer-actions">
-          <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
-            Ответить
-          </button>
-        </div>
       </div>
     </details>
   `;
 }
 
 function bindAssistantReplyInteractions(container, replies) {
-  const normalizedReplies = Array.isArray(replies) ? replies : [];
-
   container.querySelectorAll(".command-answer").forEach((details) => {
     const detailsId = String(details.dataset.entryId || "").trim();
 
@@ -1847,40 +1858,6 @@ function bindAssistantReplyInteractions(container, replies) {
     });
   });
 
-  container.querySelectorAll(".command-reply-link").forEach((replyLink) => {
-    replyLink.addEventListener("click", () => {
-      const threadId = String(replyLink.dataset.threadId || "").trim();
-      const reply = normalizedReplies.find((entry) => String(entry?.threadId || "").trim() === threadId) || normalizedReplies[0];
-      const didActivate = activateReplyThread(threadId);
-
-      if (!didActivate) {
-        setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
-        return;
-      }
-
-      if (commandInput) {
-        commandInput.value = "";
-      }
-
-      commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
-      window.setTimeout(() => {
-        commandInput.focus();
-      }, 180);
-
-      setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, reply?.threadLabel || "")}`);
-    });
-  });
-
-  container.querySelectorAll(".command-retry-link").forEach((button) => {
-    button.addEventListener("click", () => {
-      const commandId = String(button.dataset.commandId || "").trim();
-      const executor = String(button.dataset.executor || "").trim() === "cloud" ? "cloud" : "bridge";
-
-      retryCommandWithExecutor(commandId, executor).catch((error) => {
-        setCommandStatusMessage(String(error?.message || "Не удалось повторить сообщение."), { tone: "error" });
-      });
-    });
-  });
 }
 
 function renderCommands() {
@@ -2055,41 +2032,22 @@ function renderCommands() {
 
     if (entry.kind === "command") {
       const command = entry.command;
-      const failureMessage = getCommandFailureMessage(command);
-      const deliveryStatus = getCommandDeliveryStatus(command);
-      const contextMarkup = renderCommandContextMarkup(command);
-      const latencyMarkup = renderCommandLatencyMarkup(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
-      const showRetryActions = canRetryCommand(command);
+      const deliveryStatus = getCommandDeliveryStatus(command);
+      const failureMessage = getCommandFailureMessage(command);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
-      const retryActionsMarkup = showRetryActions ? `
-        <div class="command-answer-actions">
-          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="bridge">
-            Повторить через bridge
-          </button>
-          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="cloud">
-            Повторить через cloud
-          </button>
-        </div>
-      ` : "";
 
       element.innerHTML = `
         <div class="command-item-top">
           <strong>Вы</strong>
           <time>${formatDate(entry.createdAt)}</time>
         </div>
-        ${contextMarkup}
-        ${latencyMarkup}
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
-        ${failureMessage ? "" : ""}
+        ${failureMessage ? `<div class="command-delivery-note" data-tone="error">${escapeHtml(failureMessage)}</div>` : ""}
         ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
-        ${retryActionsMarkup}
         ${repliesMarkup}
-        <div class="command-item-top">
-          <span>${formatCommandStage(command)}</span>
-        </div>
       `;
 
       bindAssistantReplyInteractions(element, entry.replies);
@@ -2100,13 +2058,18 @@ function renderCommands() {
     const message = entry.message;
     const linkedCommand = entry.linkedCommand;
     const isAssistant = entry.role === "assistant";
-    const statusLabel = isAssistant
-      ? (linkedCommand?.prUrl ? "PR готов" : "Ответ получен")
-      : "Сообщение в истории";
-    const contextMarkup = renderCommandContextMarkup(linkedCommand);
+    const hasPhoto = Boolean(linkedCommand?.photo);
+    const deliveryStatus = isAssistant ? null : getCommandDeliveryStatus(linkedCommand);
+    const failureMessage = isAssistant ? "" : getCommandFailureMessage(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
-      : `${contextMarkup}<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
+      : `
+        <p>${escapeHtml(entry.text || "")}</p>
+        ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
+        ${failureMessage ? `<div class="command-delivery-note" data-tone="error">${escapeHtml(failureMessage)}</div>` : ""}
+        ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
+        ${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}
+      `;
 
     element.innerHTML = `
       <div class="command-item-top">
@@ -2114,9 +2077,6 @@ function renderCommands() {
         <time>${formatDate(entry.createdAt)}</time>
       </div>
       ${body}
-      <div class="command-item-top">
-        <span>${statusLabel}</span>
-      </div>
     `;
 
     bindAssistantReplyInteractions(element, isAssistant ? [entry] : entry.replies);
@@ -2190,7 +2150,7 @@ function joinVoiceText(baseText, nextText) {
   return `${left}${/[\s\n]$/.test(baseText) ? "" : " "}${right}`;
 }
 
-function stopVoiceRecognition(shouldClearDraft = false) {
+function stopVoiceRecognition() {
   const recognition = state.voiceRecognition;
 
   if (!recognition) {
@@ -2200,11 +2160,6 @@ function stopVoiceRecognition(shouldClearDraft = false) {
   }
 
   state.voiceRecognitionActive = false;
-
-  if (shouldClearDraft) {
-    state.voiceTranscriptBase = String(commandInput?.value || "");
-    state.voiceDraftText = "";
-  }
 
   try {
     recognition.stop();
@@ -2233,7 +2188,7 @@ function ensureVoiceRecognition() {
     state.voiceHadResult = false;
     state.voiceTranscriptBase = String(commandInput?.value || "");
     state.voiceDraftText = "";
-    setVoiceStatusMessage("Слушаю… говорите.", "");
+    setVoiceStatusMessage("Слушаю… говорите.");
     syncVoiceButton();
   });
 
@@ -2257,11 +2212,10 @@ function ensureVoiceRecognition() {
       commandInput.value = joinVoiceText(state.voiceTranscriptBase, transcript);
     }
 
+    const lastResult = event.results[event.results.length - 1];
     setVoiceStatusMessage(
-      event.results[event.results.length - 1]?.isFinal
-        ? "Голос добавлен в сообщение."
-        : "Распознаю речь…",
-      event.results[event.results.length - 1]?.isFinal ? "success" : ""
+      lastResult?.isFinal ? "Голос добавлен в сообщение." : "Распознаю речь…",
+      lastResult?.isFinal ? "success" : ""
     );
   });
 
@@ -2298,7 +2252,7 @@ function ensureVoiceRecognition() {
     syncVoiceButton();
 
     if (!state.voiceHadResult && !String(state.voiceDraftText || "").trim()) {
-      setVoiceStatusMessage("Диктовка остановлена.", "");
+      setVoiceStatusMessage("Диктовка остановлена.");
       return;
     }
 
@@ -2326,7 +2280,7 @@ function toggleVoiceRecognition() {
 
   if (state.voiceRecognitionActive) {
     stopVoiceRecognition();
-    setVoiceStatusMessage("Останавливаю диктовку…", "");
+    setVoiceStatusMessage("Останавливаю диктовку…");
     return;
   }
 
@@ -2553,6 +2507,30 @@ function renderCommandThreads() {
   renderCommands();
 }
 
+async function fetchJsonWithRetry(resource, init = {}, label = "data") {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(resource, init);
+
+      if (!response.ok) {
+        throw new Error(`Failed to load ${label}: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
+      }
+    }
+  }
+
+  throw lastError || new Error(`Failed to load ${label}.`);
+}
+
 async function fetchBridgeStatus() {
   const response = await fetch(`/api/status?_=${Date.now()}`, {
     cache: "no-store",
@@ -2759,7 +2737,7 @@ function applyDeliverySnapshot(snapshot) {
   }
 
   if (bridgeWatchdogText) {
-    bridgeWatchdogText.textContent = `Watchdog: ${status.lastError || "ошибок нет"}`;
+    bridgeWatchdogText.textContent = `Watchdog: ${formatWatchdogMessage(status.lastError)}`;
   }
 }
 
@@ -2808,18 +2786,12 @@ async function persistCommandVisible(commandId) {
 }
 
 async function fetchMenuRepos() {
-  const response = await fetch(`/api/repos?mode=cloud&_=${Date.now()}`, {
+  const data = await fetchJsonWithRetry(`/api/repos?mode=cloud&_=${Date.now()}`, {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load repos: ${response.status}`);
-  }
-
-  const data = await response.json();
+  }, "repos");
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
@@ -3195,7 +3167,6 @@ async function boot() {
     !refreshButton ||
     !dispatchModeBridgeButton ||
     !dispatchModeCloudButton ||
-    !threadSettingsToggle ||
     !threadSettingsSearch ||
     !threadSettingsSave ||
     !threadSettingsSelectAll ||
@@ -3223,7 +3194,10 @@ async function boot() {
 
   clearSelectedPhoto();
   syncVoiceButton();
-  setVoiceStatusMessage(SpeechRecognitionCtor ? "" : "Голосовой ввод доступен не во всех браузерах.", SpeechRecognitionCtor ? "" : "error");
+  setVoiceStatusMessage(
+    SpeechRecognitionCtor ? "" : "Голосовой ввод доступен не во всех браузерах.",
+    SpeechRecognitionCtor ? "" : "error"
+  );
   bindEvents();
 
   if (await ensureLatestClient()) {

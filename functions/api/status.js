@@ -1,4 +1,4 @@
-import { handleOptions, json } from "../_lib/http.js";
+import { handleOptions, json, jsonStorageError } from "../_lib/http.js";
 import { deriveBridgeStatusFromCommands, readBridgeStatus, writeBridgeStatus } from "../_lib/status.js";
 import { isAuthorized } from "../_lib/security.js";
 
@@ -11,8 +11,12 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
-    const status = await deriveBridgeStatusFromCommands(env);
-    return json({ status });
+    try {
+      const status = await deriveBridgeStatusFromCommands(env);
+      return json({ status });
+    } catch (error) {
+      return jsonStorageError(error, "Storage is rate limited. Bridge status is temporarily unavailable.");
+    }
   }
 
   if (request.method !== "POST") {
@@ -31,10 +35,14 @@ export async function onRequest(context) {
     return json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const current = await readBridgeStatus(env);
-  const status = await writeBridgeStatus(env, {
-    ...current,
-    ...(payload?.status || {})
-  });
-  return json({ ok: true, status }, { status: 201 });
+  try {
+    const current = await readBridgeStatus(env);
+    const status = await writeBridgeStatus(env, {
+      ...current,
+      ...(payload?.status || {})
+    });
+    return json({ ok: true, status }, { status: 201 });
+  } catch (error) {
+    return jsonStorageError(error, "Storage is rate limited. Bridge status update failed.");
+  }
 }

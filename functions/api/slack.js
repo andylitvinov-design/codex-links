@@ -5,6 +5,7 @@ import { DISPATCH_MODE_SLACK, getDispatchModeLabel } from "../_lib/dispatch.js";
 import {
   classifySlackReply,
   extractSlackMessageText,
+  isIgnorableSlackReplyText,
   isLikelyCodexSlackActor,
   isSlackMessageEvent,
   verifySlackRequestSignature
@@ -14,6 +15,13 @@ import { readRuntimeConfig } from "../_lib/config.js";
 import { stringifyCommandError } from "../_lib/command-debug.js";
 
 const RECENT_COMMAND_WINDOW_MS = 30 * 60 * 1000;
+
+function logSlackIngestError(context, error, extra = {}) {
+  console.error("[codex-links][slack]", context, {
+    ...extra,
+    error: error instanceof Error ? error.message : String(error || "Unknown error")
+  });
+}
 
 function shouldTrackSlackEvent(event) {
   const channel = String(event?.channel || "").trim();
@@ -159,6 +167,18 @@ async function ingestSlackReply(env, command, event, options = {}) {
   const replyThreadTs = String(event?.thread_ts || "").trim();
   const effectiveThreadTs = replyThreadTs || String(command.slackThreadTs || command.slackMessageTs || "").trim();
   const text = extractSlackMessageText(event);
+
+  if (isIgnorableSlackReplyText(text)) {
+    return {
+      ok: true,
+      command,
+      classification: {
+        status: String(command.status || "").trim().toLowerCase() || "processing",
+        progressStage: String(command.progressStage || "").trim() || "processing"
+      }
+    };
+  }
+
   const classification = classifySlackReply(text);
   const progressStage = options.progressStage || "slack-reply-received";
 
@@ -284,7 +304,9 @@ export async function onRequest(context) {
           }
         }
       }
-    } catch {}
+    } catch (error) {
+      logSlackIngestError("signatureFailureDiagnostic", error);
+    }
 
     return json({ error: "Unauthorized." }, { status: 401 });
   }

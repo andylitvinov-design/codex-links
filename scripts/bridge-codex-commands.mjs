@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
@@ -16,6 +16,12 @@ const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
 const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
+const LOG_DIR = `${process.env.HOME || ""}/Library/Logs`;
+const BRIDGE_LOG_PATH = `${LOG_DIR}/codex-links-bridge.log`;
+const BRIDGE_ERROR_LOG_PATH = `${LOG_DIR}/codex-links-bridge.error.log`;
+const FETCH_RETRY_LIMIT = 3;
+const FETCH_RETRY_DELAY_MS = 1200;
+const OCR_TIMEOUT_MS = 20 * 1000;
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
@@ -23,11 +29,62 @@ if (!token) {
 }
 
 const bridgeRunWatchdog = setTimeout(() => {
+  void appendBridgeErrorLog("bridgeRunWatchdog", new Error(`Bridge run exceeded ${BRIDGE_RUN_TIMEOUT_MS}ms and was aborted.`));
   console.error(`Bridge run exceeded ${BRIDGE_RUN_TIMEOUT_MS}ms and was aborted.`);
   process.exit(1);
 }, BRIDGE_RUN_TIMEOUT_MS);
 
 bridgeRunWatchdog.unref();
+
+async function appendBridgeErrorLog(context, error, extra = {}) {
+  const message = error instanceof Error ? error.stack || error.message : String(error || "Unknown error");
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    context,
+    ...extra,
+    error: message
+  }) + "\n";
+
+  try {
+    await writeFile(BRIDGE_ERROR_LOG_PATH, line, { flag: "a" });
+  } catch (writeError) {
+    console.error("Failed to write bridge error log", writeError instanceof Error ? writeError.message : String(writeError));
+  }
+}
+
+async function appendBridgeLog(path, level, message, meta = {}) {
+  try {
+    await mkdir(LOG_DIR, { recursive: true });
+    await appendFile(path, `${JSON.stringify({
+      at: new Date().toISOString(),
+      level,
+      message,
+      ...meta
+    })}\n`, "utf8");
+  } catch (writeError) {
+    console.error("Failed to write bridge log", writeError instanceof Error ? writeError.message : String(writeError));
+  }
+}
+
+async function logBridgeInfo(message, meta = {}) {
+  await appendBridgeLog(BRIDGE_LOG_PATH, "info", message, meta);
+}
+
+async function logBridgeError(message, error, meta = {}) {
+  const details = error instanceof Error
+    ? {
+        errorName: error.name,
+        errorMessage: error.message,
+        stack: error.stack
+      }
+    : {
+        errorMessage: String(error || "Unknown error")
+      };
+  await appendBridgeLog(BRIDGE_ERROR_LOG_PATH, "error", message, {
+    ...meta,
+    ...details
+  });
+}
 
 function getPendingUrl() {
   const url = new URL("/api/commands", baseUrl);
@@ -73,11 +130,83 @@ function execFileAsync(file, args) {
   });
 }
 
+function execFileWithOptionsAsync(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(String(stderr || error.message || `Failed to run ${file}`)));
+        return;
+      }
+
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
 function isRealThreadId(value) {
   return /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(String(value || "").trim());
 }
 
-function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
+function normalizeThreadLookupValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+let cachedStoredThreadsPromise = null;
+
+async function fetchStoredThreads() {
+  if (!cachedStoredThreadsPromise) {
+    cachedStoredThreadsPromise = (async () => {
+      try {
+        const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/api/threads`, {
+          headers: {
+            accept: "application/json"
+          }
+        }, FETCH_TIMEOUT_MS, "fetchStoredThreads");
+
+        if (!response.ok) {
+          throw new Error(`Failed to load stored threads: ${response.status}`);
+        }
+
+        const data = await response.json().catch(() => ({}));
+        return Array.isArray(data?.threads) ? data.threads : [];
+      } catch {
+        return [];
+      }
+    })();
+  }
+
+  return cachedStoredThreadsPromise;
+}
+
+async function findStoredProjectThreadId(command) {
+  const projectId = normalizeThreadLookupValue(command?.projectId || command?.threadId);
+  const projectLabel = normalizeThreadLookupValue(command?.projectLabel || command?.threadLabel);
+
+  if (!projectId && !projectLabel) {
+    return "";
+  }
+
+  const threads = await fetchStoredThreads();
+  const candidates = threads
+    .filter((thread) => isRealThreadId(thread?.id))
+    .filter((thread) => {
+      const category = normalizeThreadLookupValue(thread?.category);
+      const displayLabel = normalizeThreadLookupValue(thread?.displayLabel);
+      const label = normalizeThreadLookupValue(thread?.label);
+
+      return (
+        (projectId && (category === projectId || displayLabel.startsWith(`${projectId} /`) || label === projectId))
+        || (projectLabel && (category === projectLabel || displayLabel.startsWith(`${projectLabel} /`) || label === projectLabel))
+      );
+    })
+    .sort((left, right) =>
+      Number(right?.updatedAt || right?.createdAt || 0) - Number(left?.updatedAt || left?.createdAt || 0)
+    );
+
+  return String(candidates[0]?.id || "").trim();
+}
+
+async function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
   const sourceThreadId = String(command?.threadId || "").trim();
   const sourceThreadLabel = String(command?.threadLabel || "").trim();
   const fallbackThreadId = String(command?.fallbackThreadId || "").trim();
@@ -96,6 +225,8 @@ function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
       || threadLabel.toLowerCase() === "links"
     ) {
       threadId = legacyLinksThreadId || "";
+    } else {
+      threadId = await findStoredProjectThreadId(command);
     }
   }
 
@@ -154,6 +285,32 @@ async function fetchWithTimeout(resource, init = {}, timeoutMs = FETCH_TIMEOUT_M
   });
 }
 
+function isRetryableFetchError(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /fetch failed|ECONNRESET|ETIMEDOUT|timeout|aborted/i.test(message);
+}
+
+async function fetchWithRetry(resource, init = {}, timeoutMs = FETCH_TIMEOUT_MS, context = "fetch") {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= FETCH_RETRY_LIMIT; attempt += 1) {
+    try {
+      return await fetchWithTimeout(resource, init, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      await appendBridgeErrorLog(context, error, { attempt, url: String(resource || "") });
+
+      if (attempt >= FETCH_RETRY_LIMIT || !isRetryableFetchError(error)) {
+        throw error;
+      }
+
+      await sleep(FETCH_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError || new Error(`${context} failed`);
+}
+
 async function getLegacyLinksThreadId() {
   try {
     const toml = await readFile(`${process.env.HOME}/.codex/automations/links-inbox/automation.toml`, "utf8");
@@ -162,7 +319,9 @@ async function getLegacyLinksThreadId() {
     if (match?.[1]) {
       return match[1];
     }
-  } catch {}
+  } catch (error) {
+    await appendBridgeErrorLog("getLegacyLinksThreadId.readAutomationToml", error);
+  }
 
   try {
     return await withCodexAppServer(async ({ request }) => {
@@ -250,9 +409,217 @@ async function materializePhoto(command) {
   }
 }
 
-function buildInput(command, photoPath) {
+function isPhotoVisibilityFailure(text) {
+  const value = String(text || "").trim().toLowerCase();
+
+  if (!value) {
+    return false;
+  }
+
+  return [
+    "не вижу",
+    "не видно",
+    "не могу увидеть",
+    "не могу прочитать",
+    "изображение не видно",
+    "изображение недоступно",
+    "photo is not visible",
+    "image is not visible",
+    "image is missing",
+    "image is unreadable",
+    "can't see the image",
+    "cannot see the image",
+    "cannot read the image",
+    "unable to view the image",
+    "unable to read the image"
+  ].some((pattern) => value.includes(pattern));
+}
+
+function getPhotoUnsupportedReason(value) {
+  const text = String(value || "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  if (isPhotoVisibilityFailure(text) || /^image unreadable\.?$/i.test(text)) {
+    return "Bridge attached the image, but Codex could not read visible image content.";
+  }
+
+  if (/unsupported photo format/i.test(text)) {
+    return text;
+  }
+
+  return "";
+}
+
+async function createRetryPhotoVariant(commandId, photoPath) {
+  const source = String(photoPath || "").trim();
+
+  if (!source) {
+    return null;
+  }
+
+  const retryPath = join(tmpdir(), "codex-links-bridge", `${commandId}.retry.jpg`);
+
+  try {
+    await execFileAsync("sips", ["-s", "format", "jpeg", "-Z", "2400", source, "--out", retryPath]);
+    return retryPath;
+  } catch (error) {
+    await appendBridgeErrorLog("photoRetryVariant", error, {
+      commandId,
+      source
+    });
+    return null;
+  }
+}
+
+async function extractPhotoOcrText(commandId, photoPath) {
+  const source = String(photoPath || "").trim();
+
+  if (!source) {
+    return "";
+  }
+
+  try {
+    const scriptPath = join(process.cwd(), "scripts", "ocr-image.swift");
+    const result = await execFileWithOptionsAsync("xcrun", ["swift", scriptPath, source], {
+      cwd: process.cwd(),
+      timeout: OCR_TIMEOUT_MS,
+      maxBuffer: 2 * 1024 * 1024
+    });
+    return String(result?.stdout || "").trim().slice(0, 4000);
+  } catch (error) {
+    await appendBridgeErrorLog("photoOcr", error, {
+      commandId,
+      source
+    });
+    return "";
+  }
+}
+
+function buildBridgeContextFilePaths(command) {
+  const workspacePath = String(command?.targetWorkspacePath || "").trim();
+  const contextFiles = Array.isArray(command?.targetContextFiles)
+    ? command.targetContextFiles.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+
+  if (!workspacePath || !contextFiles.length) {
+    return [];
+  }
+
+  return contextFiles.map((file) => join(workspacePath, file));
+}
+
+function buildBridgePrompt(command, ocrText = "") {
+  const userRequest = sanitizeBridgeText(command?.text);
+  const projectCategory = String(command?.projectCategory || "").trim() || "other";
+  const projectLabel = String(command?.projectLabel || command?.threadLabel || command?.threadId || "").trim() || "links";
+  const projectId = String(command?.projectId || command?.threadId || "").trim() || "links";
+  const targetRepo = String(command?.targetRepo || "").trim();
+  const targetRepoUrl = String(command?.targetRepoUrl || "").trim();
+  const workspacePath = String(command?.targetWorkspacePath || "").trim();
+  const contextFilePaths = buildBridgeContextFilePaths(command);
+  const contextLine = contextFilePaths.length
+    ? `Start by reading these project context files in order: ${contextFilePaths.join(" -> ")}.`
+    : "Start by reading the selected project context files first.";
+  if (command?.photo) {
+    return [
+      "Codex Links photo task.",
+      `Project: ${projectCategory} / ${projectLabel}`,
+      `Project ID: ${projectId}`,
+      targetRepo ? `Repository: ${targetRepo}` : "",
+      targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
+      workspacePath ? `Workspace path: ${workspacePath}` : "",
+      `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
+      `Command ID: ${String(command?.id || "").trim()}`,
+      "Inspect the attached image first.",
+      "Answer from visible evidence in the image only.",
+      ocrText
+        ? "OCR helper text is included below. Use it only as a hint and verify it against the visible image."
+        : "",
+      "Start with one short sentence beginning with 'Observed:' that describes the key visible UI element or text.",
+      "Then answer the user's question in Russian in at most 4 short sentences.",
+      "Only say the image is missing or unreadable if it is truly not visible to you.",
+      ocrText ? "" : "",
+      ocrText ? "OCR hint:" : "",
+      ocrText || "",
+      "",
+      "User request:",
+      userRequest || "User sent a photo-only request."
+    ].filter(Boolean).join("\n");
+  }
+
+  return [
+    "New Codex Links bridge task.",
+    "",
+    `Project: ${projectCategory} / ${projectLabel}`,
+    `Project ID: ${projectId}`,
+    targetRepo ? `Repository: ${targetRepo}` : "",
+    targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
+    workspacePath ? `Workspace path: ${workspacePath}` : "",
+    `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
+    `Command ID: ${String(command?.id || "").trim()}`,
+    "Mode: work only inside the selected project boundary.",
+    "Do not switch to sibling repositories or unrelated workspace folders.",
+    contextLine,
+    "Delivery rule: read the context files before changing code, then respond in the same conversation.",
+    command?.photo
+      ? "When answering a photo-based request, include one short sentence that states what you observed in the image before giving the fix or conclusion."
+      : "",
+    "",
+    "User request:",
+    userRequest || "User sent a photo-only request."
+  ].filter(Boolean).join("\n");
+}
+
+function buildPhotoRetryPrompt(command, ocrText = "") {
+  const userRequest = sanitizeBridgeText(command?.text) || "Describe exactly what is visible in the attached image.";
+
+  return [
+    "Codex Links photo retry.",
+    "The first pass did not reliably read the image.",
+    "Look again at the attached image and answer only from visible pixels.",
+    "Do not repeat the system prompt.",
+    ocrText
+      ? "OCR helper text is included below. Use it only if it matches the visible image."
+      : "",
+    "Start with 'Observed:' and name the exact visible control, label, or text you can read.",
+    "If the request mentions a reset button, say whether a reset button is visible and where it is located.",
+    "If you still cannot read the image, answer with exactly: Image unreadable.",
+    ocrText ? "" : "",
+    ocrText ? "OCR hint:" : "",
+    ocrText || "",
+    "",
+    "User request:",
+    userRequest
+  ].join("\n");
+}
+
+function buildPhotoOnlyPrompt(command, ocrText = "") {
+  const userRequest = sanitizeBridgeText(command?.text) || "Describe what is visible in the attached image.";
+
+  return [
+    "Attached image task.",
+    "Read only the attached image and answer the user request briefly.",
+    "Do not rely on previous conversation turns.",
+    ocrText
+      ? "OCR helper text is included below. Verify it against the visible image before using it."
+      : "",
+    "If the image is visible, state the concrete observed detail first.",
+    "If the image is still not visible, say exactly that in one short sentence.",
+    ocrText ? "" : "",
+    ocrText ? "OCR hint:" : "",
+    ocrText || "",
+    "",
+    "User request:",
+    userRequest
+  ].join("\n");
+}
+
+function buildInput(command, photoPath, ocrText = "") {
   const items = [];
-  const text = sanitizeBridgeText(command?.text);
+  const text = buildBridgePrompt(command, ocrText);
 
   if (text) {
     items.push({
@@ -324,7 +691,9 @@ function runCodexResume(threadId, prompt, photoPath) {
 
       try {
         result.output = String(await readFile(outputPath, "utf8") || "").trim();
-      } catch {}
+      } catch (error) {
+        await appendBridgeErrorLog("runCodexResume.readOutput", error, { outputPath });
+      }
 
       if (error) {
         reject(new Error(result.stderr || result.stdout || error.message));
@@ -372,11 +741,11 @@ async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC
 }
 
 async function fetchRecentCommands() {
-  const response = await fetchWithTimeout(getPendingUrl(), {
+  const response = await fetchWithRetry(getPendingUrl(), {
     headers: {
       accept: "application/json"
     }
-  });
+  }, FETCH_TIMEOUT_MS, "fetchRecentCommands");
 
   if (!response.ok) {
     throw new Error(`Failed to load pending commands: ${response.status}`);
@@ -387,35 +756,59 @@ async function fetchRecentCommands() {
 }
 
 async function claimNextCommand() {
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-write-token": token
-    },
-    body: JSON.stringify({
-      action: "claim",
-      processorId: "launchd-bridge",
-      leaseMs: CLAIM_LEASE_MS
-    })
-  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-write-token": token
+      },
+      body: JSON.stringify({
+        action: "claim",
+        processorId: "launchd-bridge",
+        leaseMs: CLAIM_LEASE_MS
+      })
+    }, FETCH_TIMEOUT_MS, "claimNextCommand");
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to claim command: ${response.status} ${body}`);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Failed to claim command: ${response.status} ${body}`);
+    }
+
+    const data = await response.json();
+
+    if (data.command) {
+      return data.command;
+    }
+
+    const queuedLocalCount = Number(data?.claimDiagnostics?.queuedLocalCount || 0);
+    const processingLocalCount = Number(data?.claimDiagnostics?.processingLocalCount || 0);
+
+    if (queuedLocalCount > 0) {
+      await appendBridgeErrorLog("claimNextCommand.nullWithQueued", new Error("Claim returned null while queued local commands exist."), {
+        attempt,
+        queuedLocalCount,
+        processingLocalCount,
+        queuedLocalIds: Array.isArray(data?.claimDiagnostics?.queuedLocalIds) ? data.claimDiagnostics.queuedLocalIds.join(",") : "",
+        processingLocalIds: Array.isArray(data?.claimDiagnostics?.processingLocalIds) ? data.claimDiagnostics.processingLocalIds.join(",") : ""
+      });
+      await sleep(350);
+      continue;
+    }
+
+    return null;
   }
 
-  const data = await response.json();
-  return data.command || null;
+  return null;
 }
 
-async function updateProgress(commandId, progressStage) {
+async function updateProgress(commandId, progressStage, extras = {}) {
   if (!commandId || !progressStage) {
     return;
   }
 
   const processingLeaseUntil = new Date(Date.now() + LEASE_EXTENSION_MS).toISOString();
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -426,9 +819,10 @@ async function updateProgress(commandId, progressStage) {
       id: commandId,
       progressStage,
       progressUpdatedAt: new Date().toISOString(),
-      processingLeaseUntil
+      processingLeaseUntil,
+      ...extras
     })
-  });
+  }, FETCH_TIMEOUT_MS, "updateProgress");
 
   if (!response.ok) {
     const body = await response.text();
@@ -441,7 +835,7 @@ async function acknowledge(ids) {
     return;
   }
 
-  const response = await fetchWithTimeout(new URL("/api/commands", baseUrl), {
+  const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -451,7 +845,7 @@ async function acknowledge(ids) {
       action: "ack",
       ids
     })
-  });
+  }, FETCH_TIMEOUT_MS, "acknowledge");
 
   if (!response.ok) {
     const body = await response.text();
@@ -519,14 +913,14 @@ async function syncMessages(messages) {
     return;
   }
 
-  const response = await fetchWithTimeout(getMessagesUrl(), {
+  const response = await fetchWithRetry(getMessagesUrl(), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-write-token": token
     },
     body: JSON.stringify({ messages })
-  });
+  }, FETCH_TIMEOUT_MS, "syncMessages");
 
   if (!response.ok) {
     const body = await response.text();
@@ -535,14 +929,14 @@ async function syncMessages(messages) {
 }
 
 async function publishBridgeStatus(status) {
-  const response = await fetchWithTimeout(getStatusUrl(), {
+  const response = await fetchWithRetry(getStatusUrl(), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-write-token": token
     },
     body: JSON.stringify({ status })
-  });
+  }, FETCH_TIMEOUT_MS, "publishBridgeStatus");
 
   if (!response.ok) {
     const body = await response.text();
@@ -557,14 +951,43 @@ function createMessageId(threadId, timestamp, text) {
     .digest("hex");
 }
 
-function getImmediateAssistantText(result) {
-  const output = String(result?.output || "").trim();
+function stripPromptEcho(text, prompt = "") {
+  const value = String(text || "").trim();
+  const promptText = String(prompt || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  if (promptText) {
+    if (value === promptText) {
+      return "";
+    }
+
+    if (value.startsWith(promptText)) {
+      return value.slice(promptText.length).trim();
+    }
+  }
+
+  if (
+    value.startsWith("New Codex Links bridge task.")
+    || value.startsWith("Codex Links photo task.")
+    || value.startsWith("Codex Links photo retry.")
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
+function getImmediateAssistantText(result, prompt = "") {
+  const output = stripPromptEcho(result?.output, prompt);
 
   if (output) {
     return output;
   }
 
-  const stdout = String(result?.stdout || "").trim();
+  const stdout = stripPromptEcho(result?.stdout, prompt);
 
   if (!stdout) {
     return "";
@@ -772,13 +1195,19 @@ while (true) {
   idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
 
   try {
-    await updateProgress(command.id, "claimed");
+    await updateProgress(command.id, "claimed", command.photo
+      ? {
+          photoAttached: true,
+          photoBytesPresent: Boolean(command.photo.hasDataUrl || command.photo.dataUrl),
+          photoSeenByBridge: true
+        }
+      : {});
 
     const {
       executionThreadId,
       sourceThreadId,
       sourceThreadLabel
-    } = getResolvedExecutionThread(command, legacyLinksThreadId);
+    } = await getResolvedExecutionThread(command, legacyLinksThreadId);
     let threadId = executionThreadId;
 
     if (!threadId) {
@@ -787,7 +1216,8 @@ while (true) {
 
     await updateProgress(command.id, "preparing-input");
     const photoPath = await materializePhoto(command);
-    const input = buildInput(command, photoPath);
+    const photoOcrText = photoPath ? await extractPhotoOcrText(command.id, photoPath) : "";
+    const input = buildInput(command, photoPath, photoOcrText);
 
     if (!input.length) {
       throw new Error("Command has no deliverable content.");
@@ -803,30 +1233,107 @@ while (true) {
       throw new Error(`Command ${command.id} has no CLI-deliverable content.`);
     }
 
-    await updateProgress(command.id, "sending-to-codex");
+    await updateProgress(command.id, "sending-to-codex", photoPath
+      ? {
+          photoAttached: true,
+          photoBytesPresent: true,
+          photoSeenByBridge: true,
+          photoProcessed: true
+        }
+      : {});
     let assistantText = "";
 
     try {
-      const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-        runTurnStart(threadId, input, {
-          onHeartbeat: async () => {
-            await updateProgress(command.id, "waiting-for-codex");
-          }
-        })
-      );
-      assistantText = getAssistantTextFromTurn(turn);
+      if (photoPath) {
+        const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+          runCodexExecEphemeral(
+            prompt || "See attached image and respond.",
+            photoPath,
+            String(command?.targetWorkspacePath || "").trim() || process.cwd()
+          )
+        );
+        assistantText = getImmediateAssistantText(result, prompt);
+
+        if (isPhotoVisibilityFailure(assistantText)) {
+          await updateProgress(command.id, "retrying-photo-read");
+          const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+          const retryPrompt = buildPhotoRetryPrompt(command, photoOcrText);
+          const retryResult = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+            runCodexExecEphemeral(
+              retryPrompt,
+              retryPhotoPath || photoPath,
+              String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            )
+          );
+          assistantText = getImmediateAssistantText(retryResult, retryPrompt) || assistantText;
+        }
+      } else {
+        const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+          runTurnStart(threadId, input, {
+            onHeartbeat: async () => {
+              await updateProgress(command.id, "waiting-for-codex");
+            }
+          })
+        );
+        assistantText = getAssistantTextFromTurn(turn);
+      }
     } catch (appServerError) {
-      const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-        runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
-      );
-      assistantText = getImmediateAssistantText(result);
+      if (photoPath) {
+        await appendBridgeErrorLog("photoEphemeralRetry", appServerError, {
+          commandId: command.id
+        });
+        const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+        const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+          runCodexExecEphemeral(
+            buildPhotoRetryPrompt(command, photoOcrText),
+            retryPhotoPath || photoPath,
+            String(command?.targetWorkspacePath || "").trim() || process.cwd()
+          )
+        );
+        assistantText = getImmediateAssistantText(result, buildPhotoRetryPrompt(command, photoOcrText));
+      } else {
+        const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+          runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
+        );
+        assistantText = getImmediateAssistantText(result, prompt);
+      }
     }
 
     const ackedAt = new Date().toISOString();
 
-    if (!assistantText) {
+    if (!assistantText && photoPath) {
+      await updateProgress(command.id, "retrying-photo-read");
+      const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+      const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+        runCodexExecEphemeral(
+          buildPhotoOnlyPrompt(command, photoOcrText),
+          retryPhotoPath || photoPath,
+          String(command?.targetWorkspacePath || "").trim() || process.cwd()
+        )
+      );
+      assistantText = getImmediateAssistantText(result);
+    }
+
+    if (!assistantText && !photoPath) {
       await updateProgress(command.id, "reading-codex-reply");
       assistantText = await getThreadFallbackAssistantText(command, threadId);
+    }
+
+    assistantText = stripPromptEcho(assistantText, prompt);
+
+    const photoUnsupportedReason = photoPath ? getPhotoUnsupportedReason(assistantText) : "";
+
+    if (photoUnsupportedReason) {
+      await updateProgress(command.id, "failed", {
+        photoAttached: true,
+        photoBytesPresent: true,
+        photoSeenByBridge: true,
+        photoProcessed: false,
+        photoUnsupportedReason,
+        lastDiagnosticCode: "bridge_photo_unreadable",
+        lastDiagnosticDetail: photoUnsupportedReason
+      });
+      throw new Error(photoUnsupportedReason);
     }
 
     if (!assistantText) {
@@ -853,15 +1360,40 @@ while (true) {
     await flushCompletedBatch([completedEntry], [syncedMessage]);
     idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
   } catch (error) {
+    await appendBridgeErrorLog("bridgeCommandFailure", error, { commandId: command?.id || "" });
+    const photoUnsupportedReason = command?.photo ? getPhotoUnsupportedReason(error?.message || "") : "";
+
+    if (photoUnsupportedReason) {
+      try {
+        await updateProgress(command.id, "failed", {
+          photoAttached: true,
+          photoBytesPresent: Boolean(command.photo?.hasDataUrl || command.photo?.dataUrl || command.photoBytesPresent),
+          photoSeenByBridge: true,
+          photoProcessed: false,
+          photoUnsupportedReason,
+          lastDiagnosticCode: "bridge_photo_unreadable",
+          lastDiagnosticDetail: photoUnsupportedReason
+        });
+      } catch {}
+    }
+
     const ackedAt = new Date().toISOString();
-    const threadId = String(command?.threadId || "").trim() || legacyLinksThreadId || "";
+    const threadId = (await getResolvedExecutionThread(command, legacyLinksThreadId)).executionThreadId
+      || String(command?.threadId || "").trim()
+      || legacyLinksThreadId
+      || "";
     const threadLabel = String(command?.threadLabel || "").trim() || threadId;
     let assistantText = "";
 
     if (threadId) {
       try {
         assistantText = await getThreadFallbackAssistantText(command, threadId);
-      } catch {}
+      } catch (error) {
+        await appendBridgeErrorLog("bridgeCommandFailure.threadFallback", error, {
+          commandId: command?.id || "",
+          threadId
+        });
+      }
     }
 
     const completedEntry = {

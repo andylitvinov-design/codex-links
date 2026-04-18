@@ -128,6 +128,210 @@ Rules now enforced in repo code:
 - after fallback, executor is final for that command
 - UI now shows requested executor, actual executor, and fallback reason separately
 
+## 2026-04-17 Production Follow-Up: Slack Cloud And Photo Delivery
+
+### Newly confirmed errors
+
+- `cloud` requests from the site were still reaching `Direct OpenAI cloud` instead of the intended `Codex Cloud via Slack` path because `slack-codex-cloud` had been collapsed into the same dispatch mode as `cloud`.
+- Bridge claim timeout was too aggressive for real delivery conditions:
+  - fast watchdog path used `3s`
+  - maintenance path used a different threshold
+  - result: healthy bridge work could be switched away before claim/ack stabilized
+- `cloud + photo` failed after Slack thread creation with:
+  - code: `slack_photo_upload_failed`
+  - detail: `missing_scope`
+  - result: command fell back to local bridge
+- `cloud` smoke could produce false positives because the probe looked for `OK` in the whole Slack thread and matched the root task text itself.
+- Even after routing was fixed, `cloud via Slack` could still fall back to bridge if Codex did not send a fast enough first acknowledgement in the Slack thread.
+
+### Fixes landed
+
+- Distinct dispatch modes were restored:
+  - `cloud` = direct OpenAI cloud
+  - `slack-codex-cloud` = Codex Cloud via Slack
+- Request routing now prefers `slack-codex-cloud` when the UI asks for cloud and Slack dispatch is configured.
+- Bridge fast-claim timeout was increased to reduce premature fallback.
+- Smoke coverage now includes:
+  - `bridge` text
+  - `bridge` photo
+  - `cloud` text
+  - `cloud` photo
+- Slack app manifest now requests `files:write` so threaded file upload is represented in source control.
+
+### Production state after merge
+
+- PR merged: `#26` `Restore Slack cloud routing and photo smoke coverage`
+- `main` contains the routing fix
+- production build updated to:
+  - `public/version.json` -> `20260417-1910`
+- remaining external blocker:
+  - Slack app must be reinstalled after adding `files:write`
+
+### Remaining operational blockers
+
+- `cloud via Slack` is not yet reliable enough to stay on cloud for all text commands because the current first-ack watchdog can still reroute to bridge before Slack-thread acknowledgement arrives.
+- `cloud + photo` will not complete until the Slack app is reauthorized with the new scope set.
+
+### Recommended next actions
+
+1. Reinstall the Slack app after adding `files:write`.
+2. Re-run:
+   - `npm run cloud:smoke`
+   - `npm run cloud:photo-smoke`
+3. If text tasks still bounce to bridge, extend or redesign the `cloud via Slack` first-ack watchdog.
+4. Keep using bridge as the safe photo fallback until Slack reinstall is complete and verified.
+
+## 2026-04-17 Post-Reinstall Verification
+
+After Slack app reinstall with `files:write`:
+
+- `cloud + text` reached `slack-codex-cloud` successfully and the probe returned into the Codex thread, which confirms end-to-end delivery to Codex Cloud.
+- `cloud + photo` reached `slack-codex-cloud` and no longer failed with `missing_scope`.
+- remaining problem was unchanged watchdog behavior:
+  - both text and photo were moved to `local-bridge`
+  - fallback reason stayed `No first executor acknowledgement was observed within the fast cloud first-ack window.`
+
+Updated interpretation:
+
+- Slack scope issue is resolved.
+- The current highest-priority blocker is no longer Slack file permission.
+- The current highest-priority blocker is the `cloud via Slack` first-ack timeout policy.
+
+## 2026-04-17 Routing Simplification Decision
+
+New rule accepted for the product:
+
+- if `Bridge` is selected in the app:
+  - dispatch starts on local bridge
+  - if bridge hangs, task may be rerouted to cloud
+- if `Bridge` is not selected:
+  - dispatch is cloud-only
+  - cloud tasks must not auto-fallback back into bridge
+
+New error knowledge recorded:
+
+- `cloud -> bridge` fallback was making cloud-selected tasks look successful while silently switching executors, which hid the real cloud-worker failure mode.
+- after Slack scope fix, the remaining cloud-photo blocker was no longer `missing_scope`; the remaining issue became:
+  - Slack thread is created
+  - but the external Codex/Slack worker still does not respond in-thread in time
+- photo delivery to Slack cloud needs stronger worker prompting than “file exists in thread” alone.
+
+New fixes prepared:
+
+## 2026-04-18 Live KV And Bridge Photo Follow-Up
+
+### Newly confirmed production errors
+
+- Cloudflare Pages production hit Workers KV free tier limit:
+  - `1000 Workers KV list operations per day`
+  - list-related KV calls returned `429`
+  - result on live: queue visibility and UI refresh became unreliable
+- Photo delivery path was confirmed to reach local bridge correctly:
+  - UI attach present
+  - API create stored photo payload
+  - bridge claim succeeded
+  - `photoSeenByBridge=true`
+- The actual live photo blocker moved downstream:
+  - `codex exec` hung after `waiting-for-codex`
+  - manual retry path `retrying-photo-read` could also hang
+  - commands stayed visually stuck unless manually failed
+
+### Fixes landed
+
+- PR `#49` `Reduce KV hot-path pressure for bridge delivery`
+- commands and messages hot paths were moved away from full-store refresh patterns toward:
+  - key-by-id storage
+  - client indexes
+  - active queue indexes
+- UI polling on the main page now prefers client-scoped delivery snapshot instead of separate full public refresh calls for commands and messages
+- storage APIs now return explicit rate-limited responses instead of silent UI hangs
+
+### Operational discoveries that must not be forgotten
+
+- Even after KV hot-path reduction, the live local bridge still needs a hard timeout around image executor subprocesses.
+- Photo commands can be:
+  - delivered correctly
+  - seen by bridge
+  - still fail because the executor never returns output
+- The correct failure mode for this case is explicit:
+  - code: `bridge_photo_retry_timeout`
+  - detail: bridge saw the image, retry subprocess started, but no final answer came back
+
+### Current recommended next action
+
+1. Add hard timeout and final `mark failed` behavior for:
+   - main photo `codex exec`
+   - retry `Attached image task`
+2. Re-run live photo smoke after that worker change.
+
+- removed automatic `cloud -> bridge` fallback for Slack-cloud execution
+- kept `bridge -> cloud` fallback for stalled bridge commands
+- after Slack photo upload, the app now posts an explicit thread nudge with the uploaded file reference and asks Codex to acknowledge in the same thread
+
+## 2026-04-17 Slack Photo Upload Argument Fix
+
+Newly confirmed error knowledge:
+
+- after Slack app reinstall and `files:write`, `cloud + photo` no longer failed with `missing_scope`
+- the next confirmed blocker for `cloud + photo` became:
+  - code: `slack_photo_upload_failed`
+  - detail: `invalid_arguments`
+- most likely cause in app code:
+  - the photo handoff used Slack file-upload API methods through the generic JSON helper
+  - Slack `files.getUploadURLExternal` rejected that transport and returned:
+    - `invalid_arguments`
+    - response metadata: missing required field `length`
+    - response metadata: missing required field `filename`
+  - result: image never became available to the Codex cloud worker even though thread creation succeeded
+
+Fix prepared:
+
+- simplify Slack photo handoff:
+  - call Slack external file-upload methods with form-encoded payloads instead of the generic JSON helper
+  - complete external upload into the channel
+  - do not rely on thread-specific completion arguments during `files.completeUploadExternal`
+  - then post an explicit thread reply with the uploaded file permalink and instructions for Codex to read the image in the same thread
+- follow-up fix:
+  - use the permalink returned directly by `files.completeUploadExternal`
+  - avoid depending on a later `files.info` round-trip to build the thread nudge
+- remove hidden Slack-dispatch fallback:
+  - if a task was selected as cloud-only and Slack dispatch fails, mark it failed
+  - do not silently convert it into `local-bridge`
+
+Product rule retained:
+
+- `Bridge` selected:
+  - start on bridge
+  - fallback to cloud only if bridge stalls
+- `Bridge` not selected:
+  - run cloud-only
+  - do not auto-fallback back into bridge, so cloud-worker failures stay visible
+
+## 2026-04-17 Bridge Thread Resolution And UI Refresh Reliability
+
+Newly confirmed error knowledge:
+
+- bridge-only commands for non-UUID project ids such as `ezohata` could reach the local bridge with `threadId=ezohata`
+- Codex app server expects a real thread UUID, so bridge returned:
+  - `invalid thread id`
+  - `expected an optional prefix of \`urn:uuid:\` ... found 'z'`
+- the red UI warning `Часть данных не обновилась...` can also be triggered by any one transient failure across the separate `status`, `commands`, `messages`, or `repos` refresh calls, even when cached data is otherwise usable
+- UI command refresh had an additional hard client bug:
+  - `mergeCommandCollection()` compared command freshness using `getCommandFreshnessTs(...)`
+  - but that helper function was missing from `public/app.js`
+  - result: once an existing command was refreshed, the browser could throw during merge and keep showing stale cards such as `stage: created` even while server-side status had already advanced to `processing` or `dispatched`
+
+Fix prepared:
+
+- bridge now resolves bridge-only project ids through stored `/api/threads` metadata and chooses the latest matching real Codex thread UUID for that project/category
+- UI polling now retries the critical JSON refresh requests once before showing partial-refresh degradation
+- Slack cloud prompt now also resolves the latest stored real Codex thread UUID for the selected project and includes it in the Slack task when available, instead of sending only a human project label
+- Slack cloud wait window was reduced so the UI does not sit in `waiting (cloud)` for several minutes when the external worker is not replying:
+  - dispatch grace: `15s`
+  - total result wait: `60s`
+  - after that the command fails explicitly instead of hanging silently
+- client merge now has a concrete command freshness helper, so refreshed server status can replace stale local cards instead of freezing them
+
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
