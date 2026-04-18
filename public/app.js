@@ -22,7 +22,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260417-1910";
+const BUILD_VERSION = "20260418-0022";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -540,12 +540,17 @@ async function ensureLatestClient() {
 
     const data = await response.json();
     const latestVersion = String(data?.build || "").trim();
+    const requestedVersion = String(new URL(window.location.href).searchParams.get("v") || "").trim();
 
     if (
       !latestVersion
       || latestVersion === BUILD_VERSION
       || compareBuildVersions(latestVersion, BUILD_VERSION) < 0
     ) {
+      return false;
+    }
+
+    if (requestedVersion && requestedVersion === latestVersion) {
       return false;
     }
 
