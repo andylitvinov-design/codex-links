@@ -175,6 +175,7 @@ Production flow is now fixed as:
 
 - `branch -> PR -> merge -> Pages deploy`
 - `main` is the only production branch
+- do not batch merges for later release; each merged production fix must be deployed to live immediately in the same work session
 - ChatGPT/Codex changes are complete only after a commit or PR exists and the deploy status is known
 
 Expected platform setup for this repo:
