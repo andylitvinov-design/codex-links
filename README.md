@@ -53,6 +53,23 @@ Latest saved context-routing summary:
 - static online copy after deploy: `/project-context-audit-2026-04-17.md`
 - weekly error and findings log: [docs/weekly-errors-and-findings-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/weekly-errors-and-findings-2026-04-17.md)
 
+## Saved Rollback Point
+
+Current preserved live rollback target:
+
+- production build: `20260418-1518`
+- git commit: `53691ee7af31c3353bb4023cf0cd5fff0cdacdc0`
+- git tag: `saved/live-20260418-1518`
+- verification date: `2026-04-18`
+
+Why this point matters:
+
+- it is the confirmed live point where photo delivery is working again
+- `Bridge` photo requests reach `answered`
+- `Cloud` photo requests safely route into local bridge and also reach `answered`
+
+Before any future rollback or risky deploy check this anchor first.
+
 ## Project To Repo Alignment
 
 Rule for this workspace:

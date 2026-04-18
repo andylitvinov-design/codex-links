@@ -335,3 +335,37 @@ Fix prepared:
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+
+## 2026-04-18 Photo Delivery Root Cause And Preserved Fix Point
+
+### Root cause
+
+- Codex did not lose the ability to read images.
+- The break was in the live bridge photo execution path after the image was handed off.
+- The unstable part was the ephemeral photo run launched from the Node bridge worker:
+  - direct local `codex exec -i` on the same image succeeded;
+  - the launchd bridge path could still stall in `waiting-for-codex` or finish without a durable assistant reply;
+  - stale photo tasks could also be pushed into the wrong recovery path instead of being terminally resolved.
+
+### Fix direction
+
+- move ephemeral photo execution to a dedicated Python runner
+- keep photo work on the bridge photo-only prompt path
+- do not reroute stale photo commands into Slack
+- only finalize the command after assistant reply sync succeeds
+
+### Preserved stable point
+
+- production build: `20260418-1518`
+- commit: `53691ee7af31c3353bb4023cf0cd5fff0cdacdc0`
+- tag: `saved/live-20260418-1518`
+
+### Live proof captured before saving
+
+- `79bcae9d-b1b2-49b8-98aa-f34a37f4457a`
+  - requested executor: `bridge`
+  - final state: `answered`
+- `4113f59d-9aa5-45ad-9e5b-4cb107ee748c`
+  - requested executor: `cloud`
+  - actual executor: `bridge`
+  - final state: `answered`
