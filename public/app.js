@@ -22,7 +22,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0208";
+const BUILD_VERSION = "20260418-0315";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -2324,31 +2324,73 @@ async function fetchJsonWithRetry(resource, init = {}, label = "data") {
 }
 
 async function fetchBridgeStatus() {
-  return fetchJsonWithRetry(`/api/status?_=${Date.now()}`, {
+  const response = await fetch(`/api/status?_=${Date.now()}`, {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  }, "status");
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const message = String(payload?.message || "").trim();
+    throw new Error(message || `Failed to load status: ${response.status}`);
+  }
+
+  return response.json();
 }
 
 function getCommandFreshnessTs(command) {
-  const entry = command && typeof command === "object" ? command : {};
+  const candidates = [
+    command?.progressUpdatedAt,
+    command?.completedAt,
+    command?.resultAt,
+    command?.replyIngestedAt,
+    command?.firstReplySeenAt,
+    command?.firstExecutorAckSeenAt,
+    command?.bridgeClaimedAt,
+    command?.dispatchedAt,
+    command?.dispatchStartedAt,
+    command?.createdAt
+  ];
 
-  return Math.max(
-    toTimestamp(entry.progressUpdatedAt),
-    toTimestamp(entry.completedAt),
-    toTimestamp(entry.resultAt),
-    toTimestamp(entry.replyIngestedAt),
-    toTimestamp(entry.firstReplySeenAt),
-    toTimestamp(entry.firstExecutorAckSeenAt),
-    toTimestamp(entry.firstAckAt),
-    toTimestamp(entry.bridgeClaimedAt),
-    toTimestamp(entry.slackPostedAt),
-    toTimestamp(entry.dispatchStartedAt),
-    toTimestamp(entry.dispatchedAt),
-    toTimestamp(entry.createdAt)
-  );
+  let freshest = 0;
+
+  candidates.forEach((value) => {
+    const parsed = Date.parse(String(value || "").trim());
+
+    if (Number.isFinite(parsed) && parsed > freshest) {
+      freshest = parsed;
+    }
+  });
+
+  return freshest;
+}
+
+function getCommandStatePriority(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
+
+  if (status === "failed") {
+    return 5;
+  }
+
+  if (status === "answered" || status === "acked") {
+    return 4;
+  }
+
+  if (status === "processing") {
+    return 3;
+  }
+
+  if (status === "dispatched") {
+    return 2;
+  }
+
+  if (status === "queued") {
+    return 1;
+  }
+
+  return 0;
 }
 
 function mergeCommandCollection(commands) {
@@ -2370,7 +2412,15 @@ function mergeCommandCollection(commands) {
       return;
     }
 
-    if (getCommandFreshnessTs(incoming) >= getCommandFreshnessTs(current)) {
+    const incomingFreshness = getCommandFreshnessTs(incoming);
+    const currentFreshness = getCommandFreshnessTs(current);
+    const shouldPreferIncoming = incomingFreshness > currentFreshness
+      || (
+        incomingFreshness === currentFreshness
+        && getCommandStatePriority(incoming) >= getCommandStatePriority(current)
+      );
+
+    if (shouldPreferIncoming) {
       byId.set(id, {
         ...current,
         ...incoming,
@@ -2447,12 +2497,20 @@ async function fetchDeliverySnapshot(options = {}) {
   }
   url.searchParams.set("_", String(Date.now()));
 
-  return fetchJsonWithRetry(url.toString(), {
+  const response = await fetch(url.toString(), {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  }, "delivery");
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const message = String(payload?.message || "").trim();
+    throw new Error(message || `Failed to load delivery: ${response.status}`);
+  }
+
+  return response.json();
 }
 
 function applyDeliverySnapshot(snapshot) {
@@ -2529,77 +2587,29 @@ async function fetchMenuRepos() {
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
-async function fetchCommands() {
-  const url = new URL("/api/commands", window.location.origin);
-  url.searchParams.set("scope", "public");
-  url.searchParams.set("_", String(Date.now()));
-
-  const data = await fetchJsonWithRetry(url.toString(), {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  }, "commands");
-  mergeCommandCollection(Array.isArray(data?.commands) ? data.commands : []);
-}
-
-async function fetchMessages() {
-  const url = new URL("/api/messages", window.location.origin);
-  url.searchParams.set("scope", "public");
-  url.searchParams.set("_", String(Date.now()));
-
-  const data = await fetchJsonWithRetry(url.toString(), {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  }, "messages");
-  const previousMessages = [...state.messages];
-  mergeMessageCollection(Array.isArray(data?.messages) ? data.messages : []);
-  noteNewMessages(previousMessages, state.messages);
-}
-
 async function refreshAll() {
   const results = await Promise.allSettled([
-    fetchBridgeStatus(),
-    fetchCommands(),
-    fetchMessages(),
+    fetchDeliverySnapshot(),
     fetchMenuRepos()
   ]);
 
   const statusResult = results[0];
-  const commandsError = results[1].status === "rejected" ? results[1].reason : null;
-  const messagesError = results[2].status === "rejected" ? results[2].reason : null;
-  const reposError = results[3].status === "rejected" ? results[3].reason : null;
+  const reposError = results[1].status === "rejected" ? results[1].reason : null;
 
   if (statusResult.status === "fulfilled") {
-    const status = statusResult.value?.status || {};
-    const bridgeStatusText = document.querySelector("#bridge-status-text");
-    const bridgeWatchdogText = document.querySelector("#bridge-watchdog-text");
-
-    if (bridgeStatusText) {
-      bridgeStatusText.textContent = formatExecutorStatus(status);
-    }
-
-    if (bridgeWatchdogText) {
-      bridgeWatchdogText.textContent = `Watchdog: ${status.lastError || "ошибок нет"}`;
-    }
+    applyDeliverySnapshot(statusResult.value);
   }
 
   renderDispatchModeUi();
 
   const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
 
-  if ((commandsError || messagesError) && hasCachedData) {
+  if (statusResult.status === "rejected" && hasCachedData) {
     setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
-  } else if (commandsError && messagesError) {
-    setCommandStatusMessage("Не удалось обновить команды и ответы.", { tone: "error" });
+  } else if (statusResult.status === "rejected") {
+    setCommandStatusMessage(String(statusResult.reason?.message || "Не удалось обновить состояние."), { tone: "error" });
   } else if (reposError) {
-    syncCommandStatusFromState();
-  } else if (messagesError) {
-    setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
-  } else if (commandsError) {
-    setCommandStatusMessage("Не удалось обновить команды.", { tone: "error" });
+    setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
   } else {
     syncCommandStatusFromState();
   }

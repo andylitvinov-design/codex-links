@@ -1,4 +1,4 @@
-import { handleOptions, json } from "../_lib/http.js";
+import { handleOptions, json, jsonStorageError } from "../_lib/http.js";
 import { replaceMessages, upsertMessages, getMessagesForClient, readMessages } from "../_lib/messages.js";
 import { isAuthorized } from "../_lib/security.js";
 
@@ -34,35 +34,39 @@ export async function onRequest(context) {
   }
 
   if (request.method === "GET") {
-    const url = new URL(request.url);
-    const clientId = url.searchParams.get("clientId");
-    const scope = url.searchParams.get("scope");
+    try {
+      const url = new URL(request.url);
+      const clientId = url.searchParams.get("clientId");
+      const scope = url.searchParams.get("scope");
 
-    if (scope === "recent") {
+      if (scope === "recent") {
+        if (!isAuthorized(request, env)) {
+          return json({ error: "Unauthorized." }, { status: 401 });
+        }
+
+        const messages = await readMessages(env);
+        return json({ messages });
+      }
+
+      if (scope === "public") {
+        const messages = await readMessages(env);
+        return json({ messages: filterPublicMessages(messages) });
+      }
+
+      if (clientId) {
+        const messages = await getMessagesForClient(env, clientId);
+        return json({ messages: filterPublicMessages(messages) });
+      }
+
       if (!isAuthorized(request, env)) {
         return json({ error: "Unauthorized." }, { status: 401 });
       }
 
       const messages = await readMessages(env);
       return json({ messages });
+    } catch (error) {
+      return jsonStorageError(error, "Storage is rate limited. Messages are temporarily unavailable.");
     }
-
-    if (scope === "public") {
-      const messages = await readMessages(env);
-      return json({ messages: filterPublicMessages(messages) });
-    }
-
-    if (clientId) {
-      const messages = await getMessagesForClient(env, clientId);
-      return json({ messages: filterPublicMessages(messages) });
-    }
-
-    if (!isAuthorized(request, env)) {
-      return json({ error: "Unauthorized." }, { status: 401 });
-    }
-
-    const messages = await readMessages(env);
-    return json({ messages });
   }
 
   if (request.method !== "POST") {
@@ -81,8 +85,12 @@ export async function onRequest(context) {
     return json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const messages = payload?.replace
-    ? await replaceMessages(env, payload?.messages)
-    : await upsertMessages(env, payload?.messages);
-  return json({ ok: true, messages }, { status: 201 });
+  try {
+    const messages = payload?.replace
+      ? await replaceMessages(env, payload?.messages)
+      : await upsertMessages(env, payload?.messages);
+    return json({ ok: true, messages }, { status: 201 });
+  } catch (error) {
+    return jsonStorageError(error, "Storage is rate limited. Message write failed.");
+  }
 }
