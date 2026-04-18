@@ -962,7 +962,7 @@ export async function onRequest(context) {
         ? commands.filter((command) => command.status === status)
         : commands;
 
-      return json({ commands: serializeCommands(filtered) });
+      return json({ commands: serializeCommands(filtered, { includePhotoData: true }) });
     }
 
     if (scope === "public") {
@@ -995,7 +995,7 @@ export async function onRequest(context) {
       ? commands.filter((command) => command.status === status)
       : commands;
 
-    return json({ commands: serializeCommands(filtered) });
+    return json({ commands: serializeCommands(filtered, { includePhotoData: true }) });
   }
 
   if (request.method !== "POST") {
@@ -1049,7 +1049,7 @@ export async function onRequest(context) {
       return json({ error: answered.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: serializeCommand(answered.value) });
+    return json({ ok: true, command: serializeCommand(answered.value, { includePhotoData: true }) });
   }
 
   if (action === "fail") {
@@ -1080,7 +1080,7 @@ export async function onRequest(context) {
       return json({ error: failed.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: serializeCommand(failed.value) });
+    return json({ ok: true, command: serializeCommand(failed.value, { includePhotoData: true }) });
   }
 
   if (action === "claim") {
@@ -1097,7 +1097,7 @@ export async function onRequest(context) {
       return json({ error: claimed.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: serializeCommand(claimed.value) });
+    return json({ ok: true, command: serializeCommand(claimed.value, { includePhotoData: true }) });
   }
 
   if (action === "progress") {
@@ -1116,7 +1116,7 @@ export async function onRequest(context) {
       return json({ error: updated.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: serializeCommand(updated.value) });
+    return json({ ok: true, command: serializeCommand(updated.value, { includePhotoData: true }) });
   }
 
   if (action === "requeue") {
@@ -1130,7 +1130,7 @@ export async function onRequest(context) {
       return json({ error: requeued.error }, { status: 400 });
     }
 
-    return json({ ok: true, command: serializeCommand(requeued.value) });
+    return json({ ok: true, command: serializeCommand(requeued.value, { includePhotoData: true }) });
   }
 
   if (action === "dispatch") {
@@ -1139,7 +1139,7 @@ export async function onRequest(context) {
     }
 
     const dispatched = await dispatchCreatedCommand(env, payload?.id, await readRuntimeConfig(env));
-    return json({ ok: true, command: serializeCommand(dispatched) });
+    return json({ ok: true, command: serializeCommand(dispatched, { includePhotoData: true }) });
   }
 
   if (action === "visible") {
@@ -1158,7 +1158,7 @@ export async function onRequest(context) {
       uiVisibleAt: payload?.uiVisibleAt || new Date().toISOString()
     });
 
-    return json({ ok: true, command: serializeCommand(updated.value) });
+    return json({ ok: true, command: serializeCommand(updated.value, { includePhotoData: true }) });
   }
 
   if (action === "replace") {
@@ -1173,7 +1173,7 @@ export async function onRequest(context) {
       lastRunAt: new Date().toISOString(),
       lastError: ""
     });
-    return json({ ok: true, commands: serializeCommands(commands) });
+    return json({ ok: true, commands: serializeCommands(commands, { includePhotoData: true }) });
   }
 
   const runtimeConfig = await readRuntimeConfig(env);
