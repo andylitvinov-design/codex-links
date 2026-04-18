@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-1435";
+const BUILD_VERSION = "20260418-1455";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -2669,6 +2669,33 @@ function mergeMessageCollection(messages) {
   );
 }
 
+function buildOptimisticUserMessage(command) {
+  if (!command || typeof command !== "object") {
+    return null;
+  }
+
+  const commandId = String(command.id || "").trim();
+  const clientId = String(command.clientId || "").trim();
+  const threadId = String(command.threadId || "").trim();
+
+  if (!commandId || !clientId || !threadId) {
+    return null;
+  }
+
+  const text = String(command.text || "").trim() || (command.photo ? "Фото" : "Сообщение без текста");
+
+  return {
+    id: `command:${commandId}`,
+    clientId,
+    threadId,
+    threadLabel: String(command.threadLabel || "").trim(),
+    commandId,
+    role: "user",
+    text,
+    createdAt: String(command.createdAt || new Date().toISOString()).trim()
+  };
+}
+
 function noteNewMessages(previousMessages, nextMessages) {
   const previousCodexReplyIds = new Set(
     previousMessages
@@ -2932,6 +2959,7 @@ async function submitCommand(event) {
   commandInput.value = "";
   clearSelectedPhoto();
   mergeCommandCollection([result?.command].filter(Boolean));
+  mergeMessageCollection([buildOptimisticUserMessage(result?.command)].filter(Boolean));
   enterDeliverySpeedMode();
   startPolling();
   renderCommands();
