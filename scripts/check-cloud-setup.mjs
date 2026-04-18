@@ -4,6 +4,7 @@ import path from "node:path";
 const ROOT = process.cwd();
 const DEV_VARS_PATH = path.join(ROOT, ".dev.vars");
 const PROD_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
+const IS_CI = Boolean(String(process.env.GITHUB_ACTIONS || process.env.CI || "").trim());
 const REQUIRED = [
   "LINKS_WRITE_TOKEN",
   "COMMAND_DISPATCH_MODE"
@@ -114,7 +115,7 @@ async function main() {
   }
 
   if (missing.length) {
-    console.log("Missing local values:");
+    console.log(IS_CI ? "Missing local values (advisory in CI):" : "Missing local values:");
     for (const key of missing) {
       console.log(`- ${key}`);
     }
@@ -128,7 +129,7 @@ async function main() {
 
   if (!prod.ok) {
     console.log(`Could not read production status: ${prod.error}`);
-    process.exitCode = missing.length ? 1 : 0;
+    process.exitCode = !IS_CI && missing.length ? 1 : 0;
     return;
   }
 
@@ -140,7 +141,7 @@ async function main() {
   console.log(`- state: ${status.state || "unknown"}`);
   console.log(`- lastError: ${status.lastError || "none"}`);
 
-  if (missing.length) {
+  if (missing.length && !IS_CI) {
     process.exitCode = 1;
   }
 }
