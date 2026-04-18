@@ -528,6 +528,21 @@ function buildPhotoRetryPrompt(command) {
   ].join("\n");
 }
 
+function buildPhotoOnlyPrompt(command) {
+  const userRequest = sanitizeBridgeText(command?.text) || "Describe what is visible in the attached image.";
+
+  return [
+    "Attached image task.",
+    "Read only the attached image and answer the user request briefly.",
+    "Do not rely on previous conversation turns.",
+    "If the image is visible, state the concrete observed detail first.",
+    "If the image is still not visible, say exactly that in one short sentence.",
+    "",
+    "User request:",
+    userRequest
+  ].join("\n");
+}
+
 function buildInput(command, photoPath) {
   const items = [];
   const text = buildBridgePrompt(command);
@@ -1107,7 +1122,20 @@ while (true) {
 
     const ackedAt = new Date().toISOString();
 
-    if (!assistantText) {
+    if (!assistantText && photoPath) {
+      await updateProgress(command.id, "retrying-photo-read");
+      const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+      const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+        runCodexExecEphemeral(
+          buildPhotoOnlyPrompt(command),
+          retryPhotoPath || photoPath,
+          String(command?.targetWorkspacePath || "").trim() || process.cwd()
+        )
+      );
+      assistantText = getImmediateAssistantText(result);
+    }
+
+    if (!assistantText && !photoPath) {
       await updateProgress(command.id, "reading-codex-reply");
       assistantText = await getThreadFallbackAssistantText(command, threadId);
     }
