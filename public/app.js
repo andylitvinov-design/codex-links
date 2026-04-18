@@ -15,14 +15,18 @@ const state = {
   hardReloading: false,
   hasLoadedMessagesOnce: false,
   audioUnlocked: false,
-  resetInFlight: false
-  ,
+  resetInFlight: false,
+  voiceRecognition: null,
+  voiceRecognitionActive: false,
+  voiceTranscriptBase: "",
+  voiceDraftText: "",
+  voiceHadResult: false,
   deliverySpeedUntil: 0,
   speedModeClientId: "",
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0348";
+const BUILD_VERSION = "20260418-0420";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -251,6 +255,8 @@ const commandPhotoInput = document.querySelector("#command-photo-input");
 const commandPhotoClear = document.querySelector("#command-photo-clear");
 const commandPhotoStatus = document.querySelector("#command-photo-status");
 const commandInput = document.querySelector("#command-input");
+const commandVoiceButton = document.querySelector("#command-voice-button");
+const commandVoiceStatus = document.querySelector("#command-voice-status");
 const commandStatus = document.querySelector("#command-status");
 const commandTimeline = document.querySelector("#command-timeline");
 const submitProgress = document.querySelector("#submit-progress");
@@ -267,6 +273,7 @@ const threadSettingsSelectAll = document.querySelector("#thread-settings-select-
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
 const timelineTabDialog = document.querySelector("#timeline-tab-dialog");
 const timelineTabNotifications = document.querySelector("#timeline-tab-notifications");
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 function estimateDataUrlBytes(dataUrl) {
   const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
@@ -484,6 +491,41 @@ function formatMenuRepoLabel(repo) {
 
 function getProjectCategory(repo) {
   return String(repo?.group || repo?.category || "").trim() || "other";
+}
+
+function formatCategoryTitle(category) {
+  const normalized = String(category || "").trim().toLowerCase();
+
+  if (normalized === "myprojects") {
+    return "My Projects";
+  }
+
+  if (normalized === "brain") {
+    return "Brain";
+  }
+
+  if (normalized === "other") {
+    return "Other";
+  }
+
+  return normalized
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getCategoryPreview(category) {
+  const names = getAllMenuOptions()
+    .filter((option) => option.category === category)
+    .map((option) => option.label || option.displayLabel)
+    .filter(Boolean);
+
+  if (!names.length) {
+    return "Проекты пока не найдены.";
+  }
+
+  return names.join(" · ");
 }
 
 function getProjectStatusLabel(repo) {
@@ -722,11 +764,18 @@ function renderThreadCategories() {
     : "Категории не найдены.";
 
   categories.forEach((category) => {
+    const categoryCount = getAllMenuOptions().filter((option) => option.category === category).length;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "thread-category-chip";
-    button.textContent = category;
     button.dataset.active = state.activeThreadCategories.includes(category) ? "1" : "0";
+    button.innerHTML = `
+      <span class="thread-category-chip-head">
+        <span class="thread-category-chip-title">${escapeHtml(formatCategoryTitle(category))}</span>
+        <span class="thread-category-chip-count">${categoryCount}</span>
+      </span>
+      <span class="thread-category-chip-subtitle">${escapeHtml(getCategoryPreview(category))}</span>
+    `;
     button.addEventListener("click", () => {
       const next = new Set(state.activeThreadCategories);
 
@@ -2083,6 +2132,185 @@ function setPhotoStatusMessage(message, tone = "") {
   commandPhotoStatus.dataset.tone = tone;
 }
 
+function setVoiceStatusMessage(message = "", tone = "") {
+  if (!commandVoiceStatus) {
+    return;
+  }
+
+  commandVoiceStatus.textContent = message;
+  commandVoiceStatus.dataset.tone = tone;
+  commandVoiceStatus.hidden = !message;
+}
+
+function syncVoiceButton() {
+  if (!commandVoiceButton) {
+    return;
+  }
+
+  const isRecording = Boolean(state.voiceRecognitionActive);
+  commandVoiceButton.dataset.state = isRecording ? "recording" : "idle";
+  commandVoiceButton.setAttribute("aria-pressed", isRecording ? "true" : "false");
+  commandVoiceButton.title = isRecording ? "Остановить запись" : "Голосовой ввод";
+  commandVoiceButton.setAttribute("aria-label", isRecording ? "Остановить запись" : "Голосовой ввод");
+  commandVoiceButton.disabled = !SpeechRecognitionCtor;
+}
+
+function joinVoiceText(baseText, nextText) {
+  const left = String(baseText || "").trim();
+  const right = String(nextText || "").trim();
+
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return `${left}${/[\s\n]$/.test(baseText) ? "" : " "}${right}`;
+}
+
+function stopVoiceRecognition() {
+  const recognition = state.voiceRecognition;
+
+  if (!recognition) {
+    state.voiceRecognitionActive = false;
+    syncVoiceButton();
+    return;
+  }
+
+  state.voiceRecognitionActive = false;
+
+  try {
+    recognition.stop();
+  } catch {}
+
+  syncVoiceButton();
+}
+
+function ensureVoiceRecognition() {
+  if (!SpeechRecognitionCtor) {
+    return null;
+  }
+
+  if (state.voiceRecognition) {
+    return state.voiceRecognition;
+  }
+
+  const recognition = new SpeechRecognitionCtor();
+  recognition.lang = "ru-RU";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.addEventListener("start", () => {
+    state.voiceRecognitionActive = true;
+    state.voiceHadResult = false;
+    state.voiceTranscriptBase = String(commandInput?.value || "");
+    state.voiceDraftText = "";
+    setVoiceStatusMessage("Слушаю… говорите.");
+    syncVoiceButton();
+  });
+
+  recognition.addEventListener("result", (event) => {
+    let transcript = "";
+
+    for (let index = 0; index < event.results.length; index += 1) {
+      const phrase = String(event.results[index]?.[0]?.transcript || "").trim();
+
+      if (!phrase) {
+        continue;
+      }
+
+      transcript = transcript ? `${transcript} ${phrase}` : phrase;
+    }
+
+    state.voiceHadResult = Boolean(transcript);
+    state.voiceDraftText = transcript;
+
+    if (commandInput) {
+      commandInput.value = joinVoiceText(state.voiceTranscriptBase, transcript);
+    }
+
+    const lastResult = event.results[event.results.length - 1];
+    setVoiceStatusMessage(
+      lastResult?.isFinal ? "Голос добавлен в сообщение." : "Распознаю речь…",
+      lastResult?.isFinal ? "success" : ""
+    );
+  });
+
+  recognition.addEventListener("error", (event) => {
+    state.voiceRecognitionActive = false;
+    syncVoiceButton();
+
+    const code = String(event?.error || "").trim();
+
+    if (code === "aborted") {
+      return;
+    }
+
+    if (code === "not-allowed" || code === "service-not-allowed") {
+      setVoiceStatusMessage("Браузер не дал доступ к микрофону.", "error");
+      return;
+    }
+
+    if (code === "no-speech") {
+      setVoiceStatusMessage("Не услышал речь. Попробуйте ещё раз.", "error");
+      return;
+    }
+
+    if (code === "audio-capture") {
+      setVoiceStatusMessage("Микрофон недоступен в этом браузере.", "error");
+      return;
+    }
+
+    setVoiceStatusMessage("Голосовой ввод не сработал. Попробуйте ещё раз.", "error");
+  });
+
+  recognition.addEventListener("end", () => {
+    state.voiceRecognitionActive = false;
+    syncVoiceButton();
+
+    if (!state.voiceHadResult && !String(state.voiceDraftText || "").trim()) {
+      setVoiceStatusMessage("Диктовка остановлена.");
+      return;
+    }
+
+    state.voiceTranscriptBase = String(commandInput?.value || "");
+    state.voiceDraftText = "";
+  });
+
+  state.voiceRecognition = recognition;
+  return recognition;
+}
+
+function toggleVoiceRecognition() {
+  if (!SpeechRecognitionCtor) {
+    setVoiceStatusMessage("Этот браузер не поддерживает голосовой ввод.", "error");
+    syncVoiceButton();
+    return;
+  }
+
+  const recognition = ensureVoiceRecognition();
+
+  if (!recognition) {
+    setVoiceStatusMessage("Голосовой ввод недоступен.", "error");
+    return;
+  }
+
+  if (state.voiceRecognitionActive) {
+    stopVoiceRecognition();
+    setVoiceStatusMessage("Останавливаю диктовку…");
+    return;
+  }
+
+  try {
+    recognition.start();
+  } catch {
+    setVoiceStatusMessage("Не удалось запустить микрофон. Попробуйте ещё раз.", "error");
+  }
+}
+
 function setResetButtonBusy(isBusy) {
   if (!deliveryResetButton) {
     return;
@@ -2638,6 +2866,10 @@ function isDeliverySpeedModeActive() {
 async function submitCommand(event) {
   event.preventDefault();
 
+  if (state.voiceRecognitionActive) {
+    stopVoiceRecognition();
+  }
+
   const uiSubmitStartedAt = new Date().toISOString();
   const text = String(commandInput?.value || "").trim();
   const requestedThreadId = getActiveThreadId();
@@ -2823,6 +3055,10 @@ function bindEvents() {
     });
   });
 
+  commandVoiceButton?.addEventListener("click", () => {
+    toggleVoiceRecognition();
+  });
+
   commandThreadSelect?.addEventListener("change", () => {
     storage.selectedRepoId = canonicalizeRepoSelectionId(commandThreadSelect.value);
 
@@ -2973,6 +3209,11 @@ async function boot() {
   }
 
   clearSelectedPhoto();
+  syncVoiceButton();
+  setVoiceStatusMessage(
+    SpeechRecognitionCtor ? "" : "Голосовой ввод доступен не во всех браузерах.",
+    SpeechRecognitionCtor ? "" : "error"
+  );
   bindEvents();
 
   if (await ensureLatestClient()) {
