@@ -370,6 +370,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function isBlockedByAnotherLocalBridgeCommand(env, command) {
+  const threadId = String(command?.threadId || "").trim();
+  const clientId = String(command?.clientId || "").trim();
+
+  if (!threadId || !clientId) {
+    return false;
+  }
+
+  const commands = await readCommands(env);
+  return commands.some((candidate) =>
+    candidate?.id !== command?.id
+    && candidate?.dispatchMode === DISPATCH_MODE_LOCAL
+    && String(candidate?.status || "").trim().toLowerCase() === "processing"
+    && String(candidate?.threadId || "").trim() === threadId
+    && String(candidate?.clientId || "").trim() === clientId
+  );
+}
+
 function canFallbackToLocalBridge(command) {
   return Number(command?.fallbackCount || 0) < 1 && (
     (String(command?.threadId || "").trim() && !String(command?.threadId || "").trim().startsWith("cloud:"))
@@ -846,6 +864,10 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     || String(command.firstExecutorAckSeenAt || "").trim()
     || Number(command.fallbackCount || 0) >= 1
   ) {
+    return command;
+  }
+
+  if (await isBlockedByAnotherLocalBridgeCommand(env, command)) {
     return command;
   }
 
