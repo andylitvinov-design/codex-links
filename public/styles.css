@@ -71,6 +71,13 @@ body {
   line-height: 1.1;
 }
 
+.header-controls {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+  min-width: 0;
+}
+
 .header-actions {
   display: flex;
   gap: 10px;
@@ -88,6 +95,11 @@ body {
 .header-actions .button {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.header-projects-button {
+  min-width: min(100%, 280px);
+  justify-content: center;
 }
 
 .header-link-button.is-active {
@@ -1158,6 +1170,11 @@ code {
     gap: 10px;
   }
 
+  .header-controls {
+    width: 100%;
+    justify-items: stretch;
+  }
+
   .submit-progress-wrap {
     width: 100%;
     align-items: stretch;
@@ -1222,6 +1239,10 @@ code {
 
   .header-actions .button {
     width: auto;
+  }
+
+  .header-projects-button {
+    width: 100%;
   }
 
   .header-actions .bridge-status {
