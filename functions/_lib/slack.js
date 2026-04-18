@@ -580,10 +580,34 @@ function isLikelyProgressOnlySlackReply(text) {
     || /(проверяю|смотрю|изучаю|читаю|готовлю|запускаю|жду|обрабатываю|анализирую|ищу|синхронизирую|открываю|разбираю|дебажу|повторяю|в очереди|в работе|работаю)/i.test(value);
 }
 
+export function isIgnorableSlackReplyText(text) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return true;
+  }
+
+  return (
+    /\bimage uploaded in this thread\b/i.test(value)
+    || /\battached image from codex links request\b/i.test(value)
+    || /\backnowledge in this same thread before starting the work\b/i.test(value)
+    || /\bfile:\s*<https:\/\/[^>]+>\b/i.test(value)
+  );
+}
+
 export function classifySlackReply(text) {
   const value = String(text || "").trim();
   const lower = value.toLowerCase();
   const prUrl = extractGithubPrUrl(value);
+
+  if (isIgnorableSlackReplyText(value)) {
+    return {
+      status: "processing",
+      progressStage: "ignored-helper",
+      prUrl,
+      branchName: ""
+    };
+  }
 
   if (
     /\b(error|failed|failure|unable|blocked|need access|permission denied|could not|can'?t complete)\b/i.test(value)
