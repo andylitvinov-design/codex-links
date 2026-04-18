@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-1524";
+const BUILD_VERSION = "20260418-1532";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1289,14 +1289,28 @@ function getCommandAnswerTitle(command) {
   const executor = getCommandActualExecutor(command);
 
   if (executor === "bridge") {
-    return "Ответ Codex bridge";
+    return "Ответ Codex";
   }
 
   if (executor === "cloud") {
-    return "Ответ Codex сдщгв";
+    return "Ответ Codex";
   }
 
   return "Ответ Codex";
+}
+
+function getCommandAnswerExecutorLabel(command) {
+  const executor = getCommandActualExecutor(command);
+
+  if (executor === "bridge") {
+    return "Bridge";
+  }
+
+  if (executor === "cloud") {
+    return "Cloud";
+  }
+
+  return "";
 }
 
 function getCommandProjectPath(command) {
@@ -1842,14 +1856,14 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
-  const title = linkedCommand?.threadLabel
-    ? `Ответ Codex · ${linkedCommand.threadLabel}`
-    : getCommandAnswerTitle(linkedCommand);
+  const title = getCommandAnswerTitle(linkedCommand);
+  const executorLabel = getCommandAnswerExecutorLabel(linkedCommand);
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
         <span class="command-answer-title">${escapeHtml(title)}</span>
+        ${executorLabel ? `<span class="command-answer-badge">${escapeHtml(executorLabel)}</span>` : ""}
       </summary>
       <div class="command-answer-body">
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
