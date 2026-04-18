@@ -2312,6 +2312,25 @@ async function fetchBridgeStatus() {
   }, "status");
 }
 
+function getCommandFreshnessTs(command) {
+  const entry = command && typeof command === "object" ? command : {};
+
+  return Math.max(
+    toTimestamp(entry.progressUpdatedAt),
+    toTimestamp(entry.completedAt),
+    toTimestamp(entry.resultAt),
+    toTimestamp(entry.replyIngestedAt),
+    toTimestamp(entry.firstReplySeenAt),
+    toTimestamp(entry.firstExecutorAckSeenAt),
+    toTimestamp(entry.firstAckAt),
+    toTimestamp(entry.bridgeClaimedAt),
+    toTimestamp(entry.slackPostedAt),
+    toTimestamp(entry.dispatchStartedAt),
+    toTimestamp(entry.dispatchedAt),
+    toTimestamp(entry.createdAt)
+  );
+}
+
 function mergeCommandCollection(commands) {
   const byId = new Map(
     state.commands.map((command) => [String(command?.id || "").trim(), command])
