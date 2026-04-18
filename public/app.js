@@ -22,7 +22,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0159";
+const BUILD_VERSION = "20260418-0208";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1289,8 +1289,9 @@ function buildTimelineSignature(items, context = {}) {
       createdAt: entry.createdAt,
       threadId: entry.threadId,
       threadLabel: entry.threadLabel,
-      status: entry.status || "",
-      progressStage: entry.progressStage || "",
+      status: entry.status || entry.command?.status || entry.linkedCommand?.status || "",
+      progressStage: entry.progressStage || entry.command?.progressStage || entry.linkedCommand?.progressStage || "",
+      deliveryStage: entry.command?.deliveryStage || entry.linkedCommand?.deliveryStage || "",
       projectCategory: entry.command?.projectCategory || entry.linkedCommand?.projectCategory || "",
       projectLabel: entry.command?.projectLabel || entry.linkedCommand?.projectLabel || "",
       targetRepo: entry.command?.targetRepo || entry.linkedCommand?.targetRepo || "",
