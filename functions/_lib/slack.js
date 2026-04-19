@@ -49,6 +49,25 @@ function buildSlackAuthHeaders(token, headers = {}) {
   };
 }
 
+function encodeSlackFormBody(payload = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value === undefined || value === null) {
+      return;
+    }
+
+    if (Array.isArray(value) || (value && typeof value === "object")) {
+      params.set(key, JSON.stringify(value));
+      return;
+    }
+
+    params.set(key, String(value));
+  });
+
+  return params.toString();
+}
+
 function normalizeSlackQueryTs(rawValue) {
   const value = normalizeText(rawValue);
 
@@ -70,12 +89,16 @@ function normalizeSlackQueryTs(rawValue) {
 }
 
 function withCommandError(error, input) {
-  const wrapped = error instanceof Error ? error : new Error(String(error || "Slack request failed."))
-  wrapped.commandError = createCommandError(input)
-  return wrapped
+  const wrapped = error instanceof Error ? error : new Error(String(error || "Slack request failed."));
+  wrapped.commandError = {
+    ...createCommandError(input),
+    ...(input?.deliveryStopPoint ? { deliveryStopPoint: normalizeText(input.deliveryStopPoint, 80) } : {}),
+    ...(input && Object.prototype.hasOwnProperty.call(input, "deliveryEvidence") ? { deliveryEvidence: input.deliveryEvidence } : {})
+  };
+  return wrapped;
 }
 
-async function callSlackApi(token, method, body = null, query = null) {
+async function callSlackApi(token, method, body = null, query = null, options = {}) {
   const url = new URL(`https://slack.com/api/${method}`);
 
   if (query && typeof query === "object") {
@@ -86,10 +109,17 @@ async function callSlackApi(token, method, body = null, query = null) {
     });
   }
 
+  const formEncoded = options?.formEncoded === true;
   const response = await fetch(url.toString(), {
     method: body ? "POST" : "GET",
-    headers: buildSlackHeaders(token),
-    body: body ? JSON.stringify(body) : undefined
+    headers: formEncoded
+      ? buildSlackAuthHeaders(token, {
+          "content-type": "application/x-www-form-urlencoded; charset=utf-8"
+        })
+      : buildSlackHeaders(token),
+    body: body
+      ? (formEncoded ? encodeSlackFormBody(body) : JSON.stringify(body))
+      : undefined
   });
   const data = await response.json().catch(() => null);
 
@@ -98,6 +128,21 @@ async function callSlackApi(token, method, body = null, query = null) {
   }
 
   return data;
+}
+
+function formatSlackUploadDiagnostic(method, body, error) {
+  const methodName = normalizeText(method, 80) || "slack_upload";
+  const argKeys = Object.keys(body && typeof body === "object" ? body : {})
+    .map((key) => normalizeText(key, 40))
+    .filter(Boolean)
+    .join(",");
+  const reason = normalizeText(error instanceof Error ? error.message : error, 160) || "unknown_error";
+  return {
+    method: methodName,
+    argKeys,
+    error: reason,
+    detail: `${methodName} failed: ${reason}${argKeys ? ` [args=${argKeys}]` : ""}`
+  };
 }
 
 function decodeSlackDataUrl(dataUrl) {
@@ -131,10 +176,60 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   const decoded = decodeSlackDataUrl(photo.dataUrl);
   const contentType = normalizeText(photo.contentType) || decoded.contentType;
   const length = Number(photo.size || decoded.bytes.byteLength || 0) || decoded.bytes.byteLength;
-  const upload = await callSlackApi(token, "files.getUploadURLExternal", {
+  const inspectedAt = new Date().toISOString();
+  const baseEvidence = {
+    inspectedAt,
+    slackRootPosted: true,
+    slackThreadMapped: true,
+    slackPhotoUploaded: false,
+    slackFileVisible: false,
+    slackFileOpenOk: false,
+    threadRootSeen: true,
+    uploadNoticeSeen: false,
+    fileReplySeen: false,
+    fileId: "",
+    fileMode: "",
+    fileAccess: "",
+    botCanOpenFile: null,
+    botOpenHttpStatus: 0,
+    workerReplySeen: false,
+    workerAckSeen: false,
+    workerPhotoReadySeen: false,
+    executionAckSeen: false,
+    photoReadySeen: false,
+    matchedChannelId: channel,
+    matchedThreadTs: threadTs
+  };
+  const uploadUrlPayload = {
     filename: fileName,
     length
-  });
+  };
+  let upload;
+
+  try {
+    upload = await callSlackApi(token, "files.getUploadURLExternal", uploadUrlPayload, null, {
+      formEncoded: true
+    });
+  } catch (error) {
+    const diagnostic = formatSlackUploadDiagnostic("files.getUploadURLExternal", uploadUrlPayload, error);
+    throw withCommandError(
+      new Error(diagnostic.detail),
+      {
+        code: "slack_photo_upload_failed",
+        stage: "slack-photo-upload-failed",
+        message: "Slack photo upload failed.",
+        detail: diagnostic.detail,
+        fallback: "local-bridge",
+        deliveryStopPoint: "slack_thread_mapped",
+        deliveryEvidence: {
+          ...baseEvidence,
+          slackUploadMethod: diagnostic.method,
+          slackUploadArgKeys: diagnostic.argKeys,
+          slackUploadError: diagnostic.error
+        }
+      }
+    );
+  }
 
   const uploadResponse = await fetch(String(upload.upload_url || ""), {
     method: "POST",
@@ -146,34 +241,84 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   });
 
   if (!uploadResponse.ok) {
-    throw new Error(`Slack file upload failed with ${uploadResponse.status}.`);
+    const diagnostic = formatSlackUploadDiagnostic("files.uploadExternal", { upload_url: true }, `http_${uploadResponse.status}`);
+    throw withCommandError(
+      new Error(diagnostic.detail),
+      {
+        code: "slack_photo_upload_failed",
+        stage: "slack-photo-upload-failed",
+        message: "Slack photo upload failed.",
+        detail: diagnostic.detail,
+        fallback: "local-bridge",
+        deliveryStopPoint: "slack_thread_mapped",
+        deliveryEvidence: {
+          ...baseEvidence,
+          fileId: normalizeText(upload.file_id),
+          slackUploadMethod: diagnostic.method,
+          slackUploadArgKeys: diagnostic.argKeys,
+          slackUploadError: diagnostic.error
+        }
+      }
+    );
   }
 
-  await callSlackApi(token, "files.completeUploadExternal", {
+  const completePayload = {
     files: [
       {
         id: normalizeText(upload.file_id),
         title: fileName
       }
     ],
-    channel_id: channel,
-    initial_comment: "Attached image from Codex Links request."
-  });
-
-  let permalink = "";
-  let fileMode = "";
-  let fileAccess = "";
-  let urlPrivate = "";
+    channel_id: channel
+  };
+  let completed;
 
   try {
-    const info = await callSlackApi(token, "files.info", null, {
-      file: normalizeText(upload.file_id)
+    completed = await callSlackApi(token, "files.completeUploadExternal", completePayload, null, {
+      formEncoded: true
     });
-    fileMode = normalizeText(info?.file?.mode);
-    fileAccess = normalizeText(info?.file?.file_access);
-    urlPrivate = normalizeText(info?.file?.url_private_download || info?.file?.url_private);
-    permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
-  } catch {}
+  } catch (error) {
+    const diagnostic = formatSlackUploadDiagnostic("files.completeUploadExternal", completePayload, error);
+    throw withCommandError(
+      new Error(diagnostic.detail),
+      {
+        code: "slack_photo_upload_failed",
+        stage: "slack-photo-upload-failed",
+        message: "Slack photo upload failed.",
+        detail: diagnostic.detail,
+        fallback: "local-bridge",
+        deliveryStopPoint: "slack_thread_mapped",
+        deliveryEvidence: {
+          ...baseEvidence,
+          fileId: normalizeText(upload.file_id),
+          slackUploadMethod: diagnostic.method,
+          slackUploadArgKeys: diagnostic.argKeys,
+          slackUploadError: diagnostic.error
+        }
+      }
+    );
+  }
+
+  const completedFile = (Array.isArray(completed?.files) ? completed.files : [])
+    .find((entry) => normalizeText(entry?.id) === normalizeText(upload.file_id))
+    || (Array.isArray(completed?.files) ? completed.files[0] : null);
+
+  let permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
+  let fileMode = normalizeText(completedFile?.mode);
+  let fileAccess = normalizeText(completedFile?.file_access || completedFile?.access);
+  let urlPrivate = normalizeText(completedFile?.url_private_download || completedFile?.url_private);
+
+  if (!permalink || !fileMode || !fileAccess || !urlPrivate) {
+    try {
+      const info = await callSlackApi(token, "files.info", null, {
+        file: normalizeText(upload.file_id)
+      });
+      fileMode = fileMode || normalizeText(info?.file?.mode);
+      fileAccess = fileAccess || normalizeText(info?.file?.file_access);
+      urlPrivate = urlPrivate || normalizeText(info?.file?.url_private_download || info?.file?.url_private);
+      permalink = permalink || normalizeText(info?.file?.permalink || info?.file?.permalink_public);
+    } catch {}
+  }
 
   const probe = urlPrivate
     ? await probeSlackFileOpen(token, urlPrivate).catch(() => ({ canOpen: false, status: 0 }))
@@ -578,14 +723,19 @@ export async function postSlackCommand(env, command, mention) {
         ].filter(Boolean).join(" ")
       );
     } catch (error) {
+      const commandError = error && typeof error === "object" && error.commandError
+        ? error.commandError
+        : null;
       throw withCommandError(
         new Error(error instanceof Error ? error.message : "Slack photo upload failed."),
         {
-          code: "slack_photo_upload_failed",
-          stage: "slack-photo-upload-failed",
-          message: "Slack photo upload failed.",
-          detail: error instanceof Error ? error.message : "Slack photo upload failed.",
-          fallback: "local-bridge"
+          code: commandError?.code || "slack_photo_upload_failed",
+          stage: commandError?.stage || "slack-photo-upload-failed",
+          message: commandError?.message || "Slack photo upload failed.",
+          detail: commandError?.detail || (error instanceof Error ? error.message : "Slack photo upload failed."),
+          fallback: commandError?.fallback || "local-bridge",
+          deliveryStopPoint: commandError?.deliveryStopPoint,
+          deliveryEvidence: commandError?.deliveryEvidence
         }
       );
     }
