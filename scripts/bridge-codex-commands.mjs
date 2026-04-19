@@ -9,7 +9,8 @@ const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
 const EXEC_TIMEOUT_MS = 4 * 60 * 1000;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
-const FETCH_TIMEOUT_MS = 15 * 1000;
+const READ_TIMEOUT_MS = 15 * 1000;
+const WRITE_TIMEOUT_MS = 60 * 1000;
 const BRIDGE_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
@@ -161,7 +162,7 @@ async function fetchStoredThreads() {
           headers: {
             accept: "application/json"
           }
-        }, FETCH_TIMEOUT_MS, "fetchStoredThreads");
+        }, READ_TIMEOUT_MS, "fetchStoredThreads");
 
         if (!response.ok) {
           throw new Error(`Failed to load stored threads: ${response.status}`);
@@ -278,7 +279,7 @@ async function runWithProgressHeartbeat(commandId, progressStage, task) {
   }
 }
 
-async function fetchWithTimeout(resource, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+async function fetchWithTimeout(resource, init = {}, timeoutMs = READ_TIMEOUT_MS) {
   return fetch(resource, {
     ...init,
     signal: AbortSignal.timeout(timeoutMs)
@@ -290,7 +291,7 @@ function isRetryableFetchError(error) {
   return /fetch failed|ECONNRESET|ETIMEDOUT|timeout|aborted/i.test(message);
 }
 
-async function fetchWithRetry(resource, init = {}, timeoutMs = FETCH_TIMEOUT_MS, context = "fetch") {
+async function fetchWithRetry(resource, init = {}, timeoutMs = READ_TIMEOUT_MS, context = "fetch") {
   let lastError = null;
 
   for (let attempt = 1; attempt <= FETCH_RETRY_LIMIT; attempt += 1) {
@@ -320,7 +321,9 @@ async function getLegacyLinksThreadId() {
       return match[1];
     }
   } catch (error) {
-    await appendBridgeErrorLog("getLegacyLinksThreadId.readAutomationToml", error);
+    if (error?.code !== "ENOENT") {
+      await appendBridgeErrorLog("getLegacyLinksThreadId.readAutomationToml", error);
+    }
   }
 
   try {
@@ -796,7 +799,7 @@ async function fetchRecentCommands() {
     headers: {
       accept: "application/json"
     }
-  }, FETCH_TIMEOUT_MS, "fetchRecentCommands");
+  }, READ_TIMEOUT_MS, "fetchRecentCommands");
 
   if (!response.ok) {
     throw new Error(`Failed to load pending commands: ${response.status}`);
@@ -819,7 +822,7 @@ async function claimNextCommand() {
         processorId: "launchd-bridge",
         leaseMs: CLAIM_LEASE_MS
       })
-    }, FETCH_TIMEOUT_MS, "claimNextCommand");
+    }, WRITE_TIMEOUT_MS, "claimNextCommand");
 
     if (!response.ok) {
       const body = await response.text();
@@ -873,7 +876,7 @@ async function updateProgress(commandId, progressStage, extras = {}) {
       processingLeaseUntil,
       ...extras
     })
-  }, FETCH_TIMEOUT_MS, "updateProgress");
+  }, WRITE_TIMEOUT_MS, "updateProgress");
 
   if (!response.ok) {
     const body = await response.text();
@@ -896,7 +899,7 @@ async function acknowledge(ids) {
       action: "ack",
       ids
     })
-  }, FETCH_TIMEOUT_MS, "acknowledge");
+  }, WRITE_TIMEOUT_MS, "acknowledge");
 
   if (!response.ok) {
     const body = await response.text();
@@ -923,7 +926,7 @@ async function markAnswered(commandId, assistantText, completedAt) {
       actualDispatchMode: "bridge",
       resultAt: completedAt
     })
-  }, FETCH_TIMEOUT_MS, "markAnswered");
+  }, WRITE_TIMEOUT_MS, "markAnswered");
 
   if (!response.ok) {
     const body = await response.text();
@@ -951,7 +954,7 @@ async function markFailed(commandId, errorMessage, completedAt) {
       errorMessage,
       resultAt: completedAt
     })
-  }, FETCH_TIMEOUT_MS, "markFailed");
+  }, WRITE_TIMEOUT_MS, "markFailed");
 
   if (!response.ok) {
     const body = await response.text();
@@ -971,7 +974,7 @@ async function syncMessages(messages) {
       "x-write-token": token
     },
     body: JSON.stringify({ messages })
-  }, FETCH_TIMEOUT_MS, "syncMessages");
+  }, WRITE_TIMEOUT_MS, "syncMessages");
 
   if (!response.ok) {
     const body = await response.text();
@@ -987,7 +990,7 @@ async function publishBridgeStatus(status) {
       "x-write-token": token
     },
     body: JSON.stringify({ status })
-  }, FETCH_TIMEOUT_MS, "publishBridgeStatus");
+  }, WRITE_TIMEOUT_MS, "publishBridgeStatus");
 
   if (!response.ok) {
     const body = await response.text();
