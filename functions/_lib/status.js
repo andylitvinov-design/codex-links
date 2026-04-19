@@ -77,15 +77,11 @@ export async function readBridgeStatus(env) {
   const configuredDispatchMode = getConfiguredDispatchMode(runtimeConfig);
   const raw = await env.LINKS_STORE.get(BRIDGE_STATUS_STORAGE_KEY, "json");
   const status = normalizeStatus(raw);
-  const slackDisabled = !isSlackDispatchConfigured(runtimeConfig);
 
   if (!status.dispatchMode || (
     configuredDispatchMode === DISPATCH_MODE_CLOUD
     && isCloudDispatchConfigured(runtimeConfig)
     && status.dispatchMode === DISPATCH_MODE_LOCAL
-  ) || (
-    status.dispatchMode === DISPATCH_MODE_SLACK
-    && slackDisabled
   )) {
     status.dispatchMode = configuredDispatchMode;
   }
@@ -104,7 +100,7 @@ export async function readBridgeStatus(env) {
 
   if (status.dispatchMode === DISPATCH_MODE_LOCAL && !isCloudDispatchConfigured(runtimeConfig)) {
     status.executorLabel = "Cloud not configured; local bridge fallback";
-    status.lastError = status.lastError || "Missing trusted cloud bridge configuration in Pages project.";
+    status.lastError = status.lastError || "Missing OPENAI_API_KEY in Pages project.";
   }
 
   return status;
@@ -113,9 +109,7 @@ export async function readBridgeStatus(env) {
 export async function writeBridgeStatus(env, input) {
   const runtimeConfig = await readRuntimeConfig(env);
   const status = normalizeStatus(input);
-  const dispatchMode = !isSlackDispatchConfigured(runtimeConfig) && status.dispatchMode === DISPATCH_MODE_SLACK
-    ? getConfiguredDispatchMode(runtimeConfig)
-    : (status.dispatchMode || getConfiguredDispatchMode(runtimeConfig));
+  const dispatchMode = status.dispatchMode || getConfiguredDispatchMode(runtimeConfig);
   status.dispatchMode = dispatchMode;
   status.executorLabel = status.executorLabel || (
     dispatchMode === DISPATCH_MODE_LOCAL && !isCloudDispatchConfigured(runtimeConfig)

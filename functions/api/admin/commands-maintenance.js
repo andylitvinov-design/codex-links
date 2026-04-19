@@ -1,16 +1,14 @@
 import {
   getCommandById,
   getCommandsForClient,
-  readCommands,
   runCommandMaintenance
 } from "../../_lib/commands.js";
 import { handleOptions, json } from "../../_lib/http.js";
-import { isCloudDispatchConfigured, isSlackDispatchConfigured } from "../../_lib/dispatch.js";
+import { isSlackDispatchConfigured } from "../../_lib/dispatch.js";
 import { isAuthorized } from "../../_lib/security.js";
 import { readRuntimeConfig } from "../../_lib/config.js";
 import {
   dispatchCommandIfNeeded,
-  finalizeStaleSlackCommands,
   syncRecentSlackReplies,
   syncSpecificSlackReplies
 } from "../commands.js";
@@ -60,7 +58,6 @@ export async function onRequest(context) {
   }
 
   const runtimeConfig = await readRuntimeConfig(env);
-  const allowCloud = isCloudDispatchConfigured(runtimeConfig);
   const allowSlack = isSlackDispatchConfigured(runtimeConfig);
   const commandId = String(payload?.commandId || "").trim();
   const clientId = String(payload?.clientId || "").trim();
@@ -81,24 +78,8 @@ export async function onRequest(context) {
     }
   }
 
-  if (allowSlack) {
-    if (commandId) {
-      const command = await getCommandById(env, commandId);
-
-      if (command) {
-        await finalizeStaleSlackCommands(env, runtimeConfig, [command]);
-      }
-    } else if (clientId) {
-      const commands = await getCommandsForClient(env, clientId);
-      await finalizeStaleSlackCommands(env, runtimeConfig, commands);
-    } else {
-      const commands = await readCommands(env);
-      await finalizeStaleSlackCommands(env, runtimeConfig, commands);
-    }
-  }
-
   const maintenance = await runCommandMaintenance(env, {
-    preferCloud: allowCloud,
+    preferSlack: allowSlack,
     fallbackToLocal: true
   });
 

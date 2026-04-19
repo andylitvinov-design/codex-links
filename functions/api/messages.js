@@ -6,50 +6,11 @@ function normalizeEntryText(entry) {
   return String(entry?.text || "").trim().toLowerCase();
 }
 
-function isHiddenJunkFeedText(text) {
-  const normalized = String(text || "").trim().toLowerCase();
-  const allowedTokens = new Set(["photo", "repro", "ignore", "test", "probe"]);
-
-  if (!normalized) {
-    return false;
-  }
-
-  if (/^(?:photo|repro|ignore)(?:\s+(?:photo|repro|ignore))*$/i.test(normalized)) {
-    return true;
-  }
-
-  const tokens = normalized
-    .replace(/[^a-z\s]+/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-
-  return tokens.length > 0
-    && tokens.length <= 6
-    && tokens.every((token) => allowedTokens.has(token))
-    && tokens.includes("ignore")
-    && (tokens.includes("photo") || tokens.includes("repro"));
-}
-
-function isProductionVerificationProbe(text) {
-  return text.includes("production")
-    && (
-      text.includes("verification")
-      || text.includes("route check")
-      || text.includes(" ping")
-    )
-    && (
-      text.includes("ignore if seen")
-      || text.includes("reply with ok only")
-    );
-}
-
 function isHiddenPublicMessage(entry) {
   const text = normalizeEntryText(entry);
 
   return (
-    isHiddenJunkFeedText(text)
-    || isProductionVerificationProbe(text)
-    || text.includes("delivery-probe")
+    text.includes("delivery-probe")
     || text.includes("local bridge probe")
     || text.includes("probe reply with ok only")
     || text.includes("dedupe test ignore")

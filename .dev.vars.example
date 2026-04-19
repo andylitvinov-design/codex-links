@@ -1,12 +1,12 @@
 LINKS_WRITE_TOKEN=replace-with-a-long-random-token
 COMMAND_DISPATCH_MODE=cloud
+OPENAI_API_KEY=sk-replace-me
 CLOUD_BRIDGE_BASE_URL=http://127.0.0.1:8788
 CLOUD_BRIDGE_SHARED_SECRET=replace-with-the-same-secret-used-on-the-trusted-machine
 CLOUD_BRIDGE_LABEL=Trusted Codex Cloud
 CLOUD_BRIDGE_REQUEST_TIMEOUT_MS=20000
 PUBLIC_GA4_MEASUREMENT_ID=G-XXXXXXXXXX
 PUBLIC_GA4_DEBUG_MODE=0
-# Local dev may use 127.0.0.1. Preview and production must use a stable named Cloudflare Tunnel hostname, not trycloudflare.com.
 # Optional legacy-only Slack config:
 SLACK_BOT_TOKEN=xoxb-replace-me
 SLACK_SIGNING_SECRET=replace-me

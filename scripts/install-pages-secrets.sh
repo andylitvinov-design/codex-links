@@ -16,8 +16,7 @@ typeset -a required_keys
 required_keys=(
   LINKS_WRITE_TOKEN
   COMMAND_DISPATCH_MODE
-  CLOUD_BRIDGE_BASE_URL
-  CLOUD_BRIDGE_SHARED_SECRET
+  OPENAI_API_KEY
   GITHUB_OWNER
   GITHUB_TOKEN
 )
@@ -38,6 +37,24 @@ for key in "${required_keys[@]}"; do
   fi
 
   echo "Uploading $key to Pages project $PROJECT_NAME"
+  printf "%s" "$value" | npx wrangler pages secret put "$key" --project-name "$PROJECT_NAME"
+done
+
+optional_trusted_cloud_keys=(
+  CLOUD_BRIDGE_BASE_URL
+  CLOUD_BRIDGE_SHARED_SECRET
+  CLOUD_BRIDGE_LABEL
+  CLOUD_BRIDGE_REQUEST_TIMEOUT_MS
+)
+
+for key in "${optional_trusted_cloud_keys[@]}"; do
+  value="$(extract_value "$key")"
+
+  if [[ -z "$value" ]]; then
+    continue
+  fi
+
+  echo "Uploading optional trusted-cloud key $key to Pages project $PROJECT_NAME"
   printf "%s" "$value" | npx wrangler pages secret put "$key" --project-name "$PROJECT_NAME"
 done
 

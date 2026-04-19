@@ -11,7 +11,6 @@
     "cloud:preview-check": "node scripts/check-preview-cloud-status.mjs",
     "cloud:smoke": "node scripts/smoke-cloud-delivery.mjs",
     "cloud:photo-smoke": "node scripts/smoke-cloud-photo-delivery.mjs",
-    "cloud:bridge:start": "node scripts/cloud-bridge-server.mjs",
     "bridge:smoke": "node scripts/smoke-bridge-delivery.mjs",
     "bridge:photo-smoke": "node scripts/smoke-bridge-photo-delivery.mjs",
     "cloud:install-secrets": "zsh scripts/install-pages-secrets.sh",
