@@ -1,11 +1,25 @@
 import { constantTimeEqual } from "./security.js";
 import { createCommandError } from "./command-debug.js";
-import { readThreads } from "./threads.js";
 
 const encoder = new TextEncoder();
 
 function normalizeText(value) {
   return String(value || "").trim();
+}
+
+function isSlackCloudDiagnosticsEnabled(env) {
+  const value = normalizeText(env?.SLACK_CLOUD_DIAGNOSTICS).toLowerCase();
+  return value === "1" || value === "true";
+}
+
+function withStageTimestamp(enabled, stage, timestamp) {
+  if (!enabled || !stage) {
+    return {};
+  }
+
+  return {
+    [`${stage}At`]: normalizeText(timestamp || new Date().toISOString())
+  };
 }
 
 async function signSlackPayload(secret, payload) {
@@ -25,13 +39,6 @@ function buildSlackHeaders(token) {
   return {
     authorization: `Bearer ${token}`,
     "content-type": "application/json; charset=utf-8"
-  };
-}
-
-function buildSlackFormHeaders(token) {
-  return {
-    authorization: `Bearer ${token}`,
-    "content-type": "application/x-www-form-urlencoded; charset=utf-8"
   };
 }
 
@@ -93,43 +100,6 @@ async function callSlackApi(token, method, body = null, query = null) {
   return data;
 }
 
-async function callSlackApiForm(token, method, body = null, query = null) {
-  const url = new URL(`https://slack.com/api/${method}`);
-
-  if (query && typeof query === "object") {
-    Object.entries(query).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && String(value).trim()) {
-        url.searchParams.set(key, String(value));
-      }
-    });
-  }
-
-  const form = new URLSearchParams();
-
-  if (body && typeof body === "object") {
-    Object.entries(body).forEach(([key, value]) => {
-      if (value === undefined || value === null) {
-        return;
-      }
-
-      form.set(key, typeof value === "string" ? value : JSON.stringify(value));
-    });
-  }
-
-  const response = await fetch(url.toString(), {
-    method: "POST",
-    headers: buildSlackFormHeaders(token),
-    body: form
-  });
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || `Slack API ${method} failed with ${response.status}.`);
-  }
-
-  return data;
-}
-
 function decodeSlackDataUrl(dataUrl) {
   const value = normalizeText(dataUrl);
   const match = value.match(/^data:([^;,]+)?;base64,(.+)$/i);
@@ -161,7 +131,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   const decoded = decodeSlackDataUrl(photo.dataUrl);
   const contentType = normalizeText(photo.contentType) || decoded.contentType;
   const length = Number(photo.size || decoded.bytes.byteLength || 0) || decoded.bytes.byteLength;
-  const upload = await callSlackApiForm(token, "files.getUploadURLExternal", {
+  const upload = await callSlackApi(token, "files.getUploadURLExternal", {
     filename: fileName,
     length
   });
@@ -179,7 +149,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
     throw new Error(`Slack file upload failed with ${uploadResponse.status}.`);
   }
 
-  const completed = await callSlackApiForm(token, "files.completeUploadExternal", {
+  await callSlackApi(token, "files.completeUploadExternal", {
     files: [
       {
         id: normalizeText(upload.file_id),
@@ -190,27 +160,34 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
     initial_comment: "Attached image from Codex Links request."
   });
 
-  const completedFile = Array.isArray(completed?.files) ? completed.files[0] : null;
-  let permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
+  let permalink = "";
+  let fileMode = "";
+  let fileAccess = "";
+  let urlPrivate = "";
 
-  if (!permalink) {
-    try {
-      const info = await callSlackApi(token, "files.info", null, {
-        file: normalizeText(upload.file_id)
-      });
-      permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
-    } catch (error) {
-      console.error("[codex-links][slack] files.info fallback failed", {
-        fileId: normalizeText(upload.file_id),
-        error: error instanceof Error ? error.message : String(error || "Unknown error")
-      });
-    }
-  }
+  try {
+    const info = await callSlackApi(token, "files.info", null, {
+      file: normalizeText(upload.file_id)
+    });
+    fileMode = normalizeText(info?.file?.mode);
+    fileAccess = normalizeText(info?.file?.file_access);
+    urlPrivate = normalizeText(info?.file?.url_private_download || info?.file?.url_private);
+    permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
+  } catch {}
+
+  const probe = urlPrivate
+    ? await probeSlackFileOpen(token, urlPrivate).catch(() => ({ canOpen: false, status: 0 }))
+    : { canOpen: false, status: 0 };
 
   return {
     fileId: normalizeText(upload.file_id),
     permalink,
-    fileName
+    fileName,
+    fileMode,
+    fileAccess,
+    urlPrivate,
+    botCanOpenFile: Boolean(probe.canOpen),
+    botOpenHttpStatus: Number(probe.status || 0)
   };
 }
 
@@ -257,6 +234,159 @@ export async function fetchSlackThreadReplies(env, channel, threadTs) {
       botId: normalizeText(message?.bot_id),
       subtype: normalizeText(message?.subtype)
     }));
+}
+
+function extractFileFromMessage(message) {
+  const files = Array.isArray(message?.files) ? message.files : [];
+  const file = files.find((entry) => normalizeText(entry?.id)) || null;
+
+  if (!file) {
+    return null;
+  }
+
+  return {
+    id: normalizeText(file.id),
+    mode: normalizeText(file.mode),
+    access: normalizeText(file.file_access),
+    urlPrivate: normalizeText(file.url_private_download || file.url_private)
+  };
+}
+
+async function probeSlackFileOpen(token, url) {
+  const target = normalizeText(url);
+
+  if (!token || !target) {
+    return { canOpen: false, status: 0 };
+  }
+
+  const response = await fetch(target, {
+    headers: buildSlackAuthHeaders(token, {
+      range: "bytes=0-0"
+    }),
+    signal: AbortSignal.timeout(10_000)
+  });
+
+  try {
+    await response.arrayBuffer();
+  } catch {}
+
+  return {
+    canOpen: response.ok,
+    status: response.status
+  };
+}
+
+export async function inspectSlackPhotoDelivery(env, runtimeConfig, input = {}) {
+  const token = normalizeText(env?.SLACK_BOT_TOKEN || runtimeConfig?.SLACK_BOT_TOKEN);
+  const diagnosticsEnabled = isSlackCloudDiagnosticsEnabled(runtimeConfig || env);
+  const channelId = normalizeText(input.channelId);
+  const threadTs = normalizeText(input.threadTs);
+  const requestedFileId = normalizeText(input.fileId);
+  const inspectedAt = new Date().toISOString();
+
+  if (!token || !channelId || !threadTs) {
+    return {
+      inspectedAt,
+      threadRootSeen: false,
+      slackRootPosted: false,
+      slackThreadMapped: false,
+      slackPhotoUploaded: false,
+      slackFileVisible: false,
+      slackFileOpenOk: false,
+      uploadNoticeSeen: false,
+      fileReplySeen: false,
+      fileId: requestedFileId,
+      fileMode: "",
+      fileAccess: "",
+      botCanOpenFile: false,
+      botOpenHttpStatus: 0,
+      workerReplySeen: false,
+      workerAckSeen: false,
+      workerPhotoReadySeen: false,
+      executionAckSeen: false,
+      photoReadySeen: false,
+      ...(diagnosticsEnabled ? {
+        matchedChannelId: channelId,
+        matchedThreadTs: threadTs
+      } : {})
+    };
+  }
+
+  const data = await callSlackApi(token, "conversations.replies", null, {
+    channel: channelId,
+    ts: threadTs,
+    inclusive: true,
+    limit: 100
+  });
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
+  const replies = messages.filter((message) => normalizeText(message?.ts) && normalizeText(message?.ts) !== threadTs);
+  const root = messages.find((message) => normalizeText(message?.ts) === threadTs) || null;
+  const uploadNotice = replies.find((message) => isIgnorableSlackReplyText(extractSlackMessageText(message))) || null;
+  const fileMessage = replies.find((message) => extractFileFromMessage(message)) || null;
+  const fileFromMessage = extractFileFromMessage(fileMessage);
+  const fileId = requestedFileId || normalizeText(fileFromMessage?.id);
+
+  let fileFromInfo = null;
+
+  if (fileId) {
+    try {
+      const info = await callSlackApi(token, "files.info", null, {
+        file: fileId
+      });
+      const file = info?.file || {};
+      fileFromInfo = {
+        id: normalizeText(file.id),
+        mode: normalizeText(file.mode),
+        access: normalizeText(file.file_access),
+        urlPrivate: normalizeText(file.url_private_download || file.url_private)
+      };
+    } catch {}
+  }
+
+  const workerReplies = replies.filter((message) =>
+    isLikelyCodexSlackActor(runtimeConfig, message, { candidateCount: 1 })
+      && !isIgnorableSlackReplyText(extractSlackMessageText(message))
+  );
+  const ack = workerReplies
+    .map((message) => parseStructuredExecutionAck(extractSlackMessageText(message)))
+    .find((entry) => entry.present) || null;
+  const file = fileFromInfo || fileFromMessage;
+  const probe = file?.urlPrivate
+    ? await probeSlackFileOpen(token, file.urlPrivate).catch(() => ({ canOpen: false, status: 0 }))
+    : { canOpen: false, status: 0 };
+
+  return {
+    inspectedAt,
+    threadRootSeen: Boolean(root),
+    slackRootPosted: Boolean(root),
+    slackThreadMapped: Boolean(root) && Boolean(channelId) && Boolean(threadTs),
+    slackPhotoUploaded: Boolean(fileFromMessage || fileId),
+    slackFileVisible: normalizeText(file?.access).toLowerCase() === "visible",
+    slackFileOpenOk: Boolean(probe.canOpen),
+    uploadNoticeSeen: Boolean(uploadNotice),
+    fileReplySeen: Boolean(fileFromMessage),
+    fileId: normalizeText(file?.id || fileId),
+    fileMode: normalizeText(file?.mode),
+    fileAccess: normalizeText(file?.access),
+    botCanOpenFile: Boolean(probe.canOpen),
+    botOpenHttpStatus: Number(probe.status || 0),
+    workerReplySeen: workerReplies.length > 0,
+    workerAckSeen: Boolean(ack?.present),
+    workerPhotoReadySeen: ack?.photoReady === true,
+    executionAckSeen: Boolean(ack?.present),
+    photoReadySeen: ack?.photoReady === true,
+    ...(diagnosticsEnabled ? {
+      matchedChannelId: channelId,
+      matchedThreadTs: threadTs,
+      ...withStageTimestamp(true, "slackRootPosted", root?.ts ? new Date(Number(root.ts) * 1000 || Date.now()).toISOString() : ""),
+      ...withStageTimestamp(true, "slackPhotoUploaded", fileFromMessage?.ts ? new Date(Number(fileFromMessage.ts) * 1000 || Date.now()).toISOString() : ""),
+      ...withStageTimestamp(true, "slackFileVisible", normalizeText(file?.access).toLowerCase() === "visible" ? inspectedAt : ""),
+      ...withStageTimestamp(true, "slackFileOpenOk", probe.canOpen ? inspectedAt : ""),
+      ...withStageTimestamp(true, "workerReplySeen", workerReplies[0]?.ts ? new Date(Number(workerReplies[0].ts) * 1000 || Date.now()).toISOString() : ""),
+      ...withStageTimestamp(true, "workerAckSeen", ack?.present ? inspectedAt : ""),
+      ...withStageTimestamp(true, "workerPhotoReadySeen", ack?.photoReady === true ? inspectedAt : "")
+    } : {})
+  };
 }
 
 export async function fetchSlackChannelMessages(env, channel, options = {}) {
@@ -325,43 +455,7 @@ async function validateSlackTarget(token, channel, targetUserId) {
   }
 }
 
-async function resolveStoredCodexThreadId(env, command) {
-  const directThreadId = normalizeText(command?.threadId);
-
-  if (/^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(directThreadId)) {
-    return directThreadId;
-  }
-
-  const projectId = normalizeText(command?.projectId || command?.threadId).toLowerCase();
-  const projectLabel = normalizeText(command?.projectLabel || command?.threadLabel).toLowerCase();
-
-  if (!projectId && !projectLabel) {
-    return "";
-  }
-
-  try {
-    const threads = await readThreads(env);
-    const matched = threads
-      .filter((thread) => /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(normalizeText(thread?.id)))
-      .filter((thread) => {
-        const category = normalizeText(thread?.category).toLowerCase();
-        const label = normalizeText(thread?.label).toLowerCase();
-        const displayLabel = normalizeText(thread?.displayLabel).toLowerCase();
-
-        return (
-          (projectId && (category === projectId || label === projectId || displayLabel.startsWith(`${projectId} /`)))
-          || (projectLabel && (category === projectLabel || label === projectLabel || displayLabel.startsWith(`${projectLabel} /`)))
-        );
-      })
-      .sort((left, right) => Number(right?.updatedAt || right?.createdAt || 0) - Number(left?.updatedAt || left?.createdAt || 0))[0];
-
-    return normalizeText(matched?.id);
-  } catch {
-    return "";
-  }
-}
-
-export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = "") {
+export function buildSlackCommandPrompt(command, env) {
   const threadId = normalizeText(command?.threadId);
   const threadLabel = normalizeText(command?.threadLabel) || threadId || "Links";
   const projectCategory = normalizeText(command?.projectCategory) || "other";
@@ -370,20 +464,12 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
   const targetRepo = normalizeText(command?.targetRepo);
   const targetRepoUrl = normalizeText(command?.targetRepoUrl);
   const targetWorkspacePath = normalizeText(command?.targetWorkspacePath);
-  const codexThreadId = normalizeText(resolvedCodexThreadId) || (/^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(threadId) ? threadId : "");
+  const codexThreadId = /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(threadId) ? threadId : "";
   const contextFiles = Array.isArray(command?.targetContextFiles) && command.targetContextFiles.length
     ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
     : ["AGENTS.md", "README.md", "STATE.md"];
   const photoNote = command?.photo
-    ? [
-        "",
-        "",
-        "An image from Codex Links is attached in a file reply inside this same Slack thread.",
-        "Read the attached image before doing the work.",
-        "Base your answer on concrete visual evidence from the image, not on guesses.",
-        "If the task is about what is shown in the image, explicitly mention the relevant visible detail you observed before giving the fix or conclusion.",
-        "If the image is missing or unreadable, say that clearly in-thread instead of pretending you saw it."
-      ].join("\n")
+    ? "\n\nAn image from Codex Links is attached in a file reply inside this same Slack thread. Read the attached image before doing the work. If the image is missing, say so in-thread and wait."
     : "";
   const repoUrlLine = targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "";
   const workspacePathLine = targetWorkspacePath ? `Workspace path: ${targetWorkspacePath}` : "";
@@ -411,9 +497,6 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
     "Immediately reply in this Slack thread with a short acknowledgement before doing the work.",
     "Keep every progress update and the final result in the same Slack thread.",
     "Delivery rule: create a branch and PR, never push directly to main.",
-    command?.photo
-      ? "For photo-based requests, the final answer must start with one short sentence describing what you observed in the image."
-      : "",
     "",
     "User request:",
     normalizeText(command?.text) || "User sent a photo-only request.",
@@ -445,11 +528,10 @@ export async function postSlackCommand(env, command, mention) {
 
   await validateSlackTarget(token, channel, targetUserId);
 
-  const resolvedCodexThreadId = await resolveStoredCodexThreadId(env, command);
   const text = buildSlackCommandPrompt(command, {
     ...env,
     SLACK_CODEX_MENTION: mention
-  }, resolvedCodexThreadId);
+  });
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: buildSlackHeaders(token),
@@ -479,9 +561,12 @@ export async function postSlackCommand(env, command, mention) {
   const resolvedChannel = normalizeText(data.channel) || channel;
   const resolvedThreadTs = normalizeText(data.message?.thread_ts) || normalizeText(data.ts);
 
+  let photoUpload = null;
+
   if (command?.photo) {
     try {
       const uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo);
+      photoUpload = uploaded;
       await postSlackThreadNudge(
         token,
         resolvedChannel,
@@ -509,7 +594,8 @@ export async function postSlackCommand(env, command, mention) {
   return {
     channel: resolvedChannel,
     ts: normalizeText(data.ts),
-    threadTs: resolvedThreadTs
+    threadTs: resolvedThreadTs,
+    photoUpload
   };
 }
 
@@ -608,11 +694,6 @@ export function isIgnorableSlackReplyText(text) {
     || /\battached image from codex links request\b/i.test(value)
     || /\backnowledge in this same thread before starting the work\b/i.test(value)
     || /\bfile:\s*<https:\/\/[^>]+>\b/i.test(value)
-    || /\bnew codex links task\.\b/i.test(value)
-    || /\bconversation label:\b/i.test(value)
-    || /\brepository url:\s*<https:\/\/github\.com\/[^>]+>\b/i.test(value)
-    || /\bmode:\s*work in codex cloud only inside the selected repository boundary\b/i.test(value)
-    || /\breply in this slack thread with progress updates\./i.test(value)
   );
 }
 
@@ -667,6 +748,136 @@ export function classifySlackReply(text) {
     progressStage: "answered",
     prUrl,
     branchName: extractBranchName(value)
+  };
+}
+
+function normalizeAckBoolean(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (normalized === "true") {
+    return true;
+  }
+
+  if (normalized === "false") {
+    return false;
+  }
+
+  return null;
+}
+
+export function parseStructuredExecutionAck(text) {
+  const value = String(text || "").trim();
+  const match = value.match(/\bCODEX_LINKS_EXECUTION_ACK\b\s*[:=-]?\s*({[\s\S]*})/i);
+
+  if (!match) {
+    return {
+      present: false,
+      valid: false,
+      photoReady: null,
+      payload: null,
+      detail: ""
+    };
+  }
+
+  try {
+    const payload = JSON.parse(match[1]);
+    const kind = String(payload?.type || payload?.kind || payload?.event || "CODEX_LINKS_EXECUTION_ACK").trim().toUpperCase();
+    const status = String(payload?.status || payload?.state || "").trim().toLowerCase();
+    const photoReady = normalizeAckBoolean(payload?.photo_ready);
+    const validKind = kind === "CODEX_LINKS_EXECUTION_ACK";
+    const validStatus = !status || ["accepted", "started", "processing", "running"].includes(status);
+
+    return {
+      present: true,
+      valid: validKind && validStatus,
+      photoReady,
+      payload,
+      detail: validKind && validStatus
+        ? ""
+        : "Structured execution ack must use type CODEX_LINKS_EXECUTION_ACK and a startup status."
+    };
+  } catch (error) {
+    return {
+      present: true,
+      valid: false,
+      photoReady: null,
+      payload: null,
+      detail: error instanceof Error ? error.message : "Invalid execution ack JSON."
+    };
+  }
+}
+
+export function deriveSlackReplyOutcome(command, text) {
+  const classification = classifySlackReply(text);
+  const ack = parseStructuredExecutionAck(text);
+  const requiresPhotoReady = Boolean(command?.photoAttached || command?.photo || command?.photoBytesPresent);
+  const hasPriorExecutionAck = Boolean(String(command?.firstExecutorAckSeenAt || "").trim());
+  const executionAckValid = ack.present && ack.valid && (!requiresPhotoReady || ack.photoReady === true);
+  const baseStatus = String(command?.status || "").trim().toLowerCase() || "dispatched";
+
+  if (ack.present) {
+    if (executionAckValid) {
+      return {
+        ...classification,
+        status: "processing",
+        progressStage: requiresPhotoReady ? "execution-ack-photo-ready" : "execution-ack",
+        executionAckPresent: true,
+        executionAckValid: true,
+        executionAckPhotoReady: ack.photoReady === true,
+        lastDiagnosticCode: "",
+        lastDiagnosticDetail: ""
+      };
+    }
+
+    return {
+      ...classification,
+      status: hasPriorExecutionAck || baseStatus === "processing" ? "processing" : "dispatched",
+      progressStage: requiresPhotoReady ? "waiting-photo-ready" : "waiting-execution-ack",
+      executionAckPresent: true,
+      executionAckValid: false,
+      executionAckPhotoReady: ack.photoReady === true,
+      lastDiagnosticCode: requiresPhotoReady ? "cloud_photo_not_ready" : "execution_ack_invalid",
+      lastDiagnosticDetail: requiresPhotoReady
+        ? "Structured execution ack was received without photo_ready=true."
+        : (ack.detail || "Structured execution ack was invalid.")
+    };
+  }
+
+  if (classification.status === "answered" || classification.status === "failed") {
+    return {
+      ...classification,
+      executionAckPresent: false,
+      executionAckValid: false,
+      executionAckPhotoReady: false,
+      lastDiagnosticCode: "",
+      lastDiagnosticDetail: ""
+    };
+  }
+
+  if (!hasPriorExecutionAck) {
+    return {
+      ...classification,
+      status: baseStatus === "processing" ? "processing" : "dispatched",
+      progressStage: "waiting-execution-ack",
+      executionAckPresent: false,
+      executionAckValid: false,
+      executionAckPhotoReady: false,
+      lastDiagnosticCode: "",
+      lastDiagnosticDetail: ""
+    };
+  }
+
+  return {
+    ...classification,
+    executionAckPresent: false,
+    executionAckValid: false,
+    executionAckPhotoReady: false,
+    lastDiagnosticCode: "",
+    lastDiagnosticDetail: ""
   };
 }
 
