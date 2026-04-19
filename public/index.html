@@ -8,18 +8,37 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
+    <script>
+      (function () {
+        var build = "20260419-0246";
+        var current = new URL(window.location.href);
+        var requested = String(current.searchParams.get("v") || "").trim();
+        if (requested === build) {
+          return;
+        }
+        current.searchParams.set("v", build);
+        current.searchParams.set("reload", String(Date.now()));
+        window.location.replace(current.toString());
+      })();
+    </script>
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260419-0515" />
+    <link rel="stylesheet" href="/styles.css?v=20260419-0246" />
   </head>
   <body>
     <main class="page">
       <section class="chat-shell">
         <header class="chat-header">
           <h1>Ссылки</h1>
-          <div class="header-actions">
-            <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
+          <div class="header-controls">
+            <div class="header-actions">
+              <a class="button button-secondary header-link-button" href="/projects.html">Projects</a>
+              <a class="button button-secondary header-link-button" href="/advice.html">Advice</a>
+              <a class="button button-secondary header-link-button" href="/analysis.html">Анализ</a>
+              <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
+            </div>
+            <a class="button button-primary header-projects-button" href="/projects.html">Мои проекты</a>
           </div>
         </header>
         <section class="bridge-status-block">
@@ -28,24 +47,13 @@
               <p id="bridge-status-text" class="bridge-status">Подключаю статус cloud execution…</p>
               <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
             </div>
-            <button class="button button-secondary bridge-reset-button" id="delivery-reset-button" type="button">Reset</button>
           </div>
-          <p class="bridge-reset-help">Резервный запуск maintenance для зависших cloud/bridge сообщений.</p>
-        </section>
-
-        <section class="projects-entry">
-          <div class="projects-entry-copy">
-            <span class="field-label">Живые ссылки</span>
-            <p>Готовая страница со списком опубликованных проектов и рабочих online-ссылок.</p>
-          </div>
-          <a class="button button-primary projects-entry-button" href="/projects.html">Открыть список проектов</a>
         </section>
 
         <section class="command-wrap">
           <form id="command-form" class="command-form">
             <div class="thread-settings-inline-row">
               <span id="thread-settings-summary" class="form-status">Показываются все репозитории.</span>
-              <button class="button button-secondary thread-settings-quick-toggle" id="thread-settings-show-all-badge" type="button" aria-pressed="false">Все</button>
             </div>
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
@@ -71,7 +79,7 @@
                 <span class="field-label">Фото</span>
                 <input id="command-photo-input" name="photo" type="file" accept="image/*" />
               </label>
-              <button class="button button-secondary command-photo-clear" id="command-photo-clear" type="button" disabled aria-label="Удалить фото" title="Удалить фото">×</button>
+              <button class="button button-secondary command-photo-clear" id="command-photo-clear" type="button" disabled aria-label="Удалить фото" title="Удалить фото">x</button>
             </div>
             <p id="command-photo-status" class="form-status command-photo-status">Фото не выбрано.</p>
             <section id="project-nav" class="project-nav project-nav-inline" aria-label="Проекты из dispatch manifest">
@@ -79,18 +87,11 @@
                 <span class="field-label" id="command-target-label">Проект</span>
                 <select id="command-thread-select" name="thread"></select>
               </label>
-              <div class="project-nav-actions">
-                <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Категории</button>
-                <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline thread-settings-item-inline-compact">
-                  <input id="thread-settings-show-all" type="checkbox" />
-                  <span>Все</span>
-                </label>
-              </div>
             </section>
             <div class="command-compose-row">
               <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true"></textarea>
               <button class="button button-secondary command-voice-button" id="command-voice-button" type="button" aria-label="Голосовой ввод" title="Голосовой ввод">
-                <span aria-hidden="true">🎙</span>
+                <span aria-hidden="true">Mic</span>
               </button>
               <button class="button button-send-icon" type="submit" aria-label="Отправить в Codex" title="Отправить в Codex">
                 <span aria-hidden="true">▶</span>
@@ -130,6 +131,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260419-0515"></script>
+    <script type="module" src="/app.js?v=20260419-0246"></script>
   </body>
 </html>
