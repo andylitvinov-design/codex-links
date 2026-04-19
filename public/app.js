@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-1518";
+const BUILD_VERSION = "20260419-0246";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -731,6 +731,34 @@ function getActiveThreadId() {
   return canonicalizeRepoSelectionId(commandThreadSelect?.value || storage.selectedRepoId || "");
 }
 
+function getVisibleThreadIds() {
+  if (storage.showAllMessages) {
+    return null;
+  }
+
+  if (state.activeThreadCategories.length) {
+    const allowedCategories = new Set(state.activeThreadCategories);
+    const ids = getAllMenuOptions()
+      .filter((option) => allowedCategories.has(option.category))
+      .map((option) => canonicalizeRepoSelectionId(option.id))
+      .filter(Boolean);
+
+    return ids.length ? new Set(ids) : new Set();
+  }
+
+  const activeThreadId = getActiveThreadId();
+  return activeThreadId ? new Set([activeThreadId]) : new Set();
+}
+
+function matchesVisibleThreadSelection(threadId, visibleThreadIds) {
+  if (visibleThreadIds === null) {
+    return true;
+  }
+
+  const normalizedThreadId = canonicalizeRepoSelectionId(threadId);
+  return Boolean(normalizedThreadId) && visibleThreadIds.has(normalizedThreadId);
+}
+
 function getSelectedMenuRepoIds() {
   const availableIds = new Set(getAllMenuOptions().map((option) => option.id));
   const stored = storage.selectedMenuRepoIds
@@ -837,7 +865,7 @@ function renderThreadSettingsSummary() {
       return;
     }
 
-    threadSettingsSummary.textContent = `Группы: ${state.activeThreadCategories.join(", ")} · проектов в меню: ${filteredOptions.length}.`;
+    threadSettingsSummary.textContent = `Показываются сообщения групп: ${state.activeThreadCategories.join(", ")} · проектов: ${filteredOptions.length}.`;
     return;
   }
 
@@ -1234,11 +1262,10 @@ function getFallbackMessageDeliveryStatus(commandId) {
 }
 
 function getVisibleTimelineCommands() {
-  const showAllMessages = storage.showAllMessages;
-  const activeThreadId = showAllMessages ? "" : getActiveThreadId();
+  const visibleThreadIds = getVisibleThreadIds();
 
   return state.commands
-    .filter((command) => !activeThreadId || isSameThreadTarget(command.threadId, activeThreadId))
+    .filter((command) => matchesVisibleThreadSelection(command.threadId, visibleThreadIds))
     .filter((command) => !isHiddenSystemEntry(command))
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
 }
@@ -1886,10 +1913,11 @@ function renderCommands() {
   pruneExpiredAnswerState();
   renderTimelineTabButtons();
   const showAllMessages = storage.showAllMessages;
-  const activeThreadId = showAllMessages ? "" : getActiveThreadId();
+  const visibleThreadIds = getVisibleThreadIds();
+  const activeThreadId = showAllMessages || state.activeThreadCategories.length ? "" : getActiveThreadId();
   const visibleCommands = getVisibleTimelineCommands();
   const visibleMessages = state.messages
-    .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
+    .filter((message) => matchesVisibleThreadSelection(message.threadId, visibleThreadIds))
     .filter((message) => !isHiddenSystemEntry(message))
     .filter((message) => !isNotificationEntry(message));
 
@@ -1990,7 +2018,7 @@ function renderCommands() {
   const notificationItems = [
     getReleaseNotificationEntry(),
     ...state.messages
-      .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
+      .filter((message) => matchesVisibleThreadSelection(message.threadId, visibleThreadIds))
       .filter((message) => isNotificationEntry(message))
       .map((message) => ({
         id: `notification:${message.id}`,
