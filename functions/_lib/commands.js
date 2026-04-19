@@ -972,15 +972,26 @@ export async function claimNextCommand(env, input = {}) {
     }
   }
 
-  const queuedCommands = await readStoredCommandsByIds(env, queuedIds);
-  const candidate = queuedCommands.find((command) => {
+  const isClaimableCandidate = (command) => {
     if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "queued") {
       return false;
     }
 
     const threadKey = getCommandThreadKey(command);
     return threadKey === "::" || !activeThreadKeys.has(threadKey);
-  });
+  };
+  const queuedCommands = await readStoredCommandsByIds(env, queuedIds);
+  let candidate = queuedCommands.find((command) => isClaimableCandidate(command));
+
+  if (!candidate) {
+    const snapshot = await readCommands(env);
+    const repairedCandidate = snapshot.find((command) => isClaimableCandidate(command));
+
+    if (repairedCandidate) {
+      await rebuildCommandIndexes(env, snapshot);
+      candidate = repairedCandidate;
+    }
+  }
 
   if (!candidate) {
     return {
@@ -1187,37 +1198,28 @@ export async function updateCommandProgress(env, input = {}) {
     };
   }
 
-  const nowIso = new Date().toISOString();
-  const current = await readCommands(env);
-  let updated = null;
+  const current = await getCommandById(env, id);
 
-  const next = current.map((command) => {
-    if (command.id !== id) {
-      return command;
-    }
-
-    updated = {
-      ...command,
-      ...mergeCommandDebugState(command, input, command.dispatchMode),
-      progressStage,
-      progressUpdatedAt: normalizeProgressUpdatedAt(input.progressUpdatedAt) || nowIso
-    };
-
-    if (command.status === "processing" && processingLeaseUntil) {
-      updated.processingLeaseUntil = processingLeaseUntil;
-    }
-
-    return updated;
-  });
-
-  if (!updated) {
+  if (!current) {
     return {
       ok: false,
       error: "Command not found."
     };
   }
 
-  await writeCommands(env, next);
+  const nowIso = new Date().toISOString();
+  const updated = {
+    ...current,
+    ...mergeCommandDebugState(current, input, current.dispatchMode),
+    progressStage,
+    progressUpdatedAt: normalizeProgressUpdatedAt(input.progressUpdatedAt) || nowIso
+  };
+
+  if (current.status === "processing" && processingLeaseUntil) {
+    updated.processingLeaseUntil = processingLeaseUntil;
+  }
+
+  await persistCommand(env, updated);
 
   return {
     ok: true,
