@@ -96,3 +96,47 @@ test("GET /api/commands can include photo data explicitly", async () => {
   assert.equal(payload.commands.length, 1);
   assert.equal(payload.commands[0].photo.dataUrl, "data:image/jpeg;base64,AAAA");
 });
+
+test("GET /api/commands?scope=public stays slim and does not require auth", async () => {
+  const env = createMockEnv();
+
+  await writeCommands(env, [{
+    id: "cmd-photo-public",
+    clientId: "client-1",
+    threadId: "links",
+    threadLabel: "links",
+    text: "visible photo command",
+    createdAt: new Date().toISOString(),
+    status: "queued",
+    photo: {
+      contentType: "image/jpeg",
+      fileName: "photo.jpg",
+      size: 12,
+      dataUrl: "data:image/jpeg;base64,AAAA"
+    }
+  }]);
+
+  const response = await onRequest({
+    request: new Request("https://example.com/api/commands?scope=public"),
+    env
+  });
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.commands.length, 1);
+  assert.equal(payload.commands[0].photo.hasDataUrl, true);
+  assert.equal("dataUrl" in payload.commands[0].photo, false);
+});
+
+test("GET /api/commands requires auth for non-public bulk list", async () => {
+  const env = createMockEnv();
+
+  const response = await onRequest({
+    request: new Request("https://example.com/api/commands"),
+    env
+  });
+
+  assert.equal(response.status, 401);
+  const payload = await response.json();
+  assert.equal(payload.error, "Unauthorized.");
+});

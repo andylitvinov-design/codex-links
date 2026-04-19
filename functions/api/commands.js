@@ -28,7 +28,7 @@ import {
   getSlackCodexMention
 } from "../_lib/dispatch.js";
 import { isAuthorized } from "../_lib/security.js";
-import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
+import { deriveSlackReplyOutcome, fetchSlackChannelMessages, fetchSlackThreadReplies, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
 import { isIgnorableSlackReplyText } from "../_lib/slack.js";
 import { upsertMessages } from "../_lib/messages.js";
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
@@ -260,24 +260,28 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     return false;
   }
 
-  const classification = classifySlackReply(latestReply.text);
+  const classification = deriveSlackReplyOutcome(command, latestReply.text);
+  const hasValidExecutionAck = classification.executionAckValid;
+  const resolvedProgressStage = progressStage === "slack-reply-received-unthreaded"
+    ? progressStage
+    : (classification.progressStage || progressStage);
 
   await upsertCommandDispatchState(env, {
     id: command.id,
     dispatchMode: DISPATCH_MODE_SLACK,
     status: classification.status,
-    progressStage,
+    progressStage: resolvedProgressStage,
     actualExecutor: "cloud",
     slackReplyReceived: true,
     slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
     replyMatched: true,
     replyMatchedBy: options.replyMatchedBy || (progressStage === "slack-reply-received-unthreaded" ? "manual-sync" : "thread"),
-    firstAckAt: command.firstAckAt || new Date().toISOString(),
+    firstAckAt: hasValidExecutionAck ? (command.firstAckAt || new Date().toISOString()) : command.firstAckAt,
     timeoutPhase: "",
-    lastDiagnosticCode: progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : "",
-    lastDiagnosticDetail: progressStage === "slack-reply-received-unthreaded"
+    lastDiagnosticCode: classification.lastDiagnosticCode || (progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : ""),
+    lastDiagnosticDetail: classification.lastDiagnosticDetail || (progressStage === "slack-reply-received-unthreaded"
       ? "A Codex reply arrived outside the original Slack thread and was reconciled from recent channel history."
-      : "",
+      : ""),
     slackChannelId: channelId,
     slackThreadTs: progressStage === "slack-reply-received-unthreaded"
       ? (latestReply.threadTs || latestReply.ts || threadTs)
@@ -287,7 +291,8 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     branchName: classification.branchName,
     errorMessage: classification.status === "failed" ? latestReply.text : "",
     processingStartedAt: classification.status === "processing" ? new Date().toISOString() : "",
-    resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""
+    resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : "",
+    firstExecutorAckSeenAt: hasValidExecutionAck ? (command.firstExecutorAckSeenAt || new Date().toISOString()) : command.firstExecutorAckSeenAt
   });
 
   await upsertMessages(env, [latestReply].map((reply) => ({
@@ -633,7 +638,13 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       slackChannelId: published.channel,
       slackMessageTs: published.ts,
       slackThreadTs: published.threadTs,
-      dispatchedAt: new Date().toISOString()
+      dispatchedAt: new Date().toISOString(),
+      lastDiagnosticCode: published.photoUpload?.fileId ? "slack_photo_uploaded" : "",
+      lastDiagnosticDetail: published.photoUpload?.fileId
+        ? `Slack photo upload saved as ${published.photoUpload.fileId}.`
+        : "",
+      photoFileId: published.photoUpload?.fileId,
+      photoPermalink: published.photoUpload?.permalink
     });
 
     await storeSlackThreadCommandMap(env, published.channel, published.threadTs, command.id);

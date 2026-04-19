@@ -8,8 +8,22 @@ const TARGET_REPO_URL = process.env.CODEX_LINKS_SMOKE_REPO_URL || "https://githu
 const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"];
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const clientId = `cloud-photo-smoke-${Date.now()}`;
-const text = "photo cloud probe ignore: reply with PHOTO_OK only after reading the attached image in thread";
+const text = "photo cloud probe ignore: reply with CODEX_LINKS_EXECUTION_ACK including photo_ready=true, then PHOTO_OK only after reading the attached image in thread";
 const photoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot7O8AAAAASUVORK5CYII=";
+
+function parseExecutionAck(text) {
+  const match = String(text || "").match(/\bCODEX_LINKS_EXECUTION_ACK\b\s*[:=-]?\s*({[\s\S]*})/i);
+
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return { invalid: true };
+  }
+}
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,9 +185,17 @@ async function pollCommand(id) {
           String(command.slackChannelId || "").trim(),
           String(command.slackThreadTs || command.slackMessageTs || "").trim()
         );
+        const ack = replies.find((reply) => {
+          const payload = parseExecutionAck(String(reply?.text || ""));
+          return payload && payload.photo_ready === true;
+        });
         const matched = replies.find((reply) => /PHOTO_OK/i.test(String(reply?.text || "")));
 
-        if (matched) {
+        if (!command.firstExecutorAckSeenAt && ack) {
+          throw new Error("Structured photo execution ack appeared in Slack, but command state still has no firstExecutorAckSeenAt.");
+        }
+
+        if (matched && ack) {
           return command;
         }
       }
@@ -186,7 +208,7 @@ async function pollCommand(id) {
     await sleep(5000);
   }
 
-  throw new Error("Cloud photo smoke timed out waiting for a reply.");
+  throw new Error("Cloud photo smoke timed out waiting for both structured photo execution ack and PHOTO_OK reply.");
 }
 
 async function main() {

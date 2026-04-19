@@ -12,8 +12,22 @@ const FALLBACK_THREAD_LABEL = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_LABE
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || ""
 const CLOUD_ROUTE = String(process.env.CODEX_LINKS_SMOKE_CLOUD_ROUTE || "slack").trim().toLowerCase()
 const clientId = `smoke-${Date.now()}`
-const text = "delivery-probe: reply with OK only"
+const text = "delivery-probe: reply with CODEX_LINKS_EXECUTION_ACK first, then OK only when complete"
 const pollStartedAt = Date.now()
+
+function parseExecutionAck(text) {
+  const match = String(text || "").match(/\bCODEX_LINKS_EXECUTION_ACK\b\s*[:=-]?\s*({[\s\S]*})/i)
+
+  if (!match) {
+    return null
+  }
+
+  try {
+    return JSON.parse(match[1])
+  } catch {
+    return { invalid: true }
+  }
+}
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -186,9 +200,14 @@ async function pollCommand(id) {
           String(command.slackChannelId || "").trim(),
           String(command.slackThreadTs || command.slackMessageTs || "").trim()
         )
+        const ack = replies.find((reply) => parseExecutionAck(String(reply?.text || "").trim()))
         const matched = replies.find((reply) => /(^|\b)OK(\b|$)/i.test(String(reply?.text || "").trim()))
 
-        if (matched) {
+        if (!command.firstExecutorAckSeenAt && ack) {
+          throw new Error("Structured execution ack appeared in Slack, but command state still has no firstExecutorAckSeenAt.")
+        }
+
+        if (matched && ack) {
           return command
         }
       }
@@ -209,7 +228,7 @@ async function pollCommand(id) {
     await sleep(5000)
   }
 
-  throw new Error("Smoke test timed out waiting for a cloud reply or fallback-matched reply.")
+  throw new Error("Smoke test timed out waiting for both structured execution ack and final OK reply.")
 }
 
 async function main() {

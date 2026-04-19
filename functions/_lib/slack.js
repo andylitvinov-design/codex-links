@@ -378,9 +378,12 @@ export async function postSlackCommand(env, command, mention) {
   const resolvedChannel = normalizeText(data.channel) || channel;
   const resolvedThreadTs = normalizeText(data.message?.thread_ts) || normalizeText(data.ts);
 
+  let photoUpload = null;
+
   if (command?.photo) {
     try {
       const uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo);
+      photoUpload = uploaded;
       await postSlackThreadNudge(
         token,
         resolvedChannel,
@@ -408,7 +411,8 @@ export async function postSlackCommand(env, command, mention) {
   return {
     channel: resolvedChannel,
     ts: normalizeText(data.ts),
-    threadTs: resolvedThreadTs
+    threadTs: resolvedThreadTs,
+    photoUpload
   };
 }
 
@@ -561,6 +565,136 @@ export function classifySlackReply(text) {
     progressStage: "answered",
     prUrl,
     branchName: extractBranchName(value)
+  };
+}
+
+function normalizeAckBoolean(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (normalized === "true") {
+    return true;
+  }
+
+  if (normalized === "false") {
+    return false;
+  }
+
+  return null;
+}
+
+export function parseStructuredExecutionAck(text) {
+  const value = String(text || "").trim();
+  const match = value.match(/\bCODEX_LINKS_EXECUTION_ACK\b\s*[:=-]?\s*({[\s\S]*})/i);
+
+  if (!match) {
+    return {
+      present: false,
+      valid: false,
+      photoReady: null,
+      payload: null,
+      detail: ""
+    };
+  }
+
+  try {
+    const payload = JSON.parse(match[1]);
+    const kind = String(payload?.type || payload?.kind || payload?.event || "CODEX_LINKS_EXECUTION_ACK").trim().toUpperCase();
+    const status = String(payload?.status || payload?.state || "").trim().toLowerCase();
+    const photoReady = normalizeAckBoolean(payload?.photo_ready);
+    const validKind = kind === "CODEX_LINKS_EXECUTION_ACK";
+    const validStatus = !status || ["accepted", "started", "processing", "running"].includes(status);
+
+    return {
+      present: true,
+      valid: validKind && validStatus,
+      photoReady,
+      payload,
+      detail: validKind && validStatus
+        ? ""
+        : "Structured execution ack must use type CODEX_LINKS_EXECUTION_ACK and a startup status."
+    };
+  } catch (error) {
+    return {
+      present: true,
+      valid: false,
+      photoReady: null,
+      payload: null,
+      detail: error instanceof Error ? error.message : "Invalid execution ack JSON."
+    };
+  }
+}
+
+export function deriveSlackReplyOutcome(command, text) {
+  const classification = classifySlackReply(text);
+  const ack = parseStructuredExecutionAck(text);
+  const requiresPhotoReady = Boolean(command?.photoAttached || command?.photo || command?.photoBytesPresent);
+  const hasPriorExecutionAck = Boolean(String(command?.firstExecutorAckSeenAt || "").trim());
+  const executionAckValid = ack.present && ack.valid && (!requiresPhotoReady || ack.photoReady === true);
+  const baseStatus = String(command?.status || "").trim().toLowerCase() || "dispatched";
+
+  if (ack.present) {
+    if (executionAckValid) {
+      return {
+        ...classification,
+        status: "processing",
+        progressStage: requiresPhotoReady ? "execution-ack-photo-ready" : "execution-ack",
+        executionAckPresent: true,
+        executionAckValid: true,
+        executionAckPhotoReady: ack.photoReady === true,
+        lastDiagnosticCode: "",
+        lastDiagnosticDetail: ""
+      };
+    }
+
+    return {
+      ...classification,
+      status: hasPriorExecutionAck || baseStatus === "processing" ? "processing" : "dispatched",
+      progressStage: requiresPhotoReady ? "waiting-photo-ready" : "waiting-execution-ack",
+      executionAckPresent: true,
+      executionAckValid: false,
+      executionAckPhotoReady: ack.photoReady === true,
+      lastDiagnosticCode: requiresPhotoReady ? "cloud_photo_not_ready" : "execution_ack_invalid",
+      lastDiagnosticDetail: requiresPhotoReady
+        ? "Structured execution ack was received without photo_ready=true."
+        : (ack.detail || "Structured execution ack was invalid.")
+    };
+  }
+
+  if (classification.status === "answered" || classification.status === "failed") {
+    return {
+      ...classification,
+      executionAckPresent: false,
+      executionAckValid: false,
+      executionAckPhotoReady: false,
+      lastDiagnosticCode: "",
+      lastDiagnosticDetail: ""
+    };
+  }
+
+  if (!hasPriorExecutionAck) {
+    return {
+      ...classification,
+      status: baseStatus === "processing" ? "processing" : "dispatched",
+      progressStage: "waiting-execution-ack",
+      executionAckPresent: false,
+      executionAckValid: false,
+      executionAckPhotoReady: false,
+      lastDiagnosticCode: "",
+      lastDiagnosticDetail: ""
+    };
+  }
+
+  return {
+    ...classification,
+    executionAckPresent: false,
+    executionAckValid: false,
+    executionAckPhotoReady: false,
+    lastDiagnosticCode: "",
+    lastDiagnosticDetail: ""
   };
 }
 

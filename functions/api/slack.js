@@ -3,7 +3,7 @@ import { handleOptions, json } from "../_lib/http.js";
 import { upsertMessages } from "../_lib/messages.js";
 import { DISPATCH_MODE_SLACK, getDispatchModeLabel } from "../_lib/dispatch.js";
 import {
-  classifySlackReply,
+  deriveSlackReplyOutcome,
   extractSlackMessageText,
   isIgnorableSlackReplyText,
   isLikelyCodexSlackActor,
@@ -135,10 +135,10 @@ async function ingestSlackReply(env, command, event, options = {}) {
     };
   }
 
-  const classification = classifySlackReply(text);
+  const classification = deriveSlackReplyOutcome(command, text);
   const eventIso = new Date(Number(String(event.event_ts || event.ts || "0")) * 1000 || Date.now()).toISOString();
   const replyIngestedAt = new Date().toISOString();
-  const isFirstAck = !String(command.firstExecutorAckSeenAt || "").trim();
+  const isFirstAck = classification.executionAckValid && !String(command.firstExecutorAckSeenAt || "").trim();
   const isFirstReply = Boolean(text) && !String(command.firstReplySeenAt || "").trim();
   const progressStage = options.progressStage
     || (isFirstAck && classification.status === "processing" ? "accepted" : classification.progressStage || "processing");
@@ -153,15 +153,15 @@ async function ingestSlackReply(env, command, event, options = {}) {
     slackReplyThreaded: Boolean(replyThreadTs),
     replyMatched: true,
     replyMatchedBy: options.replyMatchedBy || (replyThreadTs ? "thread" : "unthreaded-fallback"),
-    firstAckAt: command.firstAckAt || eventIso,
-    firstExecutorAckSeenAt: command.firstExecutorAckSeenAt || eventIso,
+    firstAckAt: classification.executionAckValid ? (command.firstAckAt || eventIso) : command.firstAckAt,
+    firstExecutorAckSeenAt: classification.executionAckValid ? (command.firstExecutorAckSeenAt || eventIso) : command.firstExecutorAckSeenAt,
     firstReplySeenAt: isFirstReply ? eventIso : command.firstReplySeenAt,
     replyIngestedAt,
     timeoutPhase: "",
-    lastDiagnosticCode: !replyThreadTs ? "slack_reply_unthreaded" : "",
-    lastDiagnosticDetail: !replyThreadTs
+    lastDiagnosticCode: classification.lastDiagnosticCode || (!replyThreadTs ? "slack_reply_unthreaded" : ""),
+    lastDiagnosticDetail: classification.lastDiagnosticDetail || (!replyThreadTs
       ? "A Codex reply arrived outside the original Slack thread and was reconciled using the active channel mapping."
-      : "",
+      : ""),
     slackChannelId: channelId,
     slackThreadTs: effectiveThreadTs,
     slackMessageTs: command.slackMessageTs,
