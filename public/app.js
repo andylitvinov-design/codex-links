@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260419-0246";
+const BUILD_VERSION = "20260419-0540";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -34,6 +34,12 @@ const IDLE_POLL_INTERVAL_MS = 12000;
 const MAX_PHOTO_FILE_SIZE = 4_500_000;
 const MAX_PHOTO_UPLOAD_BYTES = 1_600_000;
 const MAX_PHOTO_DIMENSION = 1600;
+const DIRECT_CLOUD_SUPPORTED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif"
+]);
 
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
@@ -297,6 +303,10 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function isDirectCloudCompatibleImageType(contentType) {
+  return DIRECT_CLOUD_SUPPORTED_IMAGE_TYPES.has(String(contentType || "").trim().toLowerCase());
+}
+
 function encodeBase64FromBytes(bytes) {
   let binary = "";
   const chunkSize = 0x8000;
@@ -372,7 +382,7 @@ async function buildResizedPhotoData(file) {
   }
 }
 
-async function preparePhotoPayload(file) {
+async function preparePhotoPayload(file, options = {}) {
   if (!file) {
     return null;
   }
@@ -385,7 +395,11 @@ async function preparePhotoPayload(file) {
     throw new Error("Фото больше 4.5 MB. Уменьшите файл и попробуйте снова.");
   }
 
-  if (file.size <= MAX_PHOTO_UPLOAD_BYTES) {
+  const contentType = String(file.type || "image/jpeg").toLowerCase();
+  const needsCloudCompatibleTranscode = Boolean(options.preferCloudCompatibleFormat)
+    && !isDirectCloudCompatibleImageType(contentType);
+
+  if (file.size <= MAX_PHOTO_UPLOAD_BYTES && !needsCloudCompatibleTranscode) {
     let dataUrl = "";
 
     try {
@@ -398,7 +412,7 @@ async function preparePhotoPayload(file) {
 
     return {
       fileName: file.name,
-      contentType: String(file.type || "image/jpeg").toLowerCase(),
+      contentType,
       size: file.size,
       dataUrl
     };
@@ -1142,6 +1156,16 @@ function getCommandActualExecutor(command) {
     return value;
   }
 
+  const dispatchMode = String(command?.dispatchMode || "").trim().toLowerCase();
+
+  if (dispatchMode === "local-bridge") {
+    return "bridge";
+  }
+
+  if (dispatchMode === "cloud" || dispatchMode === "slack-codex-cloud") {
+    return "cloud";
+  }
+
   return "pending";
 }
 
@@ -1315,11 +1339,11 @@ function getCommandAnswerTitle(command) {
   const executor = getCommandActualExecutor(command);
 
   if (executor === "bridge") {
-    return "Ответ Codex bridge";
+    return "Ответ Codex · Bridge";
   }
 
   if (executor === "cloud") {
-    return "Ответ Codex сдщгв";
+    return "Ответ Codex · Cloud";
   }
 
   return "Ответ Codex";
@@ -1868,9 +1892,10 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
+  const answerTitle = getCommandAnswerTitle(linkedCommand);
   const title = linkedCommand?.threadLabel
-    ? `Ответ Codex · ${linkedCommand.threadLabel}`
-    : getCommandAnswerTitle(linkedCommand);
+    ? `${answerTitle} · ${linkedCommand.threadLabel}`
+    : answerTitle;
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
@@ -2988,7 +3013,9 @@ async function submitCommand(event) {
 
   if (photoFile) {
     setPhotoStatusMessage("Подготавливаю фото для отправки…");
-    payload.photo = await preparePhotoPayload(photoFile);
+    payload.photo = await preparePhotoPayload(photoFile, {
+      preferCloudCompatibleFormat: requestedCloudMode
+    });
   }
 
   const response = await fetch("/api/commands", {

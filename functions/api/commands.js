@@ -90,10 +90,6 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   if (requestedExecutor === "cloud" || requestedDispatchMode === DISPATCH_MODE_CLOUD) {
-    if (hasPhoto && isCloudDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_CLOUD;
-    }
-
     if (configuredDispatchMode === DISPATCH_MODE_SLACK && isSlackDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_SLACK;
     }
@@ -110,7 +106,7 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
       return DISPATCH_MODE_CLOUD;
     }
 
-    return DISPATCH_MODE_LOCAL;
+      return DISPATCH_MODE_LOCAL;
   }
 
   if (hasPhoto && configuredDispatchMode === DISPATCH_MODE_CLOUD) {
