@@ -1,4 +1,11 @@
-import { HISTORY_RETENTION_MS, INBOX_MESSAGES_STORAGE_KEY, MAX_INBOX_MESSAGES } from "./constants.js";
+import {
+  HISTORY_RETENTION_MS,
+  INBOX_MESSAGE_ITEM_PREFIX,
+  INBOX_MESSAGES_CLIENT_INDEX_PREFIX,
+  INBOX_MESSAGES_RECENT_STORAGE_KEY,
+  INBOX_MESSAGES_STORAGE_KEY,
+  MAX_INBOX_MESSAGES
+} from "./constants.js";
 
 function normalizeId(rawId) {
   return String(rawId || "").trim().slice(0, 200);
@@ -68,11 +75,100 @@ function normalizeMessage(input) {
   };
 }
 
-export async function readMessages(env) {
-  const existing = await env.LINKS_STORE.get(INBOX_MESSAGES_STORAGE_KEY, "json");
+function messageItemKey(id) {
+  return `${INBOX_MESSAGE_ITEM_PREFIX}${normalizeId(id)}`;
+}
 
-  if (!Array.isArray(existing)) {
-    return [];
+function clientMessageIndexKey(clientId) {
+  return `${INBOX_MESSAGES_CLIENT_INDEX_PREFIX}${normalizeClientId(clientId)}`;
+}
+
+function uniqIds(ids, max = MAX_INBOX_MESSAGES) {
+  return [...new Set(
+    (Array.isArray(ids) ? ids : [])
+      .map((id) => normalizeId(id))
+      .filter(Boolean)
+  )].slice(-max);
+}
+
+async function readIdIndex(env, key) {
+  const existing = await env.LINKS_STORE.get(key, "json");
+  return uniqIds(existing);
+}
+
+async function writeIdIndex(env, key, ids) {
+  await env.LINKS_STORE.put(key, JSON.stringify(uniqIds(ids)));
+}
+
+async function appendIndexedMessageId(env, key, id) {
+  const normalizedId = normalizeId(id);
+
+  if (!normalizedId) {
+    return;
+  }
+
+  const current = await readIdIndex(env, key).catch(() => []);
+  await writeIdIndex(env, key, [...current, normalizedId]);
+}
+
+async function readStoredMessage(env, id) {
+  const normalizedId = normalizeId(id);
+  return normalizedId ? (await env.LINKS_STORE.get(messageItemKey(normalizedId), "json")) : null;
+}
+
+async function readStoredMessagesByIds(env, ids) {
+  const entries = await Promise.all(uniqIds(ids).map((id) => readStoredMessage(env, id)));
+  return entries.map((entry) => normalizeMessage(entry)).filter(Boolean);
+}
+
+async function rebuildMessageIndexes(env, messages) {
+  const normalized = (Array.isArray(messages) ? messages : [])
+    .map((message) => normalizeMessage(message))
+    .filter(Boolean)
+    .filter((message) => isWithinRetentionWindow(message.createdAt))
+    .slice(-MAX_INBOX_MESSAGES);
+  const recentIds = [];
+  const clientBuckets = new Map();
+
+  for (const message of normalized) {
+    await env.LINKS_STORE.put(messageItemKey(message.id), JSON.stringify(message));
+    recentIds.push(message.id);
+    const bucket = clientBuckets.get(message.clientId) || [];
+    bucket.push(message.id);
+    clientBuckets.set(message.clientId, bucket);
+  }
+
+  await Promise.all([
+    writeIdIndex(env, INBOX_MESSAGES_RECENT_STORAGE_KEY, recentIds),
+    ...[...clientBuckets.entries()].map(([clientId, ids]) => writeIdIndex(env, clientMessageIndexKey(clientId), ids))
+  ]);
+}
+
+async function persistMessage(env, message) {
+  const normalized = normalizeMessage(message);
+
+  if (!normalized || !isWithinRetentionWindow(normalized.createdAt)) {
+    return null;
+  }
+
+  await env.LINKS_STORE.put(messageItemKey(normalized.id), JSON.stringify(normalized));
+  await Promise.all([
+    appendIndexedMessageId(env, INBOX_MESSAGES_RECENT_STORAGE_KEY, normalized.id),
+    appendIndexedMessageId(env, clientMessageIndexKey(normalized.clientId), normalized.id)
+  ]);
+
+  return normalized;
+}
+
+export async function readMessages(env) {
+  const indexedIds = await readIdIndex(env, INBOX_MESSAGES_RECENT_STORAGE_KEY).catch(() => []);
+  let existing = [];
+
+  if (indexedIds.length) {
+    existing = await readStoredMessagesByIds(env, indexedIds);
+  } else {
+    const legacy = await env.LINKS_STORE.get(INBOX_MESSAGES_STORAGE_KEY, "json");
+    existing = Array.isArray(legacy) ? legacy : [];
   }
 
   return existing
@@ -88,30 +184,18 @@ export async function writeMessages(env, messages) {
     .filter(Boolean)
     .filter((message) => isWithinRetentionWindow(message.createdAt))
     .slice(-MAX_INBOX_MESSAGES);
-  await env.LINKS_STORE.put(INBOX_MESSAGES_STORAGE_KEY, JSON.stringify(trimmed));
+  await rebuildMessageIndexes(env, trimmed);
   return trimmed;
 }
 
 export async function upsertMessages(env, messages) {
-  const current = await readMessages(env);
-  const next = new Map(current.map((message) => [message.id, message]));
-
-  for (const message of Array.isArray(messages) ? messages : []) {
-    const normalized = normalizeMessage(message);
-
-    if (!normalized) {
-      continue;
-    }
-
-    next.set(normalized.id, normalized);
-  }
-
-  const ordered = [...next.values()].sort((left, right) =>
-    String(left.createdAt || "").localeCompare(String(right.createdAt || ""))
+  const persisted = await Promise.all(
+    (Array.isArray(messages) ? messages : []).map((message) => persistMessage(env, message))
   );
 
-  await writeMessages(env, ordered);
-  return ordered;
+  return persisted.filter(Boolean).sort((left, right) =>
+    String(left.createdAt || "").localeCompare(String(right.createdAt || ""))
+  );
 }
 
 export async function replaceMessages(env, messages) {
@@ -129,6 +213,14 @@ export async function getMessagesForClient(env, clientId) {
 
   if (!normalizedClientId) {
     return [];
+  }
+
+  const indexedIds = await readIdIndex(env, clientMessageIndexKey(normalizedClientId)).catch(() => []);
+
+  if (indexedIds.length) {
+    return (await readStoredMessagesByIds(env, indexedIds))
+      .filter((message) => message.clientId === normalizedClientId)
+      .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
   }
 
   const messages = await readMessages(env);

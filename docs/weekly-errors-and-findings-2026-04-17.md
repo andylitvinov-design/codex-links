@@ -253,3 +253,38 @@ Product rule retained:
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+
+## 2026-04-18 Photo Delivery Incident And Fix
+
+### Confirmed root cause
+
+- Photo reading itself did not disappear from Codex.
+- The live failure sat between bridge execution and reply finalization.
+- The unstable segment was the ephemeral photo run launched from the Node bridge process:
+  - direct local `codex exec -i` on the same image succeeded;
+  - the launchd bridge could still leave photo commands in `waiting-for-codex` or close them without a durable assistant reply;
+  - stale photo commands could also be re-routed back toward Slack even though Slack is not the safe executor for photo recovery.
+
+### Why it looked like Codex stopped reading photos
+
+- At `10:51`, the bridge photo run both read the image and saved the answer in time.
+- Later failures were race/runtime failures after image read started:
+  - assistant reply was not durably synced in time, or
+  - the bridge worker stalled in the ephemeral photo execution path, or
+  - stale photo commands were requeued instead of being terminally resolved.
+- Yellow processing cards only exposed this more honestly; they were not the cause.
+
+### Fix applied
+
+- Moved ephemeral photo execution off the Node child-process path into a dedicated Python runner script.
+- Kept photo prompts on the bridge photo-only prompt path.
+- Prevented stale photo commands from falling back to Slack.
+- Required command finalization only after assistant reply sync.
+- Revalidated live with two real photo smokes:
+  - `4113f59d-9aa5-45ad-9e5b-4cb107ee748c` requested `cloud`, auto-routed to `bridge`, finished `answered`
+  - `79bcae9d-b1b2-49b8-98aa-f34a37f4457a` requested `bridge`, finished `answered`
+
+### Saved stable point
+
+- Live rollback point saved: production build `20260418-1518`
+- App notification sent with working-state confirmation and version anchor

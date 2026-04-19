@@ -1,6 +1,12 @@
 import {
   COMMAND_PROCESSING_LEASE_MS,
+  COMMAND_ACTIVE_STORAGE_KEY,
+  COMMAND_CLIENT_INDEX_PREFIX,
+  COMMAND_ITEM_PREFIX,
+  COMMAND_LOCAL_PROCESSING_STORAGE_KEY,
+  COMMAND_LOCAL_QUEUE_STORAGE_KEY,
   COMMANDS_STORAGE_KEY,
+  COMMANDS_RECENT_STORAGE_KEY,
   HISTORY_RETENTION_MS,
   MAX_COMMANDS
 } from "./constants.js";
@@ -21,6 +27,178 @@ export const COMMAND_TIMEOUTS = {
   bridgeClaimMs: BRIDGE_CLAIM_TIMEOUT_MS,
   bridgeResultMs: BRIDGE_RESULT_TIMEOUT_MS
 };
+
+function commandItemKey(id) {
+  return `${COMMAND_ITEM_PREFIX}${String(id || "").trim()}`;
+}
+
+function commandClientIndexKey(clientId) {
+  return `${COMMAND_CLIENT_INDEX_PREFIX}${normalizeClientId(clientId)}`;
+}
+
+function uniqIds(ids, max = MAX_COMMANDS) {
+  return [...new Set(
+    (Array.isArray(ids) ? ids : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  )].slice(-max);
+}
+
+function isKvRateLimitError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("429")
+    && message.includes("kv")
+    && (message.includes("limit") || message.includes("rate"));
+}
+
+async function readIdIndex(env, key) {
+  try {
+    const existing = await env.LINKS_STORE.get(key, "json");
+    return uniqIds(existing);
+  } catch (error) {
+    if (isKvRateLimitError(error)) {
+      error.kvRateLimited = true;
+    }
+    throw error;
+  }
+}
+
+async function writeIdIndex(env, key, ids) {
+  await env.LINKS_STORE.put(key, JSON.stringify(uniqIds(ids)));
+}
+
+async function readStoredCommand(env, id) {
+  const normalizedId = String(id || "").trim();
+
+  if (!normalizedId) {
+    return null;
+  }
+
+  const entry = await env.LINKS_STORE.get(commandItemKey(normalizedId), "json");
+  return entry && typeof entry === "object" ? entry : null;
+}
+
+async function readStoredCommandsByIds(env, ids) {
+  const normalizedIds = uniqIds(ids);
+  const entries = await Promise.all(normalizedIds.map((id) => readStoredCommand(env, id)));
+  return entries.filter(Boolean);
+}
+
+function isActiveCommandStatus(status) {
+  const normalized = normalizeCommandStatus(status);
+  return normalized === "queued" || normalized === "dispatched" || normalized === "processing";
+}
+
+function isLocalQueueCommand(command) {
+  return command?.dispatchMode === DISPATCH_MODE_LOCAL && normalizeCommandStatus(command?.status) === "queued";
+}
+
+function isLocalProcessingCommand(command) {
+  return command?.dispatchMode === DISPATCH_MODE_LOCAL && normalizeCommandStatus(command?.status) === "processing";
+}
+
+async function appendIndexedCommandId(env, key, id) {
+  const normalizedId = String(id || "").trim();
+
+  if (!normalizedId) {
+    return;
+  }
+
+  const current = await readIdIndex(env, key).catch(() => []);
+  await writeIdIndex(env, key, [...current, normalizedId]);
+}
+
+async function rebuildCommandIndexes(env, commands) {
+  const normalized = (Array.isArray(commands) ? commands : [])
+    .map((command) => compactCommandForStorage(command))
+    .filter((command) => isWithinRetentionWindow(command?.createdAt))
+    .slice(-MAX_COMMANDS);
+
+  const recentIds = [];
+  const activeIds = [];
+  const localQueueIds = [];
+  const localProcessingIds = [];
+  const clientIds = new Map();
+
+  for (const command of normalized) {
+    if (!command?.id) {
+      continue;
+    }
+
+    await env.LINKS_STORE.put(commandItemKey(command.id), JSON.stringify(command));
+    recentIds.push(command.id);
+
+    const clientId = normalizeClientId(command.clientId);
+    if (clientId) {
+      const bucket = clientIds.get(clientId) || [];
+      bucket.push(command.id);
+      clientIds.set(clientId, bucket);
+    }
+
+    if (isActiveCommandStatus(command.status)) {
+      activeIds.push(command.id);
+    }
+
+    if (isLocalQueueCommand(command)) {
+      localQueueIds.push(command.id);
+    }
+
+    if (isLocalProcessingCommand(command)) {
+      localProcessingIds.push(command.id);
+    }
+  }
+
+  await Promise.all([
+    writeIdIndex(env, COMMANDS_RECENT_STORAGE_KEY, recentIds),
+    writeIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY, activeIds),
+    writeIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, localQueueIds),
+    writeIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, localProcessingIds),
+    ...[...clientIds.entries()].map(([clientId, ids]) => writeIdIndex(env, commandClientIndexKey(clientId), ids))
+  ]);
+}
+
+async function persistCommand(env, command) {
+  if (!command?.id) {
+    return command;
+  }
+
+  const normalized = compactCommandForStorage(command);
+  await env.LINKS_STORE.put(commandItemKey(normalized.id), JSON.stringify(normalized));
+  await appendIndexedCommandId(env, COMMANDS_RECENT_STORAGE_KEY, normalized.id);
+  await appendIndexedCommandId(env, commandClientIndexKey(normalized.clientId), normalized.id);
+
+  const [activeIds, queueIds, processingIds] = await Promise.all([
+    readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => [])
+  ]);
+
+  await Promise.all([
+    writeIdIndex(
+      env,
+      COMMAND_ACTIVE_STORAGE_KEY,
+      isActiveCommandStatus(normalized.status)
+        ? [...activeIds, normalized.id]
+        : activeIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_LOCAL_QUEUE_STORAGE_KEY,
+      isLocalQueueCommand(normalized)
+        ? [...queueIds, normalized.id]
+        : queueIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_LOCAL_PROCESSING_STORAGE_KEY,
+      isLocalProcessingCommand(normalized)
+        ? [...processingIds, normalized.id]
+        : processingIds.filter((id) => id !== normalized.id)
+    )
+  ]);
+
+  return normalized;
+}
 
 function normalizeCommandStatus(rawStatus) {
   const status = String(rawStatus || "").trim().toLowerCase();
@@ -169,6 +347,34 @@ function normalizeDiagnosticText(rawValue, max = 240) {
   return String(rawValue || "").trim().slice(0, max);
 }
 
+function normalizePhotoUnsupportedReason(rawValue) {
+  return normalizeDiagnosticText(rawValue, 240);
+}
+
+function derivePhotoAttached(command, input = {}) {
+  if (typeof input.photoAttached === "boolean") {
+    return input.photoAttached;
+  }
+
+  if (typeof command?.photoAttached === "boolean") {
+    return command.photoAttached;
+  }
+
+  return Boolean(command?.photo);
+}
+
+function derivePhotoBytesPresent(command, input = {}) {
+  if (typeof input.photoBytesPresent === "boolean") {
+    return input.photoBytesPresent;
+  }
+
+  if (typeof command?.photoBytesPresent === "boolean") {
+    return command.photoBytesPresent;
+  }
+
+  return Boolean(String(command?.photo?.dataUrl || "").trim());
+}
+
 function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispatchMode || command?.dispatchMode) {
   const actualDispatchMode = dispatchModeToExecutionMode(dispatchMode);
   const requestedExecutor = normalizeExecutionMode(
@@ -229,6 +435,15 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
     lastDiagnosticDetail: normalizeDiagnosticText(
       Object.prototype.hasOwnProperty.call(input, "lastDiagnosticDetail") ? input.lastDiagnosticDetail : command?.lastDiagnosticDetail,
       500
+    ),
+    photoAttached: derivePhotoAttached(command, input),
+    photoBytesPresent: derivePhotoBytesPresent(command, input),
+    photoSeenByBridge: normalizeBooleanValue(input.photoSeenByBridge, Boolean(command?.photoSeenByBridge)),
+    photoProcessed: normalizeBooleanValue(input.photoProcessed, Boolean(command?.photoProcessed)),
+    photoUnsupportedReason: normalizePhotoUnsupportedReason(
+      Object.prototype.hasOwnProperty.call(input, "photoUnsupportedReason")
+        ? input.photoUnsupportedReason
+        : command?.photoUnsupportedReason
     ),
     firstAckAt: normalizeDateValue(
       Object.prototype.hasOwnProperty.call(input, "firstAckAt") ? input.firstAckAt : command?.firstAckAt
@@ -333,6 +548,61 @@ function compactCommandForStorage(command) {
   };
 }
 
+function normalizeStoredCommandEntry(entry) {
+  if (!entry || typeof entry !== "object" || typeof entry.text !== "string") {
+    return null;
+  }
+
+  return {
+    ...entry,
+    status: normalizeCommandStatus(entry.status),
+    fallbackThreadId: normalizeFallbackThreadId(entry.fallbackThreadId),
+    fallbackThreadLabel: normalizeFallbackThreadLabel(entry.fallbackThreadLabel, entry.fallbackThreadId),
+    dispatchMode: normalizeDispatchValue(entry.dispatchMode),
+    projectId: normalizeThreadId(entry.projectId || entry.threadId),
+    projectLabel: normalizeThreadLabel(entry.projectLabel || entry.threadLabel, entry.threadId),
+    projectCategory: normalizeDiagnosticText(entry.projectCategory, 120),
+    targetRepo: normalizeRepoValue(entry.targetRepo),
+    targetRepoUrl: normalizeUrlValue(entry.targetRepoUrl),
+    targetContextFiles: normalizeStringArray(entry.targetContextFiles),
+    targetWorkspacePath: normalizeWorkspacePathValue(entry.targetWorkspacePath),
+    targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode),
+    requestedExecutor: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
+    requestedMode: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
+    actualExecutor: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
+    actualDispatchMode: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
+    slackDispatchAttempted: normalizeBooleanValue(entry.slackDispatchAttempted),
+    slackDispatchSucceeded: normalizeBooleanValue(entry.slackDispatchSucceeded),
+    slackReplyReceived: normalizeBooleanValue(entry.slackReplyReceived),
+    slackReplyThreaded: normalizeBooleanValue(entry.slackReplyThreaded),
+    replyMatched: normalizeBooleanValue(entry.replyMatched, normalizeBooleanValue(entry.slackReplyMatched)),
+    slackReplyMatched: normalizeBooleanValue(entry.replyMatched, normalizeBooleanValue(entry.slackReplyMatched)),
+    replyMatchedBy: normalizeReplyMatchedBy(entry.replyMatchedBy),
+    fallbackCount: Math.max(0, Math.min(1, Number(entry.fallbackCount || 0))),
+    timeoutPhase: normalizeDiagnosticText(entry.timeoutPhase, 80),
+    fallbackApplied: normalizeBooleanValue(entry.fallbackApplied),
+    fallbackReason: normalizeDiagnosticText(entry.fallbackReason),
+    lastDiagnosticCode: normalizeDiagnosticText(entry.lastDiagnosticCode, 80),
+    lastDiagnosticDetail: normalizeDiagnosticText(entry.lastDiagnosticDetail, 500),
+    photoAttached: derivePhotoAttached(entry),
+    photoBytesPresent: derivePhotoBytesPresent(entry),
+    photoSeenByBridge: normalizeBooleanValue(entry.photoSeenByBridge),
+    photoProcessed: normalizeBooleanValue(entry.photoProcessed),
+    photoUnsupportedReason: normalizePhotoUnsupportedReason(entry.photoUnsupportedReason),
+    firstAckAt: normalizeDateValue(entry.firstAckAt),
+    resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
+    slackChannelId: normalizeSlackValue(entry.slackChannelId),
+    slackMessageTs: normalizeSlackValue(entry.slackMessageTs),
+    slackThreadTs: normalizeSlackValue(entry.slackThreadTs),
+    prUrl: String(entry.prUrl || "").trim(),
+    branchName: normalizeSlackValue(entry.branchName),
+    errorMessage: normalizeErrorMessage(entry.errorMessage),
+    dispatchedAt: normalizeDateValue(entry.dispatchedAt),
+    completedAt: normalizeDateValue(entry.completedAt),
+    ...normalizeLatencyFields(entry)
+  };
+}
+
 function isWithinRetentionWindow(value) {
   const timestamp = Date.parse(String(value || "").trim());
 
@@ -353,7 +623,58 @@ function isRecentEnough(value, windowMs) {
   return timestamp >= Date.now() - windowMs;
 }
 
+function isParallelVisionCommand(command) {
+  if (!command?.photo) {
+    return false;
+  }
+
+  const text = canonicalizeText(command?.text);
+
+  if (!text) {
+    return true;
+  }
+
+  const mutationHints = [
+    "исправ",
+    "fix",
+    "сделай",
+    "сделать",
+    "перенеси",
+    "добавь",
+    "update",
+    "deploy",
+    "commit",
+    "pr",
+    "код",
+    "code",
+    "repo",
+    "branch"
+  ];
+
+  if (mutationHints.some((hint) => text.includes(hint))) {
+    return false;
+  }
+
+  const visionHints = [
+    "что на фото",
+    "прочти фото",
+    "кнопка",
+    "what color",
+    "read the image",
+    "what is in the image",
+    "reset",
+    "photo",
+    "screenshot"
+  ];
+
+  return visionHints.some((hint) => text.includes(hint));
+}
+
 function getCommandThreadKey(command) {
+  if (isParallelVisionCommand(command)) {
+    return "::";
+  }
+
   const threadId = normalizeThreadId(command?.threadId);
   const clientId = normalizeClientId(command?.clientId);
   return `${threadId}::${clientId}`;
@@ -387,7 +708,10 @@ function findRecentDuplicate(commands, candidate) {
       return false;
     }
 
-    if (!["queued", "dispatched", "processing", "answered", "acked"].includes(normalizeCommandStatus(command.status))) {
+    // Deduplicate only while an identical command is still in flight.
+    // Once a dialog message has already been answered/acked, the user must be
+    // able to send the same text again and get a new saved entry in history.
+    if (!isActiveCommandStatus(command.status)) {
       return false;
     }
 
@@ -489,6 +813,11 @@ export function createCommandRecord(input) {
       fallbackReason: "",
       lastDiagnosticCode: "",
       lastDiagnosticDetail: "",
+      photoAttached: Boolean(normalizedPhoto?.value),
+      photoBytesPresent: Boolean(String(normalizedPhoto?.value?.dataUrl || "").trim()),
+      photoSeenByBridge: false,
+      photoProcessed: false,
+      photoUnsupportedReason: "",
       firstAckAt: "",
       resultAt: "",
       slackChannelId: "",
@@ -509,57 +838,18 @@ export function createCommandRecord(input) {
 }
 
 export async function readCommands(env) {
-  const existing = await env.LINKS_STORE.get(COMMANDS_STORAGE_KEY, "json");
+  let existing = [];
+  const indexedIds = await readIdIndex(env, COMMANDS_RECENT_STORAGE_KEY).catch(() => []);
 
-  if (!Array.isArray(existing)) {
-    return [];
+  if (indexedIds.length) {
+    existing = await readStoredCommandsByIds(env, indexedIds);
+  } else {
+    const legacy = await env.LINKS_STORE.get(COMMANDS_STORAGE_KEY, "json");
+    existing = Array.isArray(legacy) ? legacy : [];
   }
 
   return existing
-    .filter((entry) => entry && typeof entry === "object" && typeof entry.text === "string")
-    .map((entry) => ({
-      ...entry,
-      status: normalizeCommandStatus(entry.status),
-      fallbackThreadId: normalizeFallbackThreadId(entry.fallbackThreadId),
-      fallbackThreadLabel: normalizeFallbackThreadLabel(entry.fallbackThreadLabel, entry.fallbackThreadId),
-      dispatchMode: normalizeDispatchValue(entry.dispatchMode),
-      projectId: normalizeThreadId(entry.projectId || entry.threadId),
-      projectLabel: normalizeThreadLabel(entry.projectLabel || entry.threadLabel, entry.threadId),
-      projectCategory: normalizeDiagnosticText(entry.projectCategory, 120),
-      targetRepo: normalizeRepoValue(entry.targetRepo),
-      targetRepoUrl: normalizeUrlValue(entry.targetRepoUrl),
-      targetContextFiles: normalizeStringArray(entry.targetContextFiles),
-      targetWorkspacePath: normalizeWorkspacePathValue(entry.targetWorkspacePath),
-      targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode),
-      requestedExecutor: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
-      requestedMode: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
-      actualExecutor: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
-      actualDispatchMode: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
-      slackDispatchAttempted: normalizeBooleanValue(entry.slackDispatchAttempted),
-      slackDispatchSucceeded: normalizeBooleanValue(entry.slackDispatchSucceeded),
-      slackReplyReceived: normalizeBooleanValue(entry.slackReplyReceived),
-      slackReplyThreaded: normalizeBooleanValue(entry.slackReplyThreaded),
-      replyMatched: normalizeBooleanValue(entry.replyMatched, normalizeBooleanValue(entry.slackReplyMatched)),
-      slackReplyMatched: normalizeBooleanValue(entry.replyMatched, normalizeBooleanValue(entry.slackReplyMatched)),
-      replyMatchedBy: normalizeReplyMatchedBy(entry.replyMatchedBy),
-      fallbackCount: Math.max(0, Math.min(1, Number(entry.fallbackCount || 0))),
-      timeoutPhase: normalizeDiagnosticText(entry.timeoutPhase, 80),
-      fallbackApplied: normalizeBooleanValue(entry.fallbackApplied),
-      fallbackReason: normalizeDiagnosticText(entry.fallbackReason),
-      lastDiagnosticCode: normalizeDiagnosticText(entry.lastDiagnosticCode, 80),
-      lastDiagnosticDetail: normalizeDiagnosticText(entry.lastDiagnosticDetail, 500),
-      firstAckAt: normalizeDateValue(entry.firstAckAt),
-      resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
-      slackChannelId: normalizeSlackValue(entry.slackChannelId),
-      slackMessageTs: normalizeSlackValue(entry.slackMessageTs),
-      slackThreadTs: normalizeSlackValue(entry.slackThreadTs),
-      prUrl: String(entry.prUrl || "").trim(),
-      branchName: normalizeSlackValue(entry.branchName),
-      errorMessage: normalizeErrorMessage(entry.errorMessage),
-      dispatchedAt: normalizeDateValue(entry.dispatchedAt),
-      completedAt: normalizeDateValue(entry.completedAt),
-      ...normalizeLatencyFields(entry)
-    }))
+    .map((entry) => normalizeStoredCommandEntry(entry))
     .filter((entry) => isWithinRetentionWindow(entry.createdAt))
     .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
 }
@@ -569,7 +859,7 @@ export async function writeCommands(env, commands) {
     .map((command) => compactCommandForStorage(command))
     .filter((command) => isWithinRetentionWindow(command?.createdAt))
     .slice(-MAX_COMMANDS);
-  await env.LINKS_STORE.put(COMMANDS_STORAGE_KEY, JSON.stringify(trimmed));
+  await rebuildCommandIndexes(env, trimmed);
   return trimmed;
 }
 
@@ -587,7 +877,7 @@ export async function insertCommand(env, input) {
     };
   }
 
-  const current = await readCommands(env);
+  const current = await getCommandsForClient(env, normalized.value.clientId);
   const duplicate = findRecentDuplicate(current, normalized.value);
 
   if (duplicate) {
@@ -597,8 +887,7 @@ export async function insertCommand(env, input) {
     };
   }
 
-  current.push(normalized.value);
-  await writeCommands(env, current);
+  await persistCommand(env, normalized.value);
 
   return normalized;
 }
@@ -650,94 +939,50 @@ export async function claimNextCommand(env, input = {}) {
   const nowIso = new Date(now).toISOString();
   const leaseUntil = new Date(now + leaseMs).toISOString();
 
-  const current = await readCommands(env);
-  const recovered = current.map((command) => {
-    if (command.dispatchMode !== DISPATCH_MODE_LOCAL) {
-      return command;
-    }
+  const [queuedIds, processingIds] = await Promise.all([
+    readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => [])
+  ]);
+  const processingCommands = await readStoredCommandsByIds(env, processingIds);
+  const activeThreadKeys = new Set();
 
-    if (command.status !== "processing") {
-      return command;
+  for (const command of processingCommands) {
+    if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "processing") {
+      continue;
     }
 
     const leaseDeadline = Date.parse(String(command.processingLeaseUntil || "").trim());
 
-    if (!Number.isNaN(leaseDeadline) && leaseDeadline > now) {
-      return command;
-    }
-
-    return {
-      ...command,
-      status: "queued",
-      progressStage: "queued",
-      progressUpdatedAt: nowIso,
-      processingStartedAt: "",
-      processingLeaseUntil: "",
-      processorId: ""
-    };
-  });
-
-  const activeThreadKeys = new Set(
-    recovered
-      .filter((command) => command.status === "processing")
-      .map((command) => getCommandThreadKey(command))
-      .filter((value) => value !== "::")
-  );
-
-  const next = [...recovered];
-  const duplicateIndexesToAck = new Set();
-  const seenRecentIntentKeys = new Set();
-
-  for (let index = next.length - 1; index >= 0; index -= 1) {
-    const command = next[index];
-    const status = normalizeCommandStatus(command?.status);
-
-    if (!["queued", "dispatched", "processing", "answered", "acked"].includes(status)) {
+    if (!Number.isNaN(leaseDeadline) && leaseDeadline <= now) {
+      await persistCommand(env, {
+        ...command,
+        status: "queued",
+        progressStage: "queued",
+        progressUpdatedAt: nowIso,
+        processingStartedAt: "",
+        processingLeaseUntil: "",
+        processorId: ""
+      });
       continue;
     }
 
-    if (!isRecentEnough(command.createdAt, SUPERSEDED_DUPLICATE_WINDOW_MS)) {
-      continue;
+    const threadKey = getCommandThreadKey(command);
+    if (threadKey !== "::") {
+      activeThreadKeys.add(threadKey);
     }
-
-    const intentKey = getCommandIntentKey(command);
-
-    if (!intentKey) {
-      continue;
-    }
-
-    if (status === "queued" && seenRecentIntentKeys.has(intentKey)) {
-      duplicateIndexesToAck.add(index);
-      continue;
-    }
-
-    seenRecentIntentKeys.add(intentKey);
   }
 
-  for (const index of duplicateIndexesToAck) {
-    next[index] = markCommandAcked(next[index], nowIso);
-  }
-
-  const nextIndex = next.findIndex((command) => {
-    if (command.dispatchMode !== DISPATCH_MODE_LOCAL) {
-      return false;
-    }
-
-    if (command.status !== "queued") {
+  const queuedCommands = await readStoredCommandsByIds(env, queuedIds);
+  const candidate = queuedCommands.find((command) => {
+    if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "queued") {
       return false;
     }
 
     const threadKey = getCommandThreadKey(command);
-
-    if (threadKey !== "::" && activeThreadKeys.has(threadKey)) {
-      return false;
-    }
-
-    return true;
+    return threadKey === "::" || !activeThreadKeys.has(threadKey);
   });
 
-  if (nextIndex === -1) {
-    await writeCommands(env, next);
+  if (!candidate) {
     return {
       ok: true,
       value: null
@@ -745,23 +990,22 @@ export async function claimNextCommand(env, input = {}) {
   }
 
   const claimed = {
-    ...next[nextIndex],
+    ...candidate,
     status: "processing",
     progressStage: "accepted",
     progressUpdatedAt: nowIso,
-    firstAckAt: next[nextIndex].firstAckAt || nowIso,
+    firstAckAt: candidate.firstAckAt || nowIso,
     actualExecutor: "bridge",
     actualDispatchMode: "bridge",
-    dispatchStartedAt: next[nextIndex].dispatchStartedAt || nowIso,
-    bridgeClaimedAt: next[nextIndex].bridgeClaimedAt || nowIso,
-    firstExecutorAckSeenAt: next[nextIndex].firstExecutorAckSeenAt || nowIso,
+    dispatchStartedAt: candidate.dispatchStartedAt || nowIso,
+    bridgeClaimedAt: candidate.bridgeClaimedAt || nowIso,
+    firstExecutorAckSeenAt: candidate.firstExecutorAckSeenAt || nowIso,
+    photoSeenByBridge: Boolean(candidate.photo),
     processingStartedAt: nowIso,
     processingLeaseUntil: leaseUntil,
     processorId
   };
-
-  next[nextIndex] = claimed;
-  await writeCommands(env, next);
+  await persistCommand(env, claimed);
 
   return {
     ok: true,
@@ -954,6 +1198,7 @@ export async function updateCommandProgress(env, input = {}) {
 
     updated = {
       ...command,
+      ...mergeCommandDebugState(command, input, command.dispatchMode),
       progressStage,
       progressUpdatedAt: normalizeProgressUpdatedAt(input.progressUpdatedAt) || nowIso
     };
@@ -990,27 +1235,18 @@ async function updateCommand(env, id, updater) {
     };
   }
 
-  const nowIso = new Date().toISOString();
-  const current = await readCommands(env);
-  let updated = null;
+  const current = await getCommandById(env, normalizedId);
 
-  const next = current.map((command) => {
-    if (command.id !== normalizedId) {
-      return command;
-    }
-
-    updated = updater(command, nowIso);
-    return updated || command;
-  });
-
-  if (!updated) {
+  if (!current) {
     return {
       ok: false,
       error: "Command not found."
     };
   }
 
-  await writeCommands(env, next);
+  const nowIso = new Date().toISOString();
+  const updated = updater(current, nowIso) || current;
+  await persistCommand(env, updated);
   return {
     ok: true,
     value: updated
@@ -1061,6 +1297,7 @@ export async function markCommandAnswered(env, input = {}) {
       replyMatchedBy: input.replyMatchedBy || command.replyMatchedBy,
       firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt || nowIso,
       resultAt: normalizeDateValue(input.resultAt) || nowIso,
+      photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoAttached || command.photoSeenByBridge),
       timeoutPhase: "",
       lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
       lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
@@ -1092,6 +1329,7 @@ export async function markCommandFailed(env, input = {}) {
       fallbackReason: input.fallbackReason || command.fallbackReason,
       lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
       lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoSeenByBridge),
       firstExecutorAckSeenAt: normalizeDateValue(input.firstExecutorAckSeenAt) || command.firstExecutorAckSeenAt,
       firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt) || command.firstReplySeenAt,
       replyIngestedAt: normalizeDateValue(input.replyIngestedAt) || command.replyIngestedAt
@@ -1175,7 +1413,6 @@ function canFallbackToLocal(command, options = {}) {
 function canFallbackToSlack(command, options = {}) {
   return Boolean(options.preferSlack)
     && Number(command?.fallbackCount || 0) < 1
-    && !command?.photo
     && Boolean(String(command?.targetRepo || "").trim());
 }
 
@@ -1298,28 +1535,33 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   }
 
   const fallbackAllowed = canFallbackToSlack(command, options);
+  const hasFreshProcessingBridgeCommand = Boolean(options.hasFreshProcessingBridgeCommand);
 
   if (command.status === "queued") {
+    if (hasFreshProcessingBridgeCommand) {
+      return command;
+    }
+
     if (!isOlderThan(command.progressUpdatedAt || command.createdAt, BRIDGE_CLAIM_TIMEOUT_MS)) {
       return command;
     }
 
-    if (fallbackAllowed) {
-      return createFallbackState(command, DISPATCH_MODE_CLOUD, nowIso, {
-        progressStage: "switched-to-cloud",
-        timeoutPhase: "claim-timeout",
-        fallbackReason: "local bridge did not claim the command in time",
-        lastDiagnosticCode: "bridge_claim_timeout",
-        lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
-        errorMessage: stringifyCommandError({
-          code: "fallback_to_cloud",
-          stage: "switched-to-cloud",
-          message: "Local bridge did not claim the command in time. Switched to direct cloud execution.",
-          detail: "The local bridge did not claim the command before the claim timeout.",
-          fallback: "cloud"
-        })
-      });
-    }
+  if (fallbackAllowed) {
+    return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
+      progressStage: "switched-to-cloud",
+      timeoutPhase: "claim-timeout",
+      fallbackReason: "local bridge did not claim the command in time",
+      lastDiagnosticCode: "bridge_claim_timeout",
+      lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
+      errorMessage: stringifyCommandError({
+        code: "fallback_to_slack",
+        stage: "switched-to-cloud",
+        message: "Local bridge did not claim the command in time. Switched to cloud via Slack.",
+        detail: "The local bridge did not claim the command before the claim timeout.",
+        fallback: "slack-codex-cloud"
+      })
+    });
+  }
 
     return createFailedMaintenanceState(command, nowIso, {
       timeoutPhase: "claim-timeout",
@@ -1353,18 +1595,18 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     : "The local bridge stopped heartbeating before the command completed.";
 
   if (fallbackAllowed) {
-    return createFallbackState(command, DISPATCH_MODE_CLOUD, nowIso, {
+    return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
       progressStage: "switched-to-cloud",
       timeoutPhase: "result-timeout",
       fallbackReason: "local bridge stopped heartbeating",
       lastDiagnosticCode: "bridge_result_timeout",
       lastDiagnosticDetail: detail,
       errorMessage: stringifyCommandError({
-        code: "fallback_to_cloud",
+        code: "fallback_to_slack",
         stage: "switched-to-cloud",
-        message: "Local bridge timed out. Switched to direct cloud execution.",
+        message: "Local bridge timed out. Switched to cloud via Slack.",
         detail,
-        fallback: "cloud"
+        fallback: "slack-codex-cloud"
       })
     });
   }
@@ -1388,27 +1630,45 @@ export async function runCommandMaintenance(env, options = {}) {
   const nowIso = new Date().toISOString();
   let changedCount = 0;
   const commandsToDispatch = [];
+  const hasFreshProcessingBridgeCommand = current.some((command) => {
+    if (command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "processing") {
+      return false;
+    }
+
+    const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
+    const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
+    const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
+    const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
+
+    return !isLeaseExpired && !isResultStale;
+  });
 
   const next = current.map((command) => {
     const previous = command;
     let updated = command;
 
-    if (command.dispatchMode === DISPATCH_MODE_SLACK) {
+    if (command.dispatchMode === DISPATCH_MODE_CLOUD) {
       updated = evaluateCloudMaintenance(command, nowIso, options);
     } else if (command.dispatchMode === DISPATCH_MODE_LOCAL) {
-      updated = evaluateBridgeMaintenance(command, nowIso, options);
+      updated = evaluateBridgeMaintenance(command, nowIso, {
+        ...options,
+        hasFreshProcessingBridgeCommand
+      });
     }
 
     if (updated !== previous) {
       changedCount += 1;
+    }
 
-      if (
-        updated.dispatchMode === DISPATCH_MODE_SLACK
-        && updated.status === "queued"
-        && !String(updated.slackChannelId || "").trim()
-      ) {
-        commandsToDispatch.push(updated.id);
-      }
+    if (
+      updated.dispatchMode !== DISPATCH_MODE_LOCAL
+      && updated.status === "queued"
+      && (
+        updated.dispatchMode === DISPATCH_MODE_CLOUD
+        || !String(updated.slackChannelId || "").trim()
+      )
+    ) {
+      commandsToDispatch.push(updated.id);
     }
 
     return updated;
@@ -1438,6 +1698,17 @@ export async function getCommandsForClient(env, clientId) {
     return [];
   }
 
+  const indexedIds = await readIdIndex(env, commandClientIndexKey(normalizedClientId)).catch(() => []);
+
+  if (indexedIds.length) {
+    const commands = await readStoredCommandsByIds(env, indexedIds);
+    return commands
+      .map((command) => normalizeStoredCommandEntry(command))
+      .filter(Boolean)
+      .filter((command) => command.clientId === normalizedClientId)
+      .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+  }
+
   const commands = await readCommands(env);
   return commands.filter((command) => command.clientId === normalizedClientId);
 }
@@ -1449,8 +1720,29 @@ export async function getCommandById(env, id) {
     return null;
   }
 
+  const direct = await readStoredCommand(env, normalizedId);
+
+  if (direct) {
+    return normalizeStoredCommandEntry(direct);
+  }
+
   const commands = await readCommands(env);
   return commands.find((command) => command.id === normalizedId) || null;
+}
+
+export async function readActiveCommands(env) {
+  const activeIds = await readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY).catch(() => []);
+
+  if (!activeIds.length) {
+    const commands = await readCommands(env);
+    return commands.filter((command) => isActiveCommandStatus(command.status));
+  }
+
+  return (await readStoredCommandsByIds(env, activeIds))
+    .map((command) => normalizeStoredCommandEntry(command))
+    .filter(Boolean)
+    .filter((command) => isActiveCommandStatus(command.status))
+    .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
 }
 
 export async function listCommandThreads(env) {

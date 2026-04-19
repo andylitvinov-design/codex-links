@@ -15,14 +15,18 @@ const state = {
   hardReloading: false,
   hasLoadedMessagesOnce: false,
   audioUnlocked: false,
-  resetInFlight: false
-  ,
+  resetInFlight: false,
+  voiceRecognition: null,
+  voiceRecognitionActive: false,
+  voiceTranscriptBase: "",
+  voiceDraftText: "",
+  voiceHadResult: false,
   deliverySpeedUntil: 0,
   speedModeClientId: "",
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260418-0022";
+const BUILD_VERSION = "20260419-0515";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -251,11 +255,14 @@ const commandPhotoInput = document.querySelector("#command-photo-input");
 const commandPhotoClear = document.querySelector("#command-photo-clear");
 const commandPhotoStatus = document.querySelector("#command-photo-status");
 const commandInput = document.querySelector("#command-input");
+const commandVoiceButton = document.querySelector("#command-voice-button");
+const commandVoiceStatus = document.querySelector("#command-voice-status");
 const commandStatus = document.querySelector("#command-status");
 const commandTimeline = document.querySelector("#command-timeline");
 const submitProgress = document.querySelector("#submit-progress");
 const threadSettingsToggle = document.querySelector("#thread-settings-toggle");
 const threadSettingsSummary = document.querySelector("#thread-settings-summary");
+const threadSettingsShowAllBadge = document.querySelector("#thread-settings-show-all-badge");
 const threadSettingsPanel = document.querySelector("#thread-settings-panel");
 const threadSettingsShowAll = document.querySelector("#thread-settings-show-all");
 const threadSettingsSearch = document.querySelector("#thread-settings-search");
@@ -267,6 +274,23 @@ const threadSettingsSelectAll = document.querySelector("#thread-settings-select-
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
 const timelineTabDialog = document.querySelector("#timeline-tab-dialog");
 const timelineTabNotifications = document.querySelector("#timeline-tab-notifications");
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+function setThreadSettingsPanelOpen(nextOpen) {
+  if (!threadSettingsPanel) {
+    return;
+  }
+
+  threadSettingsPanel.hidden = !nextOpen;
+
+  if (threadSettingsToggle) {
+    threadSettingsToggle.setAttribute("aria-expanded", String(nextOpen));
+  }
+
+  if (threadSettingsSummary) {
+    threadSettingsSummary.setAttribute("aria-expanded", String(nextOpen));
+  }
+}
 
 function estimateDataUrlBytes(dataUrl) {
   const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
@@ -484,6 +508,41 @@ function formatMenuRepoLabel(repo) {
 
 function getProjectCategory(repo) {
   return String(repo?.group || repo?.category || "").trim() || "other";
+}
+
+function formatCategoryTitle(category) {
+  const normalized = String(category || "").trim().toLowerCase();
+
+  if (normalized === "myprojects") {
+    return "My Projects";
+  }
+
+  if (normalized === "brain") {
+    return "Brain";
+  }
+
+  if (normalized === "other") {
+    return "Other";
+  }
+
+  return normalized
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getCategoryPreview(category) {
+  const names = getAllMenuOptions()
+    .filter((option) => option.category === category)
+    .map((option) => option.label || option.displayLabel)
+    .filter(Boolean);
+
+  if (!names.length) {
+    return "Проекты пока не найдены.";
+  }
+
+  return names.join(" · ");
 }
 
 function getProjectStatusLabel(repo) {
@@ -722,11 +781,18 @@ function renderThreadCategories() {
     : "Категории не найдены.";
 
   categories.forEach((category) => {
+    const categoryCount = getAllMenuOptions().filter((option) => option.category === category).length;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "thread-category-chip";
-    button.textContent = category;
     button.dataset.active = state.activeThreadCategories.includes(category) ? "1" : "0";
+    button.innerHTML = `
+      <span class="thread-category-chip-head">
+        <span class="thread-category-chip-title">${escapeHtml(formatCategoryTitle(category))}</span>
+        <span class="thread-category-chip-count">${categoryCount}</span>
+      </span>
+      <span class="thread-category-chip-subtitle">${escapeHtml(getCategoryPreview(category))}</span>
+    `;
     button.addEventListener("click", () => {
       const next = new Set(state.activeThreadCategories);
 
@@ -749,10 +815,23 @@ function renderThreadSettingsSummary() {
     return;
   }
 
+  if (threadSettingsPanel) {
+    threadSettingsSummary.setAttribute("role", "button");
+    threadSettingsSummary.setAttribute("tabindex", "0");
+    threadSettingsSummary.setAttribute("aria-controls", "thread-settings-panel");
+    threadSettingsSummary.setAttribute("aria-expanded", String(!threadSettingsPanel.hidden));
+    threadSettingsSummary.setAttribute("title", "Открыть фильтры проектов");
+  }
+
   if (storage.showAllMessages) {
     threadSettingsSummary.textContent = "Показываются все проекты.";
+    threadSettingsShowAllBadge?.setAttribute("aria-pressed", "true");
+    threadSettingsShowAllBadge?.classList.add("is-active");
     return;
   }
+
+  threadSettingsShowAllBadge?.setAttribute("aria-pressed", "false");
+  threadSettingsShowAllBadge?.classList.remove("is-active");
 
   const filteredOptions = getFilteredMenuOptions();
 
@@ -905,7 +984,11 @@ function formatProgressStage(progressStage, status) {
     dispatching: "Отправляется исполнителю",
     sent: "Отправлено в cloud",
     accepted: "Исполнитель подтвердил задачу",
+    claimed: "Bridge забрал сообщение",
     processing: "Исполнитель работает",
+    "waiting-for-codex": "Codex обрабатывает сообщение",
+    "saving-reply": "Сохраняю ответ",
+    "retrying-photo-read": "Повторно читаю фото",
     "switched-to-bridge": "Переведено на bridge",
     "switched-to-cloud": "Переведено в cloud",
     dispatched: "Команда отправлена",
@@ -959,6 +1042,7 @@ function parseCommandErrorDetails(command) {
 }
 
 function getCommandDiagnosticMessage(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
   const fallbackReason = String(command?.fallbackReason || "").trim().toLowerCase();
   const timeoutPhase = String(command?.timeoutPhase || "").trim().toLowerCase();
   const diagnosticCode = String(command?.lastDiagnosticCode || "").trim().toLowerCase();
@@ -973,6 +1057,26 @@ function getCommandDiagnosticMessage(command) {
 
   if (diagnosticCode === "openai_request_failed" || diagnosticCode === "openai_response_failed" || diagnosticCode === "openai_empty_response") {
     return "Direct cloud execution не завершился успешно.";
+  }
+
+  if (diagnosticCode === "bridge_finalization_timeout") {
+    return "Bridge обработал задачу, но завис на сохранении ответа.";
+  }
+
+  if (diagnosticCode === "cloud_fallback_not_dispatched") {
+    return "Bridge перевёл задачу в cloud, но cloud fallback не был запущен.";
+  }
+
+  if (diagnosticCode === "bridge_result_timeout") {
+    return "Bridge не завершил выполнение вовремя.";
+  }
+
+  if (diagnosticCode === "bridge_claim_timeout") {
+    return "Bridge не забрал сообщение из очереди вовремя.";
+  }
+
+  if (status === "failed" && fallbackReason === "local bridge stopped heartbeating") {
+    return "Bridge перестал heartbeat'ить во время обработки.";
   }
 
   if (fallbackReason === "direct cloud execution timed out" || timeoutPhase === "result-timeout") {
@@ -1058,6 +1162,7 @@ function getCommandDeliveryStatus(command) {
   }
 
   const lifecycleState = getCommandLifecycleState(command);
+  const stageLabel = formatProgressStage(command?.progressStage, String(command?.status || "").trim().toLowerCase());
   const errorMessage = String(command?.errorMessage || "").trim();
   const errorDetails = parseCommandErrorDetails(command);
   const deliveryLabel = getCommandActualExecutor(command) === "pending"
@@ -1082,23 +1187,7 @@ function getCommandDeliveryStatus(command) {
     };
   }
 
-  const transportTextByKey = {
-    created: "Команда создана",
-    dispatching: "Отправляется",
-    accepted: "Исполнитель подтверждён",
-    processing: "Обрабатывается",
-    "switched-to-bridge": "Переведено на bridge",
-    "switched-to-cloud": "Переведено в cloud",
-    done: "Ответ сохранён"
-  };
-
-  const text = transportTextByKey[lifecycleState] || "";
-
-  if (!text) {
-    return null;
-  }
-
-  if (lifecycleState === "done") {
+  if (!lifecycleState || lifecycleState === "done") {
     return null;
   }
 
@@ -1118,7 +1207,11 @@ function getCommandDeliveryStatus(command) {
 
   return {
     tone: errorDetails ? "error" : "delivery",
-    text: withDeliveryLabel(diagnosticMessage || errorDetails?.message || text)
+    text: withDeliveryLabel(
+      diagnosticMessage
+      || errorDetails?.message
+      || `Обрабатываю · ${stageLabel || "В очереди"}`
+    )
   };
 }
 
@@ -1171,6 +1264,20 @@ function syncCommandStatusFromState() {
 
 function getCommandDeliveryLabel(command) {
   return getCommandActualExecutor(command);
+}
+
+function getCommandAnswerTitle(command) {
+  const executor = getCommandActualExecutor(command);
+
+  if (executor === "bridge") {
+    return "Ответ Codex · Bridge";
+  }
+
+  if (executor === "cloud") {
+    return "Ответ Codex · Cloud";
+  }
+
+  return "Ответ Codex";
 }
 
 function getCommandProjectPath(command) {
@@ -1727,7 +1834,7 @@ function renderAssistantReplyMarkup(replyEntry) {
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
-        <span class="command-answer-title">Ответ Codex</span>
+        <span class="command-answer-title">${escapeHtml(getCommandAnswerTitle(linkedCommand))}</span>
         <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
       </summary>
       <div class="command-answer-body">
@@ -1867,6 +1974,13 @@ function renderCommands() {
     }
   });
 
+  const threadedAssistantMessageIds = new Set(
+    [...assistantRepliesByCommandId.values()]
+      .flat()
+      .map((reply) => String(reply?.message?.id || "").trim())
+      .filter(Boolean)
+  );
+
   const timelineItems = [
     ...visibleCommands
       .filter((command) => !commandIdsWithUserMessages.has(String(command.id || "").trim()))
@@ -1884,7 +1998,7 @@ function renderCommands() {
     ...visibleMessages
       .filter((message) => {
         const commandId = String(message.commandId || "").trim();
-        if (message.role === "assistant" && commandId) {
+        if (message.role === "assistant" && (commandId || threadedAssistantMessageIds.has(String(message.id || "").trim()))) {
           return false;
         }
 
@@ -2066,6 +2180,191 @@ function setPhotoStatusMessage(message, tone = "") {
 
   commandPhotoStatus.textContent = message || "";
   commandPhotoStatus.dataset.tone = tone;
+}
+
+function setVoiceStatusMessage(message = "", tone = "") {
+  if (!commandVoiceStatus) {
+    return;
+  }
+
+  commandVoiceStatus.textContent = message;
+  commandVoiceStatus.dataset.tone = tone;
+  commandVoiceStatus.hidden = !message;
+}
+
+function syncVoiceButton() {
+  if (!commandVoiceButton) {
+    return;
+  }
+
+  const isRecording = Boolean(state.voiceRecognitionActive);
+  commandVoiceButton.dataset.state = isRecording ? "recording" : "idle";
+  commandVoiceButton.setAttribute("aria-pressed", isRecording ? "true" : "false");
+  commandVoiceButton.title = isRecording ? "Остановить запись" : "Голосовой ввод";
+  commandVoiceButton.setAttribute("aria-label", isRecording ? "Остановить запись" : "Голосовой ввод");
+  commandVoiceButton.disabled = !SpeechRecognitionCtor;
+}
+
+function joinVoiceText(baseText, nextText) {
+  const left = String(baseText || "").trim();
+  const right = String(nextText || "").trim();
+
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return `${left}${/[\s\n]$/.test(baseText) ? "" : " "}${right}`;
+}
+
+function stopVoiceRecognition(shouldClearDraft = false) {
+  const recognition = state.voiceRecognition;
+
+  if (!recognition) {
+    state.voiceRecognitionActive = false;
+    syncVoiceButton();
+    return;
+  }
+
+  state.voiceRecognitionActive = false;
+
+  if (shouldClearDraft) {
+    state.voiceTranscriptBase = String(commandInput?.value || "");
+    state.voiceDraftText = "";
+  }
+
+  try {
+    recognition.stop();
+  } catch {}
+
+  syncVoiceButton();
+}
+
+function ensureVoiceRecognition() {
+  if (!SpeechRecognitionCtor) {
+    return null;
+  }
+
+  if (state.voiceRecognition) {
+    return state.voiceRecognition;
+  }
+
+  const recognition = new SpeechRecognitionCtor();
+  recognition.lang = "ru-RU";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.addEventListener("start", () => {
+    state.voiceRecognitionActive = true;
+    state.voiceHadResult = false;
+    state.voiceTranscriptBase = String(commandInput?.value || "");
+    state.voiceDraftText = "";
+    setVoiceStatusMessage("Слушаю… говорите.", "");
+    syncVoiceButton();
+  });
+
+  recognition.addEventListener("result", (event) => {
+    let transcript = "";
+
+    for (let index = 0; index < event.results.length; index += 1) {
+      const phrase = String(event.results[index]?.[0]?.transcript || "").trim();
+
+      if (!phrase) {
+        continue;
+      }
+
+      transcript = transcript ? `${transcript} ${phrase}` : phrase;
+    }
+
+    state.voiceHadResult = Boolean(transcript);
+    state.voiceDraftText = transcript;
+
+    if (commandInput) {
+      commandInput.value = joinVoiceText(state.voiceTranscriptBase, transcript);
+    }
+
+    setVoiceStatusMessage(
+      event.results[event.results.length - 1]?.isFinal
+        ? "Голос добавлен в сообщение."
+        : "Распознаю речь…",
+      event.results[event.results.length - 1]?.isFinal ? "success" : ""
+    );
+  });
+
+  recognition.addEventListener("error", (event) => {
+    state.voiceRecognitionActive = false;
+    syncVoiceButton();
+
+    const code = String(event?.error || "").trim();
+
+    if (code === "aborted") {
+      return;
+    }
+
+    if (code === "not-allowed" || code === "service-not-allowed") {
+      setVoiceStatusMessage("Браузер не дал доступ к микрофону.", "error");
+      return;
+    }
+
+    if (code === "no-speech") {
+      setVoiceStatusMessage("Не услышал речь. Попробуйте ещё раз.", "error");
+      return;
+    }
+
+    if (code === "audio-capture") {
+      setVoiceStatusMessage("Микрофон недоступен в этом браузере.", "error");
+      return;
+    }
+
+    setVoiceStatusMessage("Голосовой ввод не сработал. Попробуйте ещё раз.", "error");
+  });
+
+  recognition.addEventListener("end", () => {
+    state.voiceRecognitionActive = false;
+    syncVoiceButton();
+
+    if (!state.voiceHadResult && !String(state.voiceDraftText || "").trim()) {
+      setVoiceStatusMessage("Диктовка остановлена.", "");
+      return;
+    }
+
+    state.voiceTranscriptBase = String(commandInput?.value || "");
+    state.voiceDraftText = "";
+  });
+
+  state.voiceRecognition = recognition;
+  return recognition;
+}
+
+function toggleVoiceRecognition() {
+  if (!SpeechRecognitionCtor) {
+    setVoiceStatusMessage("Этот браузер не поддерживает голосовой ввод.", "error");
+    syncVoiceButton();
+    return;
+  }
+
+  const recognition = ensureVoiceRecognition();
+
+  if (!recognition) {
+    setVoiceStatusMessage("Голосовой ввод недоступен.", "error");
+    return;
+  }
+
+  if (state.voiceRecognitionActive) {
+    stopVoiceRecognition();
+    setVoiceStatusMessage("Останавливаю диктовку…", "");
+    return;
+  }
+
+  try {
+    recognition.start();
+  } catch {
+    setVoiceStatusMessage("Не удалось запустить микрофон. Попробуйте ещё раз.", "error");
+  }
 }
 
 function setResetButtonBusy(isBusy) {
@@ -2293,10 +2592,65 @@ async function fetchBridgeStatus() {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to load status: ${response.status}`);
+    const payload = await response.json().catch(() => null);
+    const message = String(payload?.message || "").trim();
+    throw new Error(message || `Failed to load status: ${response.status}`);
   }
 
   return response.json();
+}
+
+function getCommandFreshnessTs(command) {
+  const candidates = [
+    command?.progressUpdatedAt,
+    command?.completedAt,
+    command?.resultAt,
+    command?.replyIngestedAt,
+    command?.firstReplySeenAt,
+    command?.firstExecutorAckSeenAt,
+    command?.bridgeClaimedAt,
+    command?.dispatchedAt,
+    command?.dispatchStartedAt,
+    command?.createdAt
+  ];
+
+  let freshest = 0;
+
+  candidates.forEach((value) => {
+    const parsed = Date.parse(String(value || "").trim());
+
+    if (Number.isFinite(parsed) && parsed > freshest) {
+      freshest = parsed;
+    }
+  });
+
+  return freshest;
+}
+
+function getCommandStatePriority(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
+
+  if (status === "failed") {
+    return 5;
+  }
+
+  if (status === "answered" || status === "acked") {
+    return 4;
+  }
+
+  if (status === "processing") {
+    return 3;
+  }
+
+  if (status === "dispatched") {
+    return 2;
+  }
+
+  if (status === "queued") {
+    return 1;
+  }
+
+  return 0;
 }
 
 function mergeCommandCollection(commands) {
@@ -2318,7 +2672,15 @@ function mergeCommandCollection(commands) {
       return;
     }
 
-    if (getCommandFreshnessTs(incoming) >= getCommandFreshnessTs(current)) {
+    const incomingFreshness = getCommandFreshnessTs(incoming);
+    const currentFreshness = getCommandFreshnessTs(current);
+    const shouldPreferIncoming = incomingFreshness > currentFreshness
+      || (
+        incomingFreshness === currentFreshness
+        && getCommandStatePriority(incoming) >= getCommandStatePriority(current)
+      );
+
+    if (shouldPreferIncoming) {
       byId.set(id, {
         ...current,
         ...incoming,
@@ -2389,7 +2751,7 @@ function noteNewMessages(previousMessages, nextMessages) {
 
 async function fetchDeliverySnapshot(options = {}) {
   const url = new URL("/api/delivery", window.location.origin);
-  url.searchParams.set("clientId", storage.clientId);
+  url.searchParams.set("scope", "public");
   if (options.activeOnly) {
     url.searchParams.set("activeOnly", "1");
   }
@@ -2403,7 +2765,9 @@ async function fetchDeliverySnapshot(options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to load delivery: ${response.status}`);
+    const payload = await response.json().catch(() => null);
+    const message = String(payload?.message || "").trim();
+    throw new Error(message || `Failed to load delivery: ${response.status}`);
   }
 
   return response.json();
@@ -2489,89 +2853,29 @@ async function fetchMenuRepos() {
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
-async function fetchCommands() {
-  const url = new URL("/api/commands", window.location.origin);
-  url.searchParams.set("scope", "public");
-  url.searchParams.set("_", String(Date.now()));
-
-  const response = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load commands: ${response.status}`);
-  }
-
-  const data = await response.json();
-  mergeCommandCollection(Array.isArray(data?.commands) ? data.commands : []);
-}
-
-async function fetchMessages() {
-  const url = new URL("/api/messages", window.location.origin);
-  url.searchParams.set("scope", "public");
-  url.searchParams.set("_", String(Date.now()));
-
-  const response = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load messages: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const previousMessages = [...state.messages];
-  mergeMessageCollection(Array.isArray(data?.messages) ? data.messages : []);
-  noteNewMessages(previousMessages, state.messages);
-}
-
 async function refreshAll() {
   const results = await Promise.allSettled([
-    fetchBridgeStatus(),
-    fetchCommands(),
-    fetchMessages(),
+    fetchDeliverySnapshot(),
     fetchMenuRepos()
   ]);
 
   const statusResult = results[0];
-  const commandsError = results[1].status === "rejected" ? results[1].reason : null;
-  const messagesError = results[2].status === "rejected" ? results[2].reason : null;
-  const reposError = results[3].status === "rejected" ? results[3].reason : null;
+  const reposError = results[1].status === "rejected" ? results[1].reason : null;
 
   if (statusResult.status === "fulfilled") {
-    const status = statusResult.value?.status || {};
-    const bridgeStatusText = document.querySelector("#bridge-status-text");
-    const bridgeWatchdogText = document.querySelector("#bridge-watchdog-text");
-
-    if (bridgeStatusText) {
-      bridgeStatusText.textContent = formatExecutorStatus(status);
-    }
-
-    if (bridgeWatchdogText) {
-      bridgeWatchdogText.textContent = `Watchdog: ${status.lastError || "ошибок нет"}`;
-    }
+    applyDeliverySnapshot(statusResult.value);
   }
 
   renderDispatchModeUi();
 
   const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
 
-  if ((commandsError || messagesError || reposError) && hasCachedData) {
+  if (statusResult.status === "rejected" && hasCachedData) {
     setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
-  } else if (commandsError && messagesError) {
-    setCommandStatusMessage("Не удалось обновить команды и ответы.", { tone: "error" });
+  } else if (statusResult.status === "rejected") {
+    setCommandStatusMessage(String(statusResult.reason?.message || "Не удалось обновить состояние."), { tone: "error" });
   } else if (reposError) {
     setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
-  } else if (messagesError) {
-    setCommandStatusMessage("Не удалось обновить ответы.", { tone: "error" });
-  } else if (commandsError) {
-    setCommandStatusMessage("Не удалось обновить команды.", { tone: "error" });
   } else {
     syncCommandStatusFromState();
   }
@@ -2599,6 +2903,10 @@ function isDeliverySpeedModeActive() {
 
 async function submitCommand(event) {
   event.preventDefault();
+
+  if (state.voiceRecognitionActive) {
+    stopVoiceRecognition();
+  }
 
   const uiSubmitStartedAt = new Date().toISOString();
   const text = String(commandInput?.value || "").trim();
@@ -2687,9 +2995,14 @@ async function submitCommand(event) {
   renderCommands();
   syncCommandStatusFromState();
   setSubmitProgress("queued", "processing");
+  const createdDispatchMode = String(result?.command?.dispatchMode || "").trim();
   setCommandStatusMessage(
     dispatchMode === "cloud"
-      ? "Команда создана, выполняю direct cloud dispatch…"
+      ? (
+          createdDispatchMode === "slack-codex-cloud"
+            ? "Команда создана, отправляю в cloud via Slack…"
+            : "Команда создана, запускаю cloud executor…"
+        )
       : "Команда создана, жду bridge claim…",
     { tone: "processing" }
   );
@@ -2785,6 +3098,10 @@ function bindEvents() {
     });
   });
 
+  commandVoiceButton?.addEventListener("click", () => {
+    toggleVoiceRecognition();
+  });
+
   commandThreadSelect?.addEventListener("change", () => {
     storage.selectedRepoId = canonicalizeRepoSelectionId(commandThreadSelect.value);
 
@@ -2836,17 +3153,36 @@ function bindEvents() {
   });
 
   threadSettingsToggle?.addEventListener("click", () => {
-    if (!threadSettingsPanel) {
+    setThreadSettingsPanelOpen(threadSettingsPanel?.hidden ?? true);
+  });
+
+  threadSettingsSummary?.addEventListener("click", () => {
+    setThreadSettingsPanelOpen(threadSettingsPanel?.hidden ?? true);
+  });
+
+  threadSettingsSummary?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
       return;
     }
 
-    const nextHidden = !threadSettingsPanel.hidden;
-    threadSettingsPanel.hidden = nextHidden;
-    threadSettingsToggle.setAttribute("aria-expanded", String(!nextHidden));
+    event.preventDefault();
+    setThreadSettingsPanelOpen(threadSettingsPanel?.hidden ?? true);
   });
 
   threadSettingsShowAll?.addEventListener("change", () => {
     storage.showAllMessages = Boolean(threadSettingsShowAll.checked);
+    threadSettingsShowAllBadge?.setAttribute("aria-pressed", String(storage.showAllMessages));
+    renderThreadSettingsSummary();
+    renderCommands();
+  });
+
+  threadSettingsShowAllBadge?.addEventListener("click", () => {
+    const nextValue = !storage.showAllMessages;
+    storage.showAllMessages = nextValue;
+    if (threadSettingsShowAll) {
+      threadSettingsShowAll.checked = nextValue;
+    }
+    threadSettingsShowAllBadge.setAttribute("aria-pressed", String(nextValue));
     renderThreadSettingsSummary();
     renderCommands();
   });
@@ -2856,10 +3192,7 @@ function bindEvents() {
   });
 
   threadSettingsSave?.addEventListener("click", () => {
-    if (threadSettingsPanel) {
-      threadSettingsPanel.hidden = true;
-      threadSettingsToggle?.setAttribute("aria-expanded", "false");
-    }
+    setThreadSettingsPanelOpen(false);
   });
 
   threadSettingsSelectAll?.addEventListener("click", () => {
@@ -2908,7 +3241,6 @@ async function boot() {
     !refreshButton ||
     !dispatchModeBridgeButton ||
     !dispatchModeCloudButton ||
-    !threadSettingsToggle ||
     !threadSettingsSearch ||
     !threadSettingsSave ||
     !threadSettingsSelectAll ||
@@ -2926,6 +3258,10 @@ async function boot() {
     threadSettingsShowAll.checked = storage.showAllMessages;
   }
 
+  if (threadSettingsShowAllBadge) {
+    threadSettingsShowAllBadge.setAttribute("aria-pressed", String(storage.showAllMessages));
+  }
+
   state.dispatchMode = storage.dispatchModePreference;
   state.activeTimelineTab = storage.activeTimelineTab;
   renderTimelineTabButtons();
@@ -2935,6 +3271,8 @@ async function boot() {
   }
 
   clearSelectedPhoto();
+  syncVoiceButton();
+  setVoiceStatusMessage(SpeechRecognitionCtor ? "" : "Голосовой ввод доступен не во всех браузерах.", SpeechRecognitionCtor ? "" : "error");
   bindEvents();
 
   if (await ensureLatestClient()) {

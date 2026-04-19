@@ -36,14 +36,30 @@ function buildCloudInput(command) {
   const text = normalizeText(command?.text, 12_000);
   const projectLabel = normalizeText(command?.projectLabel || command?.threadLabel || "Links", 160);
   const targetRepo = normalizeText(command?.targetRepo, 240);
-
-  return [
+  const prompt = [
     `Project: ${projectLabel}`,
     targetRepo ? `Repository: ${targetRepo}` : "",
     "",
     "User command:",
     text
   ].filter(Boolean).join("\n");
+
+  const photoDataUrl = normalizeText(command?.photo?.dataUrl, 5_000_000);
+
+  if (!photoDataUrl) {
+    return prompt;
+  }
+
+  return [
+    {
+      type: "input_text",
+      text: prompt
+    },
+    {
+      type: "input_image",
+      image_url: photoDataUrl
+    }
+  ];
 }
 
 function buildCommandError(input) {
@@ -82,15 +98,15 @@ export function getOpenAiCloudModel() {
 }
 
 export async function createOpenAiCloudResponse(env, command) {
-  if (command?.photo) {
+  if (command?.photo && !normalizeText(command?.photo?.dataUrl, 5_000_000)) {
     return {
       ok: false,
-      retryable: false,
+      retryable: true,
       commandError: buildCommandError({
-        code: "cloud_photo_not_supported",
-        stage: "cloud-photo-not-supported",
-        message: "Cloud photo commands are not supported yet.",
-        detail: "Retry this command with bridge if you need image input.",
+        code: "cloud_photo_missing_data",
+        stage: "cloud-photo-missing-data",
+        message: "Cloud photo command is missing image bytes.",
+        detail: "The command reached cloud dispatch without a usable photo data URL.",
         executor: "cloud"
       })
     };

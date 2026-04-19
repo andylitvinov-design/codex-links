@@ -11,7 +11,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260418-0022" />
+    <link rel="stylesheet" href="/styles.css?v=20260419-0515" />
   </head>
   <body>
     <main class="page">
@@ -19,26 +19,9 @@
         <header class="chat-header">
           <h1>Ссылки</h1>
           <div class="header-actions">
-            <div class="dispatch-toggle" id="dispatch-toggle" role="tablist" aria-label="Режим отправки">
-              <button class="dispatch-toggle-button is-active" id="dispatch-mode-bridge" type="button" data-mode="bridge" role="tab" aria-selected="true">
-                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
-                <span>Bridge</span>
-              </button>
-              <button class="dispatch-toggle-button" id="dispatch-mode-cloud" type="button" data-mode="cloud" role="tab" aria-selected="false">
-                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
-                <span>Cloud</span>
-              </button>
-            </div>
             <button class="button button-secondary refresh-button" id="refresh-button" type="button">Refresh</button>
           </div>
         </header>
-        <section id="project-nav" class="project-nav" aria-label="Проекты из dispatch manifest">
-          <label class="thread-select-field project-nav-field">
-            <span class="field-label" id="command-target-label">Проект</span>
-            <select id="command-thread-select" name="thread"></select>
-          </label>
-          <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
-        </section>
         <section class="bridge-status-block">
           <div class="bridge-status-row">
             <div class="bridge-status-copy">
@@ -62,10 +45,7 @@
           <form id="command-form" class="command-form">
             <div class="thread-settings-inline-row">
               <span id="thread-settings-summary" class="form-status">Показываются все репозитории.</span>
-              <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline">
-                <input id="thread-settings-show-all" type="checkbox" />
-                <span>Все</span>
-              </label>
+              <button class="button button-secondary thread-settings-quick-toggle" id="thread-settings-show-all-badge" type="button" aria-pressed="false">Все</button>
             </div>
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
@@ -91,13 +71,40 @@
                 <span class="field-label">Фото</span>
                 <input id="command-photo-input" name="photo" type="file" accept="image/*" />
               </label>
-              <button class="button button-secondary command-photo-clear" id="command-photo-clear" type="button" disabled>Удалить фото</button>
+              <button class="button button-secondary command-photo-clear" id="command-photo-clear" type="button" disabled aria-label="Удалить фото" title="Удалить фото">×</button>
             </div>
             <p id="command-photo-status" class="form-status command-photo-status">Фото не выбрано.</p>
+            <section id="project-nav" class="project-nav project-nav-inline" aria-label="Проекты из dispatch manifest">
+              <label class="thread-select-field project-nav-field">
+                <span class="field-label" id="command-target-label">Проект</span>
+                <select id="command-thread-select" name="thread"></select>
+              </label>
+              <div class="project-nav-actions">
+                <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Категории</button>
+                <label class="thread-settings-item thread-settings-item-toggle thread-settings-item-inline thread-settings-item-inline-compact">
+                  <input id="thread-settings-show-all" type="checkbox" />
+                  <span>Все</span>
+                </label>
+              </div>
+            </section>
             <div class="command-compose-row">
               <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true"></textarea>
+              <button class="button button-secondary command-voice-button" id="command-voice-button" type="button" aria-label="Голосовой ввод" title="Голосовой ввод">
+                <span aria-hidden="true">🎙</span>
+              </button>
               <button class="button button-send-icon" type="submit" aria-label="Отправить в Codex" title="Отправить в Codex">
                 <span aria-hidden="true">▶</span>
+              </button>
+            </div>
+            <p id="command-voice-status" class="form-status command-voice-status" hidden>Голосовой ввод готов.</p>
+            <div class="dispatch-toggle dispatch-toggle-inline" id="dispatch-toggle" role="tablist" aria-label="Режим отправки">
+              <button class="dispatch-toggle-button is-active" id="dispatch-mode-bridge" type="button" data-mode="bridge" role="tab" aria-selected="true">
+                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
+                <span>Bridge</span>
+              </button>
+              <button class="dispatch-toggle-button" id="dispatch-mode-cloud" type="button" data-mode="cloud" role="tab" aria-selected="false">
+                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
+                <span>Cloud</span>
               </button>
             </div>
             <div class="command-actions">
@@ -123,6 +130,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260418-0022"></script>
+    <script type="module" src="/app.js?v=20260419-0515"></script>
   </body>
 </html>
