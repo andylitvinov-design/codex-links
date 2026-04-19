@@ -18,6 +18,25 @@ export function json(data, init = {}) {
   });
 }
 
+export function isStorageRateLimited(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("429")
+    && (message.includes("workers kv") || message.includes("kv"))
+    && (message.includes("limit") || message.includes("rate"));
+}
+
+export function jsonStorageError(error, fallbackMessage = "Storage temporarily rate limited.") {
+  const rateLimited = isStorageRateLimited(error);
+
+  return json({
+    error: rateLimited ? "rate_limited" : "storage_error",
+    message: rateLimited ? fallbackMessage : String(error?.message || fallbackMessage),
+    rateLimited
+  }, {
+    status: rateLimited ? 429 : 500
+  });
+}
+
 export function text(body, init = {}) {
   return new Response(body, {
     ...init,

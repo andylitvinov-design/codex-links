@@ -2,6 +2,8 @@ export const DISPATCH_MODE_LOCAL = "local-bridge";
 export const DISPATCH_MODE_CLOUD = "cloud";
 export const LEGACY_DISPATCH_MODE_SLACK = "slack-codex-cloud";
 export const DISPATCH_MODE_SLACK = LEGACY_DISPATCH_MODE_SLACK;
+export const CONFIG_DISPATCH_MODE_SLACK = "cloud-via-slack";
+export const CONFIG_DISPATCH_MODE_DIRECT = "direct-openai";
 
 function hasOpenAiKey(env) {
   return Boolean(String(env?.OPENAI_API_KEY || "").trim());
@@ -18,11 +20,15 @@ function hasSlackChannel(env) {
 export function normalizeDispatchMode(rawMode) {
   const mode = String(rawMode || "").trim().toLowerCase();
 
-  if (mode === DISPATCH_MODE_SLACK || mode === LEGACY_DISPATCH_MODE_SLACK) {
+  if (
+    mode === DISPATCH_MODE_SLACK
+    || mode === LEGACY_DISPATCH_MODE_SLACK
+    || mode === CONFIG_DISPATCH_MODE_SLACK
+  ) {
     return DISPATCH_MODE_SLACK;
   }
 
-  if (mode === DISPATCH_MODE_CLOUD) {
+  if (mode === DISPATCH_MODE_CLOUD || mode === CONFIG_DISPATCH_MODE_DIRECT) {
     return DISPATCH_MODE_CLOUD;
   }
 
@@ -50,10 +56,22 @@ export function getConfiguredDispatchMode(env) {
     }
 
     if (explicit === DISPATCH_MODE_CLOUD) {
-      return isCloudDispatchConfigured(env) ? DISPATCH_MODE_CLOUD : DISPATCH_MODE_LOCAL;
+      if (isCloudDispatchConfigured(env)) {
+        return DISPATCH_MODE_CLOUD;
+      }
+
+      if (isSlackDispatchConfigured(env)) {
+        return DISPATCH_MODE_SLACK;
+      }
+
+      return DISPATCH_MODE_LOCAL;
     }
 
     return explicit;
+  }
+
+  if (isSlackDispatchConfigured(env)) {
+    return DISPATCH_MODE_SLACK;
   }
 
   if (isCloudDispatchConfigured(env)) {
