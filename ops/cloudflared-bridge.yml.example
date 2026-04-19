@@ -1,0 +1,7 @@
+tunnel: replace-with-your-named-tunnel-id
+credentials-file: /Users/andriilitvinov/.cloudflared/replace-with-your-named-tunnel-id.json
+
+ingress:
+  - hostname: bridge.codex-links.example.com
+    service: http://127.0.0.1:8788
+  - service: http_status:404

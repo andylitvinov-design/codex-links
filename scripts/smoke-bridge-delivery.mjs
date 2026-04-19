@@ -1,74 +1,66 @@
 #!/usr/bin/env node
 
-const BASE_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev"
-const TARGET_PROJECT_ID = process.env.CODEX_LINKS_SMOKE_PROJECT_ID || "links"
-const TARGET_PROJECT_LABEL = process.env.CODEX_LINKS_SMOKE_PROJECT_LABEL || "links"
-const TARGET_REPO = process.env.CODEX_LINKS_SMOKE_REPO || "andylitvinov-design/codex-links"
-const TARGET_REPO_URL = process.env.CODEX_LINKS_SMOKE_REPO_URL || "https://github.com/andylitvinov-design/codex-links"
-const TARGET_WORKSPACE_PATH = process.env.CODEX_LINKS_SMOKE_WORKSPACE_PATH || "/Users/andriilitvinov/projects/MYPROJECTS/links"
-const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"]
-const clientId = `bridge-smoke-${Date.now()}`
-const text = "bridge delivery-probe: reply with OK only"
-const pollStartedAt = Date.now()
+const BASE_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
+const TARGET_PROJECT_ID = process.env.CODEX_LINKS_SMOKE_PROJECT_ID || "links";
+const TARGET_PROJECT_LABEL = process.env.CODEX_LINKS_SMOKE_PROJECT_LABEL || "links";
+const TARGET_REPO = process.env.CODEX_LINKS_SMOKE_REPO || "andylitvinov-design/codex-links";
+const TARGET_REPO_URL = process.env.CODEX_LINKS_SMOKE_REPO_URL || "https://github.com/andylitvinov-design/codex-links";
+const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"];
+const clientId = `bridge-text-smoke-${Date.now()}`;
+const text = "bridge text probe ignore: reply with BRIDGE_TEXT_OK only";
 
 async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeStringArray(value) {
   return Array.isArray(value)
     ? value.map((item) => String(item || "").trim()).filter(Boolean)
-    : []
+    : [];
 }
 
 function assertManifestContext(command, label) {
   if (!command || typeof command !== "object") {
-    throw new Error(`${label}: command payload is missing.`)
+    throw new Error(`${label}: command payload is missing.`);
   }
 
-  const projectId = String(command.projectId || command.threadId || "").trim()
-  const targetRepo = String(command.targetRepo || "").trim()
-  const targetRepoUrl = String(command.targetRepoUrl || "").trim()
-  const targetWorkspacePath = String(command.targetWorkspacePath || "").trim()
-  const targetContextFiles = normalizeStringArray(command.targetContextFiles)
+  const projectId = String(command.projectId || command.threadId || "").trim();
+  const targetRepo = String(command.targetRepo || "").trim();
+  const targetRepoUrl = String(command.targetRepoUrl || "").trim();
+  const targetContextFiles = normalizeStringArray(command.targetContextFiles);
 
   if (projectId !== TARGET_PROJECT_ID) {
-    throw new Error(`${label}: expected projectId=${TARGET_PROJECT_ID}, got ${projectId || "empty"}.`)
+    throw new Error(`${label}: expected projectId=${TARGET_PROJECT_ID}, got ${projectId || "empty"}.`);
   }
 
   if (targetRepo !== TARGET_REPO) {
-    throw new Error(`${label}: expected targetRepo=${TARGET_REPO}, got ${targetRepo || "empty"}.`)
+    throw new Error(`${label}: expected targetRepo=${TARGET_REPO}, got ${targetRepo || "empty"}.`);
   }
 
   if (targetRepoUrl !== TARGET_REPO_URL) {
-    throw new Error(`${label}: expected targetRepoUrl=${TARGET_REPO_URL}, got ${targetRepoUrl || "empty"}.`)
-  }
-
-  if (targetWorkspacePath !== TARGET_WORKSPACE_PATH) {
-    throw new Error(`${label}: expected targetWorkspacePath=${TARGET_WORKSPACE_PATH}, got ${targetWorkspacePath || "empty"}.`)
+    throw new Error(`${label}: expected targetRepoUrl=${TARGET_REPO_URL}, got ${targetRepoUrl || "empty"}.`);
   }
 
   if (targetContextFiles.join("::") !== TARGET_CONTEXT_FILES.join("::")) {
-    throw new Error(`${label}: expected targetContextFiles=${TARGET_CONTEXT_FILES.join(", ")}, got ${targetContextFiles.join(", ") || "empty"}.`)
+    throw new Error(`${label}: expected targetContextFiles=${TARGET_CONTEXT_FILES.join(", ")}, got ${targetContextFiles.join(", ") || "empty"}.`);
   }
 }
 
 async function fetchAssistantReplies(commandId) {
   const response = await fetch(`${BASE_URL}/api/messages?scope=public`, {
     headers: { accept: "application/json" }
-  })
-  const data = await response.json().catch(() => ({}))
+  });
+  const data = await response.json().catch(() => ({}));
 
   return Array.isArray(data?.messages)
     ? data.messages.filter((message) =>
         String(message?.commandId || "").trim() === String(commandId || "").trim()
         && String(message?.role || "").trim() === "assistant"
       )
-    : []
+    : [];
 }
 
 async function postCommand() {
-  const startedAt = Date.now()
   const response = await fetch(`${BASE_URL}/api/commands`, {
     method: "POST",
     headers: {
@@ -80,90 +72,71 @@ async function postCommand() {
       threadId: TARGET_PROJECT_ID,
       threadLabel: TARGET_PROJECT_LABEL,
       projectId: TARGET_PROJECT_ID,
-      dispatchMode: "bridge",
+      dispatchMode: "local-bridge",
       targetExecutionMode: "bridge",
       targetRepo: TARGET_REPO,
       targetRepoUrl: TARGET_REPO_URL,
       targetContextFiles: TARGET_CONTEXT_FILES,
       text
     })
-  })
+  });
 
-  const data = await response.json().catch(() => ({}))
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok || !data?.command?.id) {
-    throw new Error(String(data?.error || "").trim() || `POST /api/commands failed with ${response.status}`)
+    throw new Error(String(data?.error || "").trim() || `POST /api/commands failed with ${response.status}`);
   }
 
-  assertManifestContext(data.command, "bridge create")
-  return {
-    command: data.command,
-    createAckMs: Date.now() - startedAt
-  }
+  assertManifestContext(data.command, "bridge text create");
+  return data.command;
 }
 
 async function pollCommand(id) {
-  const startedAt = Date.now()
+  const startedAt = Date.now();
 
-  while ((Date.now() - startedAt) < 120000) {
+  while ((Date.now() - startedAt) < 180000) {
     const response = await fetch(`${BASE_URL}/api/commands?id=${encodeURIComponent(id)}`, {
       headers: { accept: "application/json" }
-    })
-    const data = await response.json().catch(() => ({}))
-    const command = data?.command || null
+    });
+    const data = await response.json().catch(() => ({}));
+    const command = data?.command || null;
 
     if (command) {
-      assertManifestContext(command, "bridge poll")
-      const status = String(command.status || "").trim().toLowerCase()
-      const stage = String(command.progressStage || "").trim()
-
-      console.log(`status=${status || "unknown"} stage=${stage || "unknown"} dispatchMode=${String(command.dispatchMode || "").trim() || "unknown"}`)
+      assertManifestContext(command, "bridge text poll");
+      const status = String(command.status || "").trim().toLowerCase();
+      console.log(`status=${status || "unknown"} stage=${String(command.progressStage || "").trim() || "unknown"} dispatchMode=${String(command.dispatchMode || "").trim() || "unknown"}`);
 
       if (status === "answered") {
-        return command
-      }
+        const replies = await fetchAssistantReplies(command.id);
+        const matched = replies.find((reply) => /BRIDGE_TEXT_OK/i.test(String(reply?.text || "")));
 
-      if (status === "acked") {
-        const replies = await fetchAssistantReplies(command.id)
-
-        if (replies.length) {
-          return command
+        if (!matched) {
+          throw new Error("Bridge text smoke answered, but BRIDGE_TEXT_OK reply was not found.");
         }
+
+        return command;
       }
 
       if (status === "failed") {
-        throw new Error(String(command.errorMessage || "Bridge command failed."))
+        throw new Error(String(command.errorMessage || "Bridge text smoke failed."));
       }
     }
 
-    await sleep(5000)
+    await sleep(5000);
   }
 
-  throw new Error("Bridge smoke timed out waiting for a reply.")
+  throw new Error("Bridge text smoke timed out waiting for a reply.");
 }
 
 async function main() {
-  console.log(`Submitting bridge smoke command to ${BASE_URL}`)
-  const created = await postCommand()
-  console.log(`commandId=${created.command.id}`)
-  const answered = await pollCommand(created.command.id)
-  const report = {
-    path: "bridge",
-    createAckMs: created.createAckMs,
-    executorVisibleMs: Number(
-      answered?.latencyBreakdown?.dispatchToFirstAckMs
-      ?? answered?.latencyBreakdown?.dispatchStartToBridgeClaimMs
-      ?? null
-    ),
-    firstReplyVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstReplyMs ?? null),
-    doneMs: Date.now() - pollStartedAt,
-    stage: answered?.deliveryStage || answered?.progressStage || answered?.status || "unknown"
-  }
-  console.log(JSON.stringify({ latencyReport: report }, null, 2))
-  console.log(`Bridge smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`)
+  console.log(`Submitting bridge text smoke command to ${BASE_URL}`);
+  const command = await postCommand();
+  console.log(`commandId=${command.id}`);
+  const answered = await pollCommand(command.id);
+  console.log(`Bridge text smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`);
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exit(1)
-})
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});

@@ -35,22 +35,6 @@ async function main() {
     failures.push("public/index.html asset cache-busting parameters do not match the build id.");
   }
 
-  if (!indexHtml.includes('id="thread-settings-summary"') || !indexHtml.includes('id="thread-settings-panel"')) {
-    failures.push("public/index.html must keep the thread filter summary and panel markup.");
-  }
-
-  if (!indexHtml.includes('id="thread-settings-show-all-badge"')) {
-    failures.push("public/index.html must expose a visible show-all badge.");
-  }
-
-  if (!appJs.includes("threadSettingsSummary?.addEventListener(\"click\"")) {
-    failures.push("public/app.js must let the summary pill open the thread filter panel.");
-  }
-
-  if (!appJs.includes("threadSettingsShowAllBadge?.addEventListener(\"click\"")) {
-    failures.push("public/app.js must wire the visible show-all badge.");
-  }
-
   if (manifest.productionBranch !== "main") {
     failures.push("ops/deployment-manifest.json must keep productionBranch=main.");
   }

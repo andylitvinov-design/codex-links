@@ -5,35 +5,30 @@ export const DISPATCH_MODE_SLACK = LEGACY_DISPATCH_MODE_SLACK;
 export const CONFIG_DISPATCH_MODE_SLACK = "cloud-via-slack";
 export const CONFIG_DISPATCH_MODE_DIRECT = "direct-openai";
 
-function isLegacyCloudConfigMode(rawMode) {
-  const mode = String(rawMode || "").trim().toLowerCase();
-  return mode === DISPATCH_MODE_SLACK
-    || mode === LEGACY_DISPATCH_MODE_SLACK
-    || mode === CONFIG_DISPATCH_MODE_SLACK
-    || mode === CONFIG_DISPATCH_MODE_DIRECT
-    || mode === DISPATCH_MODE_CLOUD;
+function hasOpenAiKey(env) {
+  return Boolean(String(env?.OPENAI_API_KEY || "").trim());
 }
 
-function hasTrustedCloudBridgeBaseUrl(env) {
-  return Boolean(String(env?.CLOUD_BRIDGE_BASE_URL || "").trim());
+function hasSlackToken(env) {
+  return Boolean(String(env?.SLACK_BOT_TOKEN || "").trim());
 }
 
-function hasTrustedCloudBridgeSecret(env) {
-  return Boolean(String(env?.CLOUD_BRIDGE_SHARED_SECRET || "").trim());
+function hasSlackChannel(env) {
+  return Boolean(String(env?.SLACK_CODEX_CHANNEL_ID || "").trim());
 }
 
 export function normalizeDispatchMode(rawMode) {
   const mode = String(rawMode || "").trim().toLowerCase();
 
-  if (mode === DISPATCH_MODE_SLACK || mode === LEGACY_DISPATCH_MODE_SLACK) {
+  if (
+    mode === DISPATCH_MODE_SLACK
+    || mode === LEGACY_DISPATCH_MODE_SLACK
+    || mode === CONFIG_DISPATCH_MODE_SLACK
+  ) {
     return DISPATCH_MODE_SLACK;
   }
 
-  if (
-    mode === DISPATCH_MODE_CLOUD
-    || mode === CONFIG_DISPATCH_MODE_DIRECT
-    || mode === CONFIG_DISPATCH_MODE_SLACK
-  ) {
+  if (mode === DISPATCH_MODE_CLOUD || mode === CONFIG_DISPATCH_MODE_DIRECT) {
     return DISPATCH_MODE_CLOUD;
   }
 
@@ -41,27 +36,42 @@ export function normalizeDispatchMode(rawMode) {
 }
 
 export function isCloudDispatchConfigured(env) {
-  return hasTrustedCloudBridgeBaseUrl(env) && hasTrustedCloudBridgeSecret(env);
+  return hasOpenAiKey(env);
 }
 
 export function isSlackDispatchConfigured(env) {
-  return false;
+  return hasSlackToken(env) && hasSlackChannel(env);
 }
 
 export function isSlackInboundConfigured(env) {
-  return false;
+  return isSlackDispatchConfigured(env) && Boolean(String(env?.SLACK_SIGNING_SECRET || "").trim());
 }
 
 export function getConfiguredDispatchMode(env) {
   const explicit = normalizeDispatchMode(env?.COMMAND_DISPATCH_MODE);
-  const explicitRaw = String(env?.COMMAND_DISPATCH_MODE || "").trim();
 
-  if (explicitRaw) {
-    if (isLegacyCloudConfigMode(explicitRaw)) {
-      return isCloudDispatchConfigured(env) ? DISPATCH_MODE_CLOUD : DISPATCH_MODE_LOCAL;
+  if (String(env?.COMMAND_DISPATCH_MODE || "").trim()) {
+    if (explicit === DISPATCH_MODE_SLACK) {
+      return isSlackDispatchConfigured(env) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
+    }
+
+    if (explicit === DISPATCH_MODE_CLOUD) {
+      if (isCloudDispatchConfigured(env)) {
+        return DISPATCH_MODE_CLOUD;
+      }
+
+      if (isSlackDispatchConfigured(env)) {
+        return DISPATCH_MODE_SLACK;
+      }
+
+      return DISPATCH_MODE_LOCAL;
     }
 
     return explicit;
+  }
+
+  if (isSlackDispatchConfigured(env)) {
+    return DISPATCH_MODE_SLACK;
   }
 
   if (isCloudDispatchConfigured(env)) {
@@ -75,11 +85,11 @@ export function getDispatchModeLabel(mode) {
   const normalized = normalizeDispatchMode(mode);
 
   if (normalized === DISPATCH_MODE_SLACK) {
-    return "Legacy Codex Cloud via Slack";
+    return "Codex Cloud via Slack";
   }
 
   if (normalized === DISPATCH_MODE_CLOUD) {
-    return "Trusted Codex Cloud";
+    return "Direct OpenAI cloud";
   }
 
   return "Local bridge";

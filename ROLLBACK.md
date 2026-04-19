@@ -21,4 +21,3 @@ If the site must recover before the revert PR is merged:
 
 - Never fix production by force-pushing `main`.
 - Prefer reverting the merge or the exact bad commit, not editing history.
-- If trusted cloud mode is the regression source, first stop the private bridge service or switch Pages `COMMAND_DISPATCH_MODE` back to `local-bridge`, then ship the Git revert through the normal PR flow.

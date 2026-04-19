@@ -1,5 +1,6 @@
 LINKS_WRITE_TOKEN=replace-with-a-long-random-token
 COMMAND_DISPATCH_MODE=cloud
+OPENAI_API_KEY=sk-replace-me
 CLOUD_BRIDGE_BASE_URL=http://127.0.0.1:8788
 CLOUD_BRIDGE_SHARED_SECRET=replace-with-the-same-secret-used-on-the-trusted-machine
 CLOUD_BRIDGE_LABEL=Trusted Codex Cloud

@@ -7,8 +7,8 @@ const TARGET_REPO = process.env.CODEX_LINKS_SMOKE_REPO || "andylitvinov-design/c
 const TARGET_REPO_URL = process.env.CODEX_LINKS_SMOKE_REPO_URL || "https://github.com/andylitvinov-design/codex-links";
 const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"];
 const clientId = `bridge-photo-smoke-${Date.now()}`;
-const text = "If the attached image is visible and shows a red square with a white center, reply with exactly PHOTO_OK_RED. If the image is not visible, reply with exactly PHOTO_NOT_VISIBLE.";
-const photoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAV0lEQVR42u3Z0QkAIAgFwCZx/6HapZYQMbsHfircl6DrPJ4FAAAwFLAjWhUAAAAAQC9AdgAAAAByBlb3AQAAAABYZAAAAD8CXCUAAAAAZgN8KQEAAEpyAXtKwuUCTzFGAAAAAElFTkSuQmCC";
+const text = "photo bridge probe ignore: reply with PHOTO_OK only after reading the attached image";
+const photoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot7O8AAAAASUVORK5CYII=";
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,7 +82,7 @@ async function postCommand() {
       photo: {
         contentType: "image/png",
         fileName: "bridge-photo-smoke.png",
-        size: 144,
+        size: 68,
         dataUrl: photoDataUrl
       }
     })
@@ -115,14 +115,10 @@ async function pollCommand(id) {
 
       if (status === "answered") {
         const replies = await fetchAssistantReplies(command.id);
-        const latestReply = String(replies.at(-1)?.text || "").trim();
+        const matched = replies.find((reply) => /PHOTO_OK/i.test(String(reply?.text || "")));
 
-        if (/PHOTO_NOT_VISIBLE/i.test(latestReply)) {
-          throw new Error(`Bridge photo smoke answered, but Codex reported the image as not visible: ${latestReply}`);
-        }
-
-        if (!/PHOTO_OK_RED/i.test(latestReply)) {
-          throw new Error(`Bridge photo smoke answered, but PHOTO_OK_RED reply was not found: ${latestReply || "empty"}.`);
+        if (!matched) {
+          throw new Error("Bridge photo smoke answered, but PHOTO_OK reply was not found.");
         }
 
         return command;
