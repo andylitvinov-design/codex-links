@@ -391,6 +391,9 @@ function normalizeDeliveryEvidence(rawValue) {
     fileId: normalizeSlackValue(rawValue.fileId),
     fileMode: normalizeDiagnosticText(rawValue.fileMode, 40),
     fileAccess: normalizeDiagnosticText(rawValue.fileAccess, 40),
+    slackUploadMethod: normalizeDiagnosticText(rawValue.slackUploadMethod, 80),
+    slackUploadArgKeys: normalizeDiagnosticText(rawValue.slackUploadArgKeys, 120),
+    slackUploadError: normalizeDiagnosticText(rawValue.slackUploadError, 160),
     botCanOpenFile: typeof rawValue.botCanOpenFile === "boolean" ? rawValue.botCanOpenFile : null,
     botOpenHttpStatus: Number.isFinite(Number(rawValue.botOpenHttpStatus)) ? Number(rawValue.botOpenHttpStatus) : 0,
     executionAckSeen: normalizeBooleanValue(rawValue.executionAckSeen),
@@ -423,6 +426,9 @@ function normalizeDeliveryEvidence(rawValue) {
     && !normalized.fileId
     && !normalized.fileMode
     && !normalized.fileAccess
+    && !normalized.slackUploadMethod
+    && !normalized.slackUploadArgKeys
+    && !normalized.slackUploadError
     && normalized.botCanOpenFile === null
     && !normalized.botOpenHttpStatus
     && !normalized.executionAckSeen
