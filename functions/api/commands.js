@@ -49,8 +49,8 @@ const SLACK_DISPATCH_GRACE_MS = 10_000;
 const SLACK_FIRST_ACK_TIMEOUT_MS = 12_000;
 const SLACK_RESULT_WAIT_MS = 30_000;
 const SLACK_SYNC_POLL_MS = 2_000;
-const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 45_000;
-const SLACK_PHOTO_RESULT_WAIT_MS = 120_000;
+const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 20_000;
+const SLACK_PHOTO_RESULT_WAIT_MS = 60_000;
 
 function logCommandError(context, error, extra = {}) {
   const message = error instanceof Error ? error.message : String(error || "Unknown error");
