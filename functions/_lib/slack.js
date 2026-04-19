@@ -49,6 +49,39 @@ function buildSlackAuthHeaders(token, headers = {}) {
   };
 }
 
+function encodeSlackFormBody(body) {
+  const params = new URLSearchParams();
+
+  Object.entries(body || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) {
+      return;
+    }
+
+    if (Array.isArray(value) || (value && typeof value === "object")) {
+      params.set(key, JSON.stringify(value));
+      return;
+    }
+
+    params.set(key, String(value));
+  });
+
+  return params;
+}
+
+function formatSlackError(data, fallbackMessage) {
+  const error = normalizeText(data?.error);
+  const metadataMessages = Array.isArray(data?.response_metadata?.messages)
+    ? data.response_metadata.messages.map((entry) => normalizeText(entry)).filter(Boolean)
+    : [];
+  const detail = metadataMessages.join(" ");
+
+  if (error && detail) {
+    return `${error}: ${detail}`;
+  }
+
+  return error || detail || fallbackMessage;
+}
+
 function normalizeSlackQueryTs(rawValue) {
   const value = normalizeText(rawValue);
 
@@ -75,7 +108,7 @@ function withCommandError(error, input) {
   return wrapped
 }
 
-async function callSlackApi(token, method, body = null, query = null) {
+async function callSlackApi(token, method, body = null, query = null, options = {}) {
   const url = new URL(`https://slack.com/api/${method}`);
 
   if (query && typeof query === "object") {
@@ -86,15 +119,25 @@ async function callSlackApi(token, method, body = null, query = null) {
     });
   }
 
+  const bodyEncoding = normalizeText(options.bodyEncoding).toLowerCase() || "json";
+  const headers = bodyEncoding === "form"
+    ? buildSlackAuthHeaders(token, {
+        "content-type": "application/x-www-form-urlencoded"
+      })
+    : buildSlackHeaders(token);
+  const requestBody = body
+    ? (bodyEncoding === "form" ? encodeSlackFormBody(body) : JSON.stringify(body))
+    : undefined;
+
   const response = await fetch(url.toString(), {
     method: body ? "POST" : "GET",
-    headers: buildSlackHeaders(token),
-    body: body ? JSON.stringify(body) : undefined
+    headers,
+    body: requestBody
   });
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || `Slack API ${method} failed with ${response.status}.`);
+    throw new Error(formatSlackError(data, `Slack API ${method} failed with ${response.status}.`));
   }
 
   return data;
@@ -134,14 +177,16 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   const upload = await callSlackApi(token, "files.getUploadURLExternal", {
     filename: fileName,
     length
+  }, null, {
+    bodyEncoding: "form"
   });
 
   const uploadResponse = await fetch(String(upload.upload_url || ""), {
     method: "POST",
-    headers: buildSlackAuthHeaders(token, {
+    headers: {
       "content-type": contentType,
       "content-length": String(length)
-    }),
+    },
     body: decoded.bytes
   });
 
@@ -149,7 +194,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
     throw new Error(`Slack file upload failed with ${uploadResponse.status}.`);
   }
 
-  await callSlackApi(token, "files.completeUploadExternal", {
+  const completed = await callSlackApi(token, "files.completeUploadExternal", {
     files: [
       {
         id: normalizeText(upload.file_id),
@@ -157,23 +202,17 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
       }
     ],
     channel_id: channel,
+    thread_ts: threadTs,
     initial_comment: "Attached image from Codex Links request."
   });
 
-  let permalink = "";
-  let fileMode = "";
-  let fileAccess = "";
-  let urlPrivate = "";
-
-  try {
-    const info = await callSlackApi(token, "files.info", null, {
-      file: normalizeText(upload.file_id)
-    });
-    fileMode = normalizeText(info?.file?.mode);
-    fileAccess = normalizeText(info?.file?.file_access);
-    urlPrivate = normalizeText(info?.file?.url_private_download || info?.file?.url_private);
-    permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
-  } catch {}
+  const completedFile = Array.isArray(completed?.files)
+    ? completed.files.find((file) => normalizeText(file?.id) === normalizeText(upload.file_id)) || completed.files[0]
+    : null;
+  const permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
+  const fileMode = normalizeText(completedFile?.mode);
+  const fileAccess = normalizeText(completedFile?.file_access);
+  const urlPrivate = normalizeText(completedFile?.url_private_download || completedFile?.url_private);
 
   const probe = urlPrivate
     ? await probeSlackFileOpen(token, urlPrivate).catch(() => ({ canOpen: false, status: 0 }))
