@@ -329,6 +329,14 @@ function normalizeActualExecutionMode(rawValue) {
   return value === "cloud" || value === "bridge" ? value : "";
 }
 
+function normalizeCloudJobId(rawValue) {
+  return String(rawValue || "").trim().slice(0, 160);
+}
+
+function normalizeProgressMessage(rawValue) {
+  return String(rawValue || "").trim().slice(0, 240);
+}
+
 function normalizeReplyMatchedBy(rawValue) {
   const value = String(rawValue || "").trim().toLowerCase();
 
@@ -340,7 +348,7 @@ function normalizeReplyMatchedBy(rawValue) {
 }
 
 function dispatchModeToExecutionMode(rawValue) {
-  return normalizeDispatchValue(rawValue) === DISPATCH_MODE_SLACK ? "cloud" : "bridge";
+  return normalizeDispatchValue(rawValue) === DISPATCH_MODE_LOCAL ? "bridge" : "cloud";
 }
 
 function normalizeBooleanValue(rawValue, fallback = false) {
@@ -598,6 +606,12 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
     deliveryEvidence: normalizeDeliveryEvidence(
       Object.prototype.hasOwnProperty.call(input, "deliveryEvidence") ? input.deliveryEvidence : command?.deliveryEvidence
     ),
+    cloudJobId: normalizeCloudJobId(
+      Object.prototype.hasOwnProperty.call(input, "cloudJobId") ? input.cloudJobId : command?.cloudJobId
+    ),
+    progressMessage: normalizeProgressMessage(
+      Object.prototype.hasOwnProperty.call(input, "progressMessage") ? input.progressMessage : command?.progressMessage
+    ),
     firstAckAt: normalizeDateValue(
       Object.prototype.hasOwnProperty.call(input, "firstAckAt") ? input.firstAckAt : command?.firstAckAt
     ),
@@ -747,6 +761,8 @@ function normalizeStoredCommandEntry(entry) {
     photoUnsupportedReason: normalizePhotoUnsupportedReason(entry.photoUnsupportedReason),
     deliveryStopPoint: normalizeDiagnosticText(entry.deliveryStopPoint, 80),
     deliveryEvidence: normalizeDeliveryEvidence(entry.deliveryEvidence),
+    cloudJobId: normalizeCloudJobId(entry.cloudJobId),
+    progressMessage: normalizeProgressMessage(entry.progressMessage),
     routeAttempts: normalizeRouteAttempts(entry.routeAttempts),
     firstAckAt: normalizeDateValue(entry.firstAckAt),
     resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
@@ -981,6 +997,8 @@ export function createCommandRecord(input) {
       photoUnsupportedReason: "",
       deliveryStopPoint: "",
       deliveryEvidence: null,
+      cloudJobId: "",
+      progressMessage: "",
       routeAttempts: [],
       firstAckAt: "",
       resultAt: "",
@@ -1632,7 +1650,7 @@ function canFallbackToLocal(command, options = {}) {
 }
 
 function canFallbackToSlack(command, options = {}) {
-  return Boolean(options.preferSlack)
+  return Boolean(options.preferCloud || options.preferSlack)
     && Number(command?.fallbackCount || 0) < 1
     && Boolean(String(command?.targetRepo || "").trim());
 }
@@ -1779,18 +1797,18 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     }
 
   if (fallbackAllowed) {
-    return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
+    return createFallbackState(command, DISPATCH_MODE_CLOUD, nowIso, {
       progressStage: "switched-to-cloud",
       timeoutPhase: "claim-timeout",
       fallbackReason: "local bridge did not claim the command in time",
       lastDiagnosticCode: "bridge_claim_timeout",
       lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
       errorMessage: stringifyCommandError({
-        code: "fallback_to_slack",
+        code: "fallback_to_cloud",
         stage: "switched-to-cloud",
-        message: "Local bridge did not claim the command in time. Switched to cloud via Slack.",
+        message: "Local bridge did not claim the command in time. Switched to trusted cloud.",
         detail: "The local bridge did not claim the command before the claim timeout.",
-        fallback: "slack-codex-cloud"
+        fallback: "trusted-codex-cloud"
       })
     });
   }
@@ -1827,18 +1845,18 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     : "The local bridge stopped heartbeating before the command completed.";
 
   if (fallbackAllowed) {
-    return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
+    return createFallbackState(command, DISPATCH_MODE_CLOUD, nowIso, {
       progressStage: "switched-to-cloud",
       timeoutPhase: "result-timeout",
       fallbackReason: "local bridge stopped heartbeating",
       lastDiagnosticCode: "bridge_result_timeout",
       lastDiagnosticDetail: detail,
       errorMessage: stringifyCommandError({
-        code: "fallback_to_slack",
+        code: "fallback_to_cloud",
         stage: "switched-to-cloud",
-        message: "Local bridge timed out. Switched to cloud via Slack.",
+        message: "Local bridge timed out. Switched to trusted cloud.",
         detail,
-        fallback: "slack-codex-cloud"
+        fallback: "trusted-codex-cloud"
       })
     });
   }

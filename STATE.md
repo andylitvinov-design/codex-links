@@ -1,7 +1,7 @@
 # STATE
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: держать photo delivery рабочим на live для `bridge` и `cloud`, где фото из cloud безопасно переходят в local bridge и завершаются реальным reply
+- current task: перевести `cloud` на private trusted cloud bridge через уже авторизованный Codex login на trusted machine, не используя Slack и API-key cloud path
 - saved rollback point: production build `20260418-1518`, live notification sent `2026-04-18T17:08:30Z`
-- last root cause recorded: live bridge photo-run зависал не из-за UI, а из-за нестабильного ephemeral Codex photo path в Node child-process flow; решение: вынести ephemeral photo exec в отдельный Python runner, не reroute-ить stale photo tasks в Slack и финализировать command только после sync assistant reply
-- next step: держать отдельный smoke на photo delivery для `bridge` и `cloud`, затем проверить opt-in `direct-openai`
+- last root cause recorded: предыдущий cloud path смешивал несколько executor routes (`direct-openai`, `Slack`, `bridge`), из-за чего cloud mode был трудно диагностировать и небезопасно завязан на внешние auth paths; новое решение: Pages broker -> private cloud bridge -> local Codex login с явными progress callbacks и без передачи auth state наружу
+- next step: поднять private bridge на trusted machine, прогнать `npm run cloud:check`, `npm run cloud:smoke`, `npm run cloud:photo-smoke`, затем проверить preview deploy и branch -> PR release flow

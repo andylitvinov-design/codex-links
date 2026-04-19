@@ -5,6 +5,13 @@ const state = {
   activeThreadCategories: [],
   activeTimelineTab: "dialog",
   dispatchMode: "bridge",
+  publicConfig: {
+    cloud: {
+      enabled: false,
+      label: "Trusted Codex Cloud",
+      photoCompatMode: false
+    }
+  },
   bridgeWatchdog: null,
   commandPoller: null,
   commandPollerInterval: 0,
@@ -26,7 +33,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260419-0515";
+const BUILD_VERSION = "20260419-1705";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -449,6 +456,10 @@ function getActiveDispatchMode() {
   return state.dispatchMode === "cloud" ? "cloud" : "bridge";
 }
 
+function isTrustedCloudEnabled() {
+  return Boolean(state.publicConfig?.cloud?.enabled);
+}
+
 function normalizeRepoSelectionId(value) {
   return String(value || "").trim().toLowerCase().replace(/^cloud:/, "");
 }
@@ -550,7 +561,9 @@ function getProjectStatusLabel(repo) {
 }
 
 function getSelectedDispatchModeLabel() {
-  return getActiveDispatchMode() === "cloud" ? "Cloud" : "Bridge";
+  return getActiveDispatchMode() === "cloud"
+    ? (String(state.publicConfig?.cloud?.label || "").trim() || "Cloud")
+    : "Bridge";
 }
 
 function formatExecutorStatus(status = {}) {
@@ -982,9 +995,12 @@ function formatProgressStage(progressStage, status) {
   const mapped = {
     created: "Команда создана",
     dispatching: "Отправляется исполнителю",
+    sending: "Запрос уходит в trusted cloud bridge",
     sent: "Отправлено в cloud",
     accepted: "Исполнитель подтвердил задачу",
     claimed: "Bridge забрал сообщение",
+    waiting: "Задача принята, ожидаю запуск",
+    running: "Trusted cloud bridge выполняет задачу",
     processing: "Исполнитель работает",
     "waiting-for-codex": "Codex обрабатывает сообщение",
     "saving-reply": "Сохраняю ответ",
@@ -1052,11 +1068,19 @@ function getCommandDiagnosticMessage(command) {
   }
 
   if (diagnosticCode === "openai_api_key_missing") {
-    return "Cloud не настроен: отсутствует OPENAI_API_KEY.";
+    return "Cloud не настроен: отсутствует конфигурация trusted cloud bridge.";
   }
 
   if (diagnosticCode === "openai_request_failed" || diagnosticCode === "openai_response_failed" || diagnosticCode === "openai_empty_response") {
-    return "Direct cloud execution не завершился успешно.";
+    return "Legacy direct cloud execution не завершился успешно.";
+  }
+
+  if (diagnosticCode === "cloud_bridge_not_configured") {
+    return "Trusted cloud bridge не настроен.";
+  }
+
+  if (diagnosticCode === "cloud_bridge_request_failed" || diagnosticCode === "cloud_bridge_rejected" || diagnosticCode === "cloud_bridge_execution_failed") {
+    return "Trusted cloud bridge не завершил задачу успешно.";
   }
 
   if (diagnosticCode === "bridge_finalization_timeout") {
@@ -1141,7 +1165,7 @@ function getCommandLifecycleState(command) {
     return "switched-to-cloud";
   }
 
-  if (stage === "dispatching" || status === "dispatched") {
+  if (stage === "dispatching" || stage === "sending" || status === "dispatched") {
     return "dispatching";
   }
 
@@ -1149,11 +1173,119 @@ function getCommandLifecycleState(command) {
     return "accepted";
   }
 
-  if (status === "processing" || stage === "processing") {
+  if (status === "processing" || stage === "processing" || stage === "waiting" || stage === "running") {
     return "processing";
   }
 
   return "created";
+}
+
+function getActiveCommandStatusMessage(command) {
+  if (!command) {
+    return "";
+  }
+
+  const lifecycleState = getCommandLifecycleState(command);
+  const requestedExecutor = getCommandRequestedExecutor(command);
+  const actualExecutor = getCommandActualExecutor(command);
+  const effectiveExecutor = actualExecutor === "pending" ? requestedExecutor : actualExecutor;
+  const status = String(command?.status || "").trim().toLowerCase();
+  const progressStage = String(command?.progressStage || "").trim().toLowerCase();
+  const deliveryStopPoint = String(command?.deliveryStopPoint || "").trim().toLowerCase();
+  const evidence = command?.deliveryEvidence && typeof command.deliveryEvidence === "object"
+    ? command.deliveryEvidence
+    : {};
+  const hasPhoto = Boolean(command?.photoAttached || command?.photo || command?.photoBytesPresent);
+
+  if (lifecycleState === "created") {
+    return `Команда создана для ${requestedExecutor}…`;
+  }
+
+  if (lifecycleState === "switched-to-bridge") {
+    return "Перевёл задачу на bridge…";
+  }
+
+  if (lifecycleState === "switched-to-cloud") {
+    return "Перевёл задачу в cloud…";
+  }
+
+  if (lifecycleState === "accepted") {
+    return `Исполнитель ${effectiveExecutor} подтвердил задачу…`;
+  }
+
+  if (lifecycleState === "processing") {
+    if (String(command?.progressMessage || "").trim()) {
+      return String(command.progressMessage || "").trim();
+    }
+
+    return effectiveExecutor === "bridge"
+      ? "Bridge обрабатывает задачу…"
+      : "Trusted cloud bridge выполняет задачу…";
+  }
+
+  if (lifecycleState !== "dispatching") {
+    return "";
+  }
+
+  if (progressStage === "dispatching") {
+    return `Отправляю через ${requestedExecutor}…`;
+  }
+
+  if (progressStage === "sending" || progressStage === "waiting" || progressStage === "running") {
+    return String(command?.progressMessage || "").trim()
+      || `Обработка через ${effectiveExecutor}…`;
+  }
+
+  if (status !== "dispatched" && progressStage !== "dispatched") {
+    return `Обработка через ${effectiveExecutor}…`;
+  }
+
+  if (effectiveExecutor === "bridge") {
+    return "Команда отправлена, жду bridge claim…";
+  }
+
+  if (deliveryStopPoint === "slack_root_posted") {
+    return "Сообщение отправлено в Slack, создаю thread…";
+  }
+
+  if (deliveryStopPoint === "slack_thread_mapped") {
+    return hasPhoto
+      ? "Slack thread создан, подготавливаю фото…"
+      : "Slack thread создан, жду первый ответ Codex…";
+  }
+
+  if (deliveryStopPoint === "slack_photo_uploaded" || evidence.slackPhotoUploaded) {
+    if (evidence.slackFileOpenOk) {
+      return "Фото загружено и доступно в Slack, жду первый ответ Codex…";
+    }
+
+    if (evidence.slackFileVisible) {
+      return "Фото загружено в Slack, проверяю доступ к файлу…";
+    }
+
+    return "Фото загружено в Slack, завершаю передачу…";
+  }
+
+  if (deliveryStopPoint === "slack_file_open_ok" || evidence.slackFileOpenOk) {
+    return "Фото доступно в Slack, жду первый ответ Codex…";
+  }
+
+  if (deliveryStopPoint === "worker_reply_seen" || evidence.workerReplySeen) {
+    return "Codex ответил, жду подтверждение старта…";
+  }
+
+  if (deliveryStopPoint === "worker_ack_seen" || evidence.workerAckSeen) {
+    return hasPhoto
+      ? "Codex подтвердил старт, жду подтверждение чтения фото…"
+      : "Codex подтвердил старт, выполняю задачу…";
+  }
+
+  if (deliveryStopPoint === "worker_photo_ready_seen" || evidence.workerPhotoReadySeen) {
+    return "Codex подтвердил чтение фото, выполняю задачу…";
+  }
+
+  return String(command?.progressMessage || "").trim()
+    || `Команда отправлена через ${effectiveExecutor}, жду следующий этап…`;
 }
 
 function getCommandDeliveryStatus(command) {
@@ -1208,7 +1340,8 @@ function getCommandDeliveryStatus(command) {
   return {
     tone: errorDetails ? "error" : "delivery",
     text: withDeliveryLabel(
-      diagnosticMessage
+      String(command?.progressMessage || "").trim()
+      || diagnosticMessage
       || errorDetails?.message
       || `Обрабатываю · ${stageLabel || "В очереди"}`
     )
@@ -1243,23 +1376,15 @@ function syncCommandStatusFromState() {
   const lifecycleState = getCommandLifecycleState(activeCommand);
   const isProcessing = ["dispatching", "accepted", "processing", "switched-to-bridge", "switched-to-cloud"].includes(lifecycleState);
   const tone = isProcessing ? "processing" : "queued";
-  const deliveryLabel = getCommandActualExecutor(activeCommand);
-  const message = lifecycleState === "created"
-    ? `Команда создана для ${getCommandRequestedExecutor(activeCommand)}…`
-    : lifecycleState === "dispatching"
-      ? `Отправляю через ${getCommandRequestedExecutor(activeCommand)}…`
-    : lifecycleState === "accepted"
-      ? `Исполнитель ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel} подтвердил задачу…`
-    : lifecycleState === "switched-to-bridge"
-      ? "Перевёл задачу на bridge…"
-      : lifecycleState === "switched-to-cloud"
-        ? "Перевёл задачу в cloud…"
-        : isProcessing
-          ? `Обработка через ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel}…`
-          : `Сообщение в очереди (${getCommandRequestedExecutor(activeCommand)})…`;
+  const message = getActiveCommandStatusMessage(activeCommand)
+    || `Сообщение в очереди (${getCommandRequestedExecutor(activeCommand)})…`;
+  const progressStage = String(activeCommand?.progressStage || "").trim().toLowerCase();
+  const submitStage = progressStage === "sending" || progressStage === "waiting" || progressStage === "running"
+    ? progressStage
+    : (isProcessing ? "processing" : "queued");
 
   setCommandStatusMessage(message, { tone });
-  setSubmitProgress(isProcessing ? "processing" : "queued", tone);
+  setSubmitProgress(submitStage, tone);
 }
 
 function getCommandDeliveryLabel(command) {
@@ -2403,6 +2528,10 @@ function setSubmitProgress(stage = "", tone = "") {
   const dots = [...submitProgress.querySelectorAll(".submit-progress-dot")];
   const activeCount = stage === "queued"
     ? 2
+    : stage === "waiting"
+      ? 3
+      : stage === "running"
+        ? 4
     : stage === "processing"
       ? 4
       : stage === "answered"
@@ -2489,6 +2618,8 @@ function renderDispatchModeUi() {
   const isCloud = getActiveDispatchMode() === "cloud";
   const selectedRepo = getMenuRepoById(storage.selectedRepoId);
   const activeRepo = selectedRepo || state.menuRepos[0] || null;
+  const cloudEnabled = isTrustedCloudEnabled();
+  const cloudSelectable = cloudEnabled && (!activeRepo || isCloudReadyRepo(activeRepo));
   const hasActiveStatus = Boolean(String(commandStatus?.textContent || "").trim());
   const hasPendingCommand = state.commands.some((command) => {
     const status = String(command?.status || "").trim().toLowerCase();
@@ -2503,6 +2634,10 @@ function renderDispatchModeUi() {
   dispatchModeCloudButton?.classList.toggle("is-active", isCloud);
   dispatchModeBridgeButton?.setAttribute("aria-selected", String(!isCloud));
   dispatchModeCloudButton?.setAttribute("aria-selected", String(isCloud));
+  dispatchModeCloudButton?.toggleAttribute("disabled", !cloudSelectable);
+  dispatchModeCloudButton?.setAttribute("title", !cloudEnabled
+    ? "Trusted cloud bridge is not configured."
+    : (!activeRepo || isCloudReadyRepo(activeRepo) ? "Trusted Codex Cloud" : "Cloud is unavailable for bridge-only projects."));
 
   if (commandTargetLabel) {
     commandTargetLabel.textContent = "Проект";
@@ -2517,8 +2652,10 @@ function renderDispatchModeUi() {
   if (!hasPendingCommand && !hasActiveStatus) {
     setCommandStatusMessage(
       activeRepo
-        ? isCloud && !isCloudReadyRepo(activeRepo)
-          ? `Проект: ${formatProjectPath(activeRepo)} · bridge-only, manifest GitHub repo ещё не подтверждён.`
+        ? !cloudEnabled
+          ? `Проект: ${formatProjectPath(activeRepo)} · trusted cloud bridge не настроен, отправка через bridge.`
+          : isCloud && !isCloudReadyRepo(activeRepo)
+            ? `Проект: ${formatProjectPath(activeRepo)} · bridge-only, manifest GitHub repo ещё не подтверждён.`
           : `Проект: ${formatProjectPath(activeRepo)} · ${getProjectStatusLabel(activeRepo)} · отправка через ${isCloud ? "cloud" : "bridge"}.`
         : "Выберите проект."
     );
@@ -2853,17 +2990,48 @@ async function fetchMenuRepos() {
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
+async function fetchPublicConfig() {
+  const response = await fetch(`/api/public-config?_=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load public config: ${response.status}`);
+  }
+
+  const data = await response.json();
+  state.publicConfig = data && typeof data === "object"
+    ? data
+    : {
+        cloud: {
+          enabled: false,
+          label: "Trusted Codex Cloud",
+          photoCompatMode: false
+        }
+      };
+}
+
 async function refreshAll() {
   const results = await Promise.allSettled([
     fetchDeliverySnapshot(),
-    fetchMenuRepos()
+    fetchMenuRepos(),
+    fetchPublicConfig()
   ]);
 
   const statusResult = results[0];
   const reposError = results[1].status === "rejected" ? results[1].reason : null;
+  const configError = results[2].status === "rejected" ? results[2].reason : null;
 
   if (statusResult.status === "fulfilled") {
     applyDeliverySnapshot(statusResult.value);
+  }
+
+  if (!isTrustedCloudEnabled() && state.dispatchMode === "cloud") {
+    state.dispatchMode = "bridge";
+    storage.dispatchModePreference = "bridge";
   }
 
   renderDispatchModeUi();
@@ -2876,6 +3044,8 @@ async function refreshAll() {
     setCommandStatusMessage(String(statusResult.reason?.message || "Не удалось обновить состояние."), { tone: "error" });
   } else if (reposError) {
     setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
+  } else if (configError) {
+    setCommandStatusMessage("Не удалось обновить cloud config.", { tone: "error" });
   } else {
     syncCommandStatusFromState();
   }
@@ -2901,6 +3071,54 @@ function isDeliverySpeedModeActive() {
   return state.speedModeClientId === storage.clientId && state.deliverySpeedUntil > Date.now();
 }
 
+function buildBaseCommandPayload({
+  uiSubmitStartedAt,
+  threadId,
+  threadLabel,
+  activeRepo,
+  fallbackThreadId,
+  fallbackThreadLabel,
+  text
+}) {
+  const payload = {
+    clientId: storage.clientId,
+    uiSubmitStartedAt,
+    threadId,
+    threadLabel,
+    text,
+    targetRepo: String(activeRepo?.targetRepo || "").trim(),
+    targetRepoUrl: String(activeRepo?.targetRepoUrl || "").trim(),
+    targetContextFiles: Array.isArray(activeRepo?.contextFiles) ? activeRepo.contextFiles : [],
+    targetWorkspacePath: String(activeRepo?.workspacePath || "").trim(),
+    projectId: String(activeRepo?.id || "").trim(),
+    projectLabel: String(activeRepo?.label || "").trim(),
+    projectCategory: getProjectCategory(activeRepo)
+  };
+
+  if (fallbackThreadId) {
+    payload.fallbackThreadId = fallbackThreadId;
+    payload.fallbackThreadLabel = fallbackThreadLabel;
+  }
+
+  return payload;
+}
+
+function buildBridgeCommandPayload(context) {
+  return {
+    ...buildBaseCommandPayload(context),
+    dispatchMode: "local-bridge",
+    targetExecutionMode: "bridge"
+  };
+}
+
+function buildCloudCommandPayload(context) {
+  return {
+    ...buildBaseCommandPayload(context),
+    dispatchMode: "cloud",
+    targetExecutionMode: "cloud"
+  };
+}
+
 async function submitCommand(event) {
   event.preventDefault();
 
@@ -2920,6 +3138,7 @@ async function submitCommand(event) {
   const dispatchMode = requestedDispatchMode;
   const threadId = requestedThreadId;
   const threadLabel = activeRepo?.label || fallbackThreadLabel;
+  const payloadBuilder = dispatchMode === "cloud" ? buildCloudCommandPayload : buildBridgeCommandPayload;
 
   if (!text && !photoFile) {
     setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
@@ -2928,6 +3147,11 @@ async function submitCommand(event) {
 
   if (!activeRepo) {
     setCommandStatusMessage("Сначала выберите проект.", { tone: "error" });
+    return;
+  }
+
+  if (requestedCloudMode && !isTrustedCloudEnabled()) {
+    setCommandStatusMessage("Trusted cloud bridge не настроен. Используйте bridge.", { tone: "error" });
     return;
   }
 
@@ -2943,28 +3167,15 @@ async function submitCommand(event) {
   );
   setSubmitProgress("queued", "queued");
 
-  const payload = {
-    clientId: storage.clientId,
+  const payload = payloadBuilder({
     uiSubmitStartedAt,
     threadId,
     threadLabel,
-    text,
-    dispatchMode: dispatchMode === "cloud" ? "cloud" : "local-bridge",
-    targetExecutionMode: dispatchMode
-  };
-
-  payload.targetRepo = String(activeRepo.targetRepo || "").trim();
-  payload.targetRepoUrl = String(activeRepo.targetRepoUrl || "").trim();
-  payload.targetContextFiles = Array.isArray(activeRepo.contextFiles) ? activeRepo.contextFiles : [];
-  payload.targetWorkspacePath = String(activeRepo.workspacePath || "").trim();
-  payload.projectId = String(activeRepo.id || "").trim();
-  payload.projectLabel = String(activeRepo.label || "").trim();
-  payload.projectCategory = getProjectCategory(activeRepo);
-
-  if (fallbackThreadId) {
-    payload.fallbackThreadId = fallbackThreadId;
-    payload.fallbackThreadLabel = fallbackThreadLabel;
-  }
+    activeRepo,
+    fallbackThreadId,
+    fallbackThreadLabel,
+    text
+  });
 
   if (photoFile) {
     setPhotoStatusMessage("Подготавливаю фото для отправки…");
@@ -2998,11 +3209,7 @@ async function submitCommand(event) {
   const createdDispatchMode = String(result?.command?.dispatchMode || "").trim();
   setCommandStatusMessage(
     dispatchMode === "cloud"
-      ? (
-          createdDispatchMode === "slack-codex-cloud"
-            ? "Команда создана, отправляю в cloud via Slack…"
-            : "Команда создана, запускаю cloud executor…"
-        )
+      ? (String(result?.command?.progressMessage || "").trim() || "Команда создана, запускаю trusted cloud bridge…")
       : "Команда создана, жду bridge claim…",
     { tone: "processing" }
   );
@@ -3064,6 +3271,14 @@ function bindEvents() {
   dispatchModeCloudButton?.addEventListener("click", () => {
     const activeRepo = getMenuRepoById(storage.selectedRepoId) || state.menuRepos[0] || null;
 
+    if (!isTrustedCloudEnabled()) {
+      state.dispatchMode = "bridge";
+      storage.dispatchModePreference = "bridge";
+      renderDispatchModeUi();
+      setCommandStatusMessage("Trusted cloud bridge не настроен. Остаюсь в bridge mode.", { tone: "error" });
+      return;
+    }
+
     if (activeRepo && !isCloudReadyRepo(activeRepo)) {
       state.dispatchMode = "bridge";
       storage.dispatchModePreference = "bridge";
@@ -3107,10 +3322,15 @@ function bindEvents() {
 
     const activeRepo = getMenuRepoById(storage.selectedRepoId);
 
-    if (state.dispatchMode === "cloud" && activeRepo && !isCloudReadyRepo(activeRepo)) {
+    if (state.dispatchMode === "cloud" && (!isTrustedCloudEnabled() || (activeRepo && !isCloudReadyRepo(activeRepo)))) {
       state.dispatchMode = "bridge";
       storage.dispatchModePreference = "bridge";
-      setCommandStatusMessage(`Проект ${formatProjectPath(activeRepo)} bridge-only. Переключаю на bridge.`, { tone: "error" });
+      setCommandStatusMessage(
+        !isTrustedCloudEnabled()
+          ? "Trusted cloud bridge недоступен. Переключаю на bridge."
+          : `Проект ${formatProjectPath(activeRepo)} bridge-only. Переключаю на bridge.`,
+        { tone: "error" }
+      );
     }
 
     renderDispatchModeUi();

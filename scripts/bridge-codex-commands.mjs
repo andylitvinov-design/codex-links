@@ -4,6 +4,22 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
+import {
+  buildBridgePrompt as sharedBuildBridgePrompt,
+  buildInput as sharedBuildInput,
+  buildPhotoOnlyPrompt as sharedBuildPhotoOnlyPrompt,
+  buildPhotoRetryPrompt as sharedBuildPhotoRetryPrompt,
+  createRetryPhotoVariant as sharedCreateRetryPhotoVariant,
+  extractPhotoOcrText as sharedExtractPhotoOcrText,
+  getFailureAssistantText as sharedGetFailureAssistantText,
+  getImmediateAssistantText as sharedGetImmediateAssistantText,
+  getPhotoUnsupportedReason as sharedGetPhotoUnsupportedReason,
+  isPhotoInspectionOnlyRequest as sharedIsPhotoInspectionOnlyRequest,
+  materializePhoto as sharedMaterializePhoto,
+  runCodexExecEphemeral as sharedRunCodexExecEphemeral,
+  sanitizeBridgeText as sharedSanitizeBridgeText,
+  stripPromptEcho as sharedStripPromptEcho
+} from "./shared-codex-executor.mjs";
 
 const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
@@ -1271,9 +1287,9 @@ while (true) {
     }
 
     await updateProgress(command.id, "preparing-input");
-    const photoPath = await materializePhoto(command);
-    const photoOcrText = photoPath ? await extractPhotoOcrText(command.id, photoPath) : "";
-    const input = buildInput(command, photoPath, photoOcrText);
+    const photoPath = await sharedMaterializePhoto(command);
+    const photoOcrText = photoPath ? await sharedExtractPhotoOcrText(photoPath) : "";
+    const input = sharedBuildInput(command, photoPath, photoOcrText);
 
     if (!input.length) {
       throw new Error("Command has no deliverable content.");
@@ -1301,34 +1317,34 @@ while (true) {
 
     try {
       if (photoPath) {
-        const fastPhotoInspection = isPhotoInspectionOnlyRequest(command);
+        const fastPhotoInspection = sharedIsPhotoInspectionOnlyRequest(command);
         const photoCwd = fastPhotoInspection
           ? process.cwd()
           : (String(command?.targetWorkspacePath || "").trim() || process.cwd());
         const photoTimeoutMs = fastPhotoInspection ? 90_000 : EXEC_TIMEOUT_MS;
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-          runCodexExecEphemeral(
+          sharedRunCodexExecEphemeral(
             prompt || "See attached image and respond.",
             photoPath,
             photoCwd,
             photoTimeoutMs
           )
         );
-        assistantText = getImmediateAssistantText(result, prompt);
+        assistantText = sharedGetImmediateAssistantText(result, prompt);
 
         if (isPhotoVisibilityFailure(assistantText)) {
           await updateProgress(command.id, "retrying-photo-read");
-          const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
-          const retryPrompt = buildPhotoRetryPrompt(command, photoOcrText);
+          const retryPhotoPath = await sharedCreateRetryPhotoVariant(command.id, photoPath);
+          const retryPrompt = sharedBuildPhotoRetryPrompt(command, photoOcrText);
           const retryResult = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-            runCodexExecEphemeral(
+            sharedRunCodexExecEphemeral(
               retryPrompt,
               retryPhotoPath || photoPath,
               photoCwd,
               photoTimeoutMs
             )
           );
-          assistantText = getImmediateAssistantText(retryResult, retryPrompt) || assistantText;
+          assistantText = sharedGetImmediateAssistantText(retryResult, retryPrompt) || assistantText;
         }
       } else {
         const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
@@ -1345,23 +1361,23 @@ while (true) {
         await appendBridgeErrorLog("photoEphemeralRetry", appServerError, {
           commandId: command.id
         });
-        const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+        const retryPhotoPath = await sharedCreateRetryPhotoVariant(command.id, photoPath);
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-          runCodexExecEphemeral(
-            buildPhotoRetryPrompt(command, photoOcrText),
+          sharedRunCodexExecEphemeral(
+            sharedBuildPhotoRetryPrompt(command, photoOcrText),
             retryPhotoPath || photoPath,
-            isPhotoInspectionOnlyRequest(command)
+            sharedIsPhotoInspectionOnlyRequest(command)
               ? process.cwd()
               : (String(command?.targetWorkspacePath || "").trim() || process.cwd()),
-            isPhotoInspectionOnlyRequest(command) ? 90_000 : EXEC_TIMEOUT_MS
+            sharedIsPhotoInspectionOnlyRequest(command) ? 90_000 : EXEC_TIMEOUT_MS
           )
         );
-        assistantText = getImmediateAssistantText(result, buildPhotoRetryPrompt(command, photoOcrText));
+        assistantText = sharedGetImmediateAssistantText(result, sharedBuildPhotoRetryPrompt(command, photoOcrText));
       } else {
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
         );
-        assistantText = getImmediateAssistantText(result, prompt);
+        assistantText = sharedGetImmediateAssistantText(result, prompt);
       }
     }
 
@@ -1369,18 +1385,18 @@ while (true) {
 
     if (!assistantText && photoPath) {
       await updateProgress(command.id, "retrying-photo-read");
-      const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
+      const retryPhotoPath = await sharedCreateRetryPhotoVariant(command.id, photoPath);
       const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-        runCodexExecEphemeral(
-            buildPhotoOnlyPrompt(command, photoOcrText),
+        sharedRunCodexExecEphemeral(
+            sharedBuildPhotoOnlyPrompt(command, photoOcrText),
             retryPhotoPath || photoPath,
-            isPhotoInspectionOnlyRequest(command)
+            sharedIsPhotoInspectionOnlyRequest(command)
               ? process.cwd()
             : (String(command?.targetWorkspacePath || "").trim() || process.cwd()),
-          isPhotoInspectionOnlyRequest(command) ? 90_000 : EXEC_TIMEOUT_MS
+          sharedIsPhotoInspectionOnlyRequest(command) ? 90_000 : EXEC_TIMEOUT_MS
         )
       );
-      assistantText = getImmediateAssistantText(result);
+      assistantText = sharedGetImmediateAssistantText(result);
     }
 
     if (!assistantText && !photoPath) {
@@ -1388,9 +1404,9 @@ while (true) {
       assistantText = await getThreadFallbackAssistantText(command, threadId);
     }
 
-    assistantText = stripPromptEcho(assistantText, prompt);
+    assistantText = sharedStripPromptEcho(assistantText, prompt);
 
-    const photoUnsupportedReason = photoPath ? getPhotoUnsupportedReason(assistantText) : "";
+    const photoUnsupportedReason = photoPath ? sharedGetPhotoUnsupportedReason(assistantText) : "";
 
     if (photoUnsupportedReason) {
       await updateProgress(command.id, "failed", {
@@ -1434,7 +1450,7 @@ while (true) {
     idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
   } catch (error) {
     await appendBridgeErrorLog("bridgeCommandFailure", error, { commandId: command?.id || "" });
-    const photoUnsupportedReason = command?.photo ? getPhotoUnsupportedReason(error?.message || "") : "";
+    const photoUnsupportedReason = command?.photo ? sharedGetPhotoUnsupportedReason(error?.message || "") : "";
 
     if (photoUnsupportedReason) {
       try {
@@ -1466,8 +1482,8 @@ while (true) {
       threadId,
       threadLabel,
       completedAt: ackedAt,
-      assistantText: assistantText || getFailureAssistantText(error),
-      errorMessage: error.message || getFailureAssistantText(error),
+      assistantText: assistantText || sharedGetFailureAssistantText(error),
+      errorMessage: error.message || sharedGetFailureAssistantText(error),
       result: assistantText ? "answered" : "failed"
     };
     const syncedMessage = createAssistantMessage(

@@ -100,7 +100,7 @@ export async function readBridgeStatus(env) {
 
   if (status.dispatchMode === DISPATCH_MODE_LOCAL && !isCloudDispatchConfigured(runtimeConfig)) {
     status.executorLabel = "Cloud not configured; local bridge fallback";
-    status.lastError = status.lastError || "Missing OPENAI_API_KEY in Pages project.";
+    status.lastError = status.lastError || "Missing trusted cloud bridge configuration in Pages project.";
   }
 
   return status;

@@ -8,6 +8,10 @@ function normalizeConfig(input) {
   const source = input && typeof input === "object" ? input : {};
 
   return {
+    CLOUD_BRIDGE_BASE_URL: normalizeValue(source.CLOUD_BRIDGE_BASE_URL, 400),
+    CLOUD_BRIDGE_REQUEST_TIMEOUT_MS: normalizeValue(source.CLOUD_BRIDGE_REQUEST_TIMEOUT_MS, 20),
+    CLOUD_BRIDGE_SHARED_SECRET: normalizeValue(source.CLOUD_BRIDGE_SHARED_SECRET, 300),
+    CLOUD_BRIDGE_LABEL: normalizeValue(source.CLOUD_BRIDGE_LABEL, 120),
     CLOUD_PHOTO_COMPAT_MODE: normalizeValue(source.CLOUD_PHOTO_COMPAT_MODE, 20),
     COMMAND_DISPATCH_MODE: normalizeValue(source.COMMAND_DISPATCH_MODE, 80),
     GITHUB_OWNER: normalizeValue(source.GITHUB_OWNER, 120),
@@ -29,6 +33,10 @@ function mergeConfig(stored, env) {
 
   return normalizeConfig({
     ...base,
+    CLOUD_BRIDGE_BASE_URL: env?.CLOUD_BRIDGE_BASE_URL || base.CLOUD_BRIDGE_BASE_URL,
+    CLOUD_BRIDGE_REQUEST_TIMEOUT_MS: env?.CLOUD_BRIDGE_REQUEST_TIMEOUT_MS || base.CLOUD_BRIDGE_REQUEST_TIMEOUT_MS,
+    CLOUD_BRIDGE_SHARED_SECRET: env?.CLOUD_BRIDGE_SHARED_SECRET || base.CLOUD_BRIDGE_SHARED_SECRET,
+    CLOUD_BRIDGE_LABEL: env?.CLOUD_BRIDGE_LABEL || base.CLOUD_BRIDGE_LABEL,
     CLOUD_PHOTO_COMPAT_MODE: env?.CLOUD_PHOTO_COMPAT_MODE || base.CLOUD_PHOTO_COMPAT_MODE,
     COMMAND_DISPATCH_MODE: env?.COMMAND_DISPATCH_MODE || base.COMMAND_DISPATCH_MODE,
     GITHUB_OWNER: env?.GITHUB_OWNER || base.GITHUB_OWNER,
@@ -89,6 +97,10 @@ export function describeConfig(config) {
   const normalized = normalizeConfig(config);
 
   return {
+    CLOUD_BRIDGE_BASE_URL: mask(normalized.CLOUD_BRIDGE_BASE_URL),
+    CLOUD_BRIDGE_REQUEST_TIMEOUT_MS: normalized.CLOUD_BRIDGE_REQUEST_TIMEOUT_MS || "",
+    CLOUD_BRIDGE_SHARED_SECRET: mask(normalized.CLOUD_BRIDGE_SHARED_SECRET),
+    CLOUD_BRIDGE_LABEL: normalized.CLOUD_BRIDGE_LABEL || "",
     COMMAND_DISPATCH_MODE: normalized.COMMAND_DISPATCH_MODE || "",
     CLOUD_PHOTO_COMPAT_MODE: normalized.CLOUD_PHOTO_COMPAT_MODE || "",
     GITHUB_OWNER: normalized.GITHUB_OWNER || "",
@@ -107,6 +119,7 @@ export function describeConfig(config) {
 
 export function describePublicConfig(config) {
   const normalized = normalizeConfig(config);
+  const cloudEnabled = Boolean(normalized.CLOUD_BRIDGE_BASE_URL && normalized.CLOUD_BRIDGE_SHARED_SECRET);
 
   return {
     analytics: {
@@ -114,6 +127,8 @@ export function describePublicConfig(config) {
       ga4MeasurementId: normalized.PUBLIC_GA4_MEASUREMENT_ID || ""
     },
     cloud: {
+      enabled: cloudEnabled,
+      label: cloudEnabled ? (normalized.CLOUD_BRIDGE_LABEL || "Trusted Codex Cloud") : "",
       photoCompatMode: normalized.CLOUD_PHOTO_COMPAT_MODE === "1" || normalized.CLOUD_PHOTO_COMPAT_MODE.toLowerCase() === "true"
     }
   };

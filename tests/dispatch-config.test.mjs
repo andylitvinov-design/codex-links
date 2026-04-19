@@ -10,25 +10,23 @@ import {
 } from "../functions/_lib/dispatch.js";
 
 test("normalizeDispatchMode accepts slack and direct aliases", () => {
-  assert.equal(normalizeDispatchMode("cloud-via-slack"), DISPATCH_MODE_SLACK);
+  assert.equal(normalizeDispatchMode("cloud-via-slack"), DISPATCH_MODE_CLOUD);
   assert.equal(normalizeDispatchMode("slack-codex-cloud"), DISPATCH_MODE_SLACK);
   assert.equal(normalizeDispatchMode("direct-openai"), DISPATCH_MODE_CLOUD);
   assert.equal(normalizeDispatchMode("cloud"), DISPATCH_MODE_CLOUD);
 });
 
-test("getConfiguredDispatchMode prefers Slack by default when configured", () => {
+test("getConfiguredDispatchMode prefers trusted cloud when configured", () => {
   assert.equal(getConfiguredDispatchMode({
-    SLACK_BOT_TOKEN: "x",
-    SLACK_CODEX_CHANNEL_ID: "C123"
-  }), DISPATCH_MODE_SLACK);
+    CLOUD_BRIDGE_BASE_URL: "http://127.0.0.1:8788",
+    CLOUD_BRIDGE_SHARED_SECRET: "secret"
+  }), DISPATCH_MODE_CLOUD);
 });
 
-test("getConfiguredDispatchMode falls back from direct-openai to Slack when key is missing", () => {
+test("getConfiguredDispatchMode falls back from cloud aliases to local bridge when trusted bridge is missing", () => {
   assert.equal(getConfiguredDispatchMode({
     COMMAND_DISPATCH_MODE: "direct-openai",
-    SLACK_BOT_TOKEN: "x",
-    SLACK_CODEX_CHANNEL_ID: "C123"
-  }), DISPATCH_MODE_SLACK);
+  }), DISPATCH_MODE_LOCAL);
 });
 
 test("getConfiguredDispatchMode falls back to local bridge when nothing cloud-capable is configured", () => {

@@ -49,7 +49,7 @@ test("runCommandMaintenance marks stale cloud commands as failed", async () => {
 
   const result = await runCommandMaintenance(env, {
     fallbackToLocal: false,
-    preferSlack: false
+    preferCloud: false
   });
 
   assert.equal(result.changed, true);
@@ -92,7 +92,7 @@ test("runCommandMaintenance preserves compat mode markers on stale cloud photo f
 
   const result = await runCommandMaintenance(env, {
     fallbackToLocal: false,
-    preferSlack: false
+    preferCloud: false
   });
 
   const updated = result.commands.find((command) => command.id === "cmd-cloud-photo-compat-timeout");
@@ -126,14 +126,14 @@ test("runCommandMaintenance schedules queued cloud fallback commands for dispatc
 
   const result = await runCommandMaintenance(env, {
     fallbackToLocal: true,
-    preferSlack: false
+    preferCloud: false
   });
 
   assert.equal(result.changed, false);
   assert.deepEqual(result.commandsToDispatch, ["cmd-cloud-fallback"]);
 });
 
-test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", async () => {
+test("runCommandMaintenance reroutes stale bridge commands to trusted cloud", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
 
@@ -157,7 +157,7 @@ test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", asyn
 
   const result = await runCommandMaintenance(env, {
     fallbackToLocal: true,
-    preferSlack: true
+    preferCloud: true
   });
 
   assert.equal(result.changed, true);
@@ -166,10 +166,46 @@ test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", asyn
 
   const updated = result.commands.find((command) => command.id === "cmd-bridge-timeout");
   assert.ok(updated);
-  assert.equal(updated.dispatchMode, "slack-codex-cloud");
+  assert.equal(updated.dispatchMode, "cloud");
   assert.equal(updated.status, "queued");
   assert.equal(updated.progressStage, "switched-to-cloud");
   assert.equal(updated.timeoutPhase, "result-timeout");
   assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
-  assert.match(updated.errorMessage, /fallback_to_slack/);
+  assert.match(updated.errorMessage, /fallback_to_cloud/);
+});
+
+test("runCommandMaintenance keeps fresh cloud commands active", async () => {
+  const env = createMockEnv();
+  const freshIso = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-cloud-fresh",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "long running cloud task",
+    createdAt: freshIso,
+    progressUpdatedAt: freshIso,
+    dispatchedAt: freshIso,
+    dispatchMode: "cloud",
+    requestedExecutor: "cloud",
+    actualExecutor: "cloud",
+    status: "processing",
+    progressStage: "running",
+    fallbackCount: 1
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: false,
+    preferCloud: false
+  });
+
+  assert.equal(result.changed, false);
+  assert.equal(result.changedCount, 0);
+
+  const updated = result.commands.find((command) => command.id === "cmd-cloud-fresh");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "cloud");
+  assert.equal(updated.status, "processing");
+  assert.equal(updated.progressStage, "running");
 });

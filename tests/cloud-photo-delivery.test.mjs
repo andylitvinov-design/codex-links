@@ -206,67 +206,24 @@ test("postSlackCommand uploads photo through Slack thread without files:read", a
   }
 });
 
-test("POST /api/commands keeps photo cloud requests on slack-codex-cloud when Slack upload succeeds", async () => {
+test("POST /api/commands keeps photo cloud requests on trusted cloud bridge when broker accepts them", async () => {
   const env = createMockEnv({
-    COMMAND_DISPATCH_MODE: "cloud-via-slack",
-    SLACK_BOT_TOKEN: "xoxb-test",
-    SLACK_CODEX_CHANNEL_ID: "C123",
-    SLACK_CODEX_USER_ID: "U-WORKER"
+    CLOUD_BRIDGE_BASE_URL: "http://127.0.0.1:8788",
+    CLOUD_BRIDGE_SHARED_SECRET: "secret"
   });
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
 
-    if (url === "https://slack.com/api/auth.test") {
-      return Response.json({ ok: true, user_id: "U-BOT" });
-    }
-
-    if (url.startsWith("https://slack.com/api/conversations.members")) {
-      return Response.json({ ok: true, members: ["U-WORKER"] });
-    }
-
-    if (url === "https://slack.com/api/chat.postMessage") {
-      const body = JSON.parse(String(init.body || "{}"));
+    if (url === "http://127.0.0.1:8788/v1/commands") {
+      assert.equal(String(init.method || "GET").toUpperCase(), "POST");
       return Response.json({
         ok: true,
-        channel: "C123",
-        ts: body.thread_ts ? "1776619100.000200" : "1776619100.000100",
-        message: {
-          ts: body.thread_ts ? "1776619100.000200" : "1776619100.000100",
-          thread_ts: body.thread_ts || "1776619100.000100"
-        }
-      });
-    }
-
-    if (url === "https://slack.com/api/files.getUploadURLExternal") {
-      return Response.json({
-        ok: true,
-        upload_url: "https://files.slack.com/upload/v1/test",
-        file_id: "F123"
-      });
-    }
-
-    if (url === "https://files.slack.com/upload/v1/test") {
-      return new Response("OK - 68", { status: 200 });
-    }
-
-    if (url === "https://slack.com/api/files.completeUploadExternal") {
-      return Response.json({
-        ok: true,
-        files: [{
-          id: "F123",
-          title: "photo.png",
-          mode: "hosted",
-          file_access: "visible",
-          url_private_download: "https://files.slack.com/files-pri/T123-F123/download/photo.png",
-          permalink: "https://example.slack.com/files/U123/F123/photo.png"
-        }]
-      });
-    }
-
-    if (url === "https://files.slack.com/files-pri/T123-F123/download/photo.png") {
-      return new Response(new Uint8Array([1]), { status: 200 });
+        jobId: "job-photo-1",
+        acceptedAt: "2026-04-19T12:00:00.000Z",
+        progressMessage: "Trusted cloud bridge accepted the photo job."
+      }, { status: 202 });
     }
 
     throw new Error(`Unexpected fetch: ${url}`);
@@ -303,11 +260,11 @@ test("POST /api/commands keeps photo cloud requests on slack-codex-cloud when Sl
     const data = await response.json();
 
     assert.equal(response.status, 201);
-    assert.equal(String(data?.command?.dispatchMode || "").trim(), "slack-codex-cloud");
+    assert.equal(String(data?.command?.dispatchMode || "").trim(), "cloud");
     assert.equal(Boolean(data?.command?.fallbackApplied), false);
-    assert.equal(String(data?.command?.deliveryStopPoint || "").trim(), "slack_file_open_ok");
-    assert.equal(Boolean(data?.command?.deliveryEvidence?.slackPhotoUploaded), true);
-    assert.equal(Boolean(data?.command?.deliveryEvidence?.slackFileOpenOk), true);
+    assert.equal(String(data?.command?.status || "").trim(), "processing");
+    assert.equal(String(data?.command?.cloudJobId || "").trim(), "job-photo-1");
+    assert.equal(String(data?.command?.progressMessage || "").trim(), "Trusted cloud bridge accepted the photo job.");
   } finally {
     globalThis.fetch = originalFetch;
   }

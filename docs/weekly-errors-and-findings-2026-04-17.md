@@ -288,3 +288,39 @@ Product rule retained:
 
 - Live rollback point saved: production build `20260418-1518`
 - App notification sent with working-state confirmation and version anchor
+
+## 2026-04-19 Slack Executor Identity Check
+
+### Newly confirmed observations
+
+- In the production Slack workspace, manual mention attempts in the dispatch thread do not expose a separate `@Codex` actor.
+- Typing `@Codex` in the tested thread resolves to `@Codex Links`, which is the local Slack app used by Links itself.
+- Manual thread prompts sent to `@Codex Links` produced no executor reply, which is expected for the Links app and does not validate Codex Cloud execution.
+- Local/prod-aligned config inspection shows `SLACK_CODEX_USER_ID=U0ATJCS3UE5`.
+- Slack channel history confirms `U0ATJCS3UE5` is the same human Slack user who authored the manual test messages in the dispatch channel.
+- Therefore, Links root task messages are currently mentioning the human operator instead of a distinct Codex executor actor.
+- Fresh production probes still show:
+  - text commands can stop at `slack_thread_mapped` with no `workerReplySeen`, or occasionally surface only an unthreaded fallback reply;
+  - photo commands reach `slack_file_open_ok` with hosted Slack file access confirmed, but still show no `workerReplySeen`.
+
+### Updated interpretation
+
+- The remaining blocker is no longer consistent with `OPENAI_API_KEY` being missing on the Links Pages project for the Slack route.
+- The more likely remaining failure is that the configured Slack executor identity is wrong.
+- The current `SLACK_CODEX_USER_ID` points to a human Slack user, not to a distinct Codex executor app/user.
+- This moves the primary suspicion away from Links photo upload and toward one of these external conditions:
+  - the official OpenAI Codex Slack integration is not installed or not available in the workspace;
+  - the configured `SLACK_CODEX_USER_ID` points to a non-executor actor;
+  - the intended external executor exists, but its Slack thread/event behavior is not wired to respond in the observed channel/thread context.
+
+### Operational consequence
+
+- Manual Slack testing with `@Codex Links` must not be treated as a valid Codex Cloud test.
+- Until a distinct executor actor is identified in Slack, `cloud via Slack` cannot be considered fully verified even when Links dispatch, thread mapping, photo upload, and Slack file-open checks all succeed.
+
+### Recommended next actions
+
+1. In Slack admin/app inventory, verify whether an official OpenAI Codex app or any distinct executor app/user is installed in the workspace.
+2. Replace the production `SLACK_CODEX_USER_ID` with the real executor app/user id, not the human operator id `U0ATJCS3UE5`.
+3. If no distinct executor actor exists, treat the issue as missing Slack executor installation/access rather than a Links-side runtime bug.
+4. If a distinct executor actor does exist, test that actor manually in the same channel/thread and confirm whether replies stay threaded.

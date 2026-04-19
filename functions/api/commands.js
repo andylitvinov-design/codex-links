@@ -11,7 +11,6 @@ import {
   listCommandThreads,
   requeueCommand,
   readCommands,
-  rerouteCommandToSlack,
   upsertCommandDispatchState,
   updateCommandProgress,
   writeCommands
@@ -24,7 +23,6 @@ import {
   getConfiguredDispatchMode,
   getDispatchModeLabel,
   isCloudDispatchConfigured,
-  isSlackDispatchConfigured,
   getSlackCodexMention
 } from "../_lib/dispatch.js";
 import { isAuthorized } from "../_lib/security.js";
@@ -34,7 +32,7 @@ import { upsertMessages } from "../_lib/messages.js";
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
 import { stringifyCommandError } from "../_lib/command-debug.js";
-import { createOpenAiCloudResponse } from "../_lib/openai-cloud.js";
+import { submitTrustedCloudCommand } from "../_lib/trusted-cloud-bridge.js";
 import { resolveProjectDispatchTarget } from "../_lib/project-dispatch-manifest.js";
 import {
   buildLatencyBreakdown,
@@ -90,7 +88,6 @@ function isOlderThan(value, maxAgeMs) {
 }
 
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
-  const hasPhoto = Boolean(payload?.photo && typeof payload.photo === "object");
   const requestedExecutor = String(
     payload?.targetExecutionMode
     || payload?.requestedExecutor
@@ -104,52 +101,14 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
     return DISPATCH_MODE_LOCAL;
   }
 
-  if (requestedDispatchMode === DISPATCH_MODE_SLACK) {
-    return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
-  }
-
-  if (requestedDispatchMode === "direct-openai") {
-    if (isCloudDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_CLOUD;
-    }
-
-    if (isSlackDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_SLACK;
-    }
-
-    return DISPATCH_MODE_LOCAL;
-  }
-
-  if (requestedExecutor === "cloud" || requestedDispatchMode === DISPATCH_MODE_CLOUD) {
-    if (hasPhoto && isCloudDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_CLOUD;
-    }
-
-    if (configuredDispatchMode === DISPATCH_MODE_SLACK && isSlackDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_SLACK;
-    }
-
-    if (configuredDispatchMode === DISPATCH_MODE_CLOUD && isCloudDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_CLOUD;
-    }
-
-    if (isSlackDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_SLACK;
-    }
-
-    if (isCloudDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_CLOUD;
-    }
-
-    return DISPATCH_MODE_LOCAL;
-  }
-
-  if (hasPhoto && configuredDispatchMode === DISPATCH_MODE_CLOUD) {
-    if (isCloudDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_CLOUD;
-    }
-
-    return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
+  if (
+    requestedDispatchMode === DISPATCH_MODE_CLOUD
+    || requestedDispatchMode === DISPATCH_MODE_SLACK
+    || requestedDispatchMode === "direct-openai"
+    || requestedDispatchMode === "cloud-via-slack"
+    || requestedExecutor === "cloud"
+  ) {
+    return DISPATCH_MODE_CLOUD;
   }
 
   return configuredDispatchMode;
@@ -657,12 +616,6 @@ function canFallbackToLocalBridge(command) {
   );
 }
 
-function canFallbackToSlack(command, runtimeConfig) {
-  return Number(command?.fallbackCount || 0) < 1
-    && Boolean(String(command?.targetRepo || "").trim())
-    && isSlackDispatchConfigured(runtimeConfig);
-}
-
 async function markCloudCommandFailed(env, command, commandError) {
   const normalizedError = stringifyCommandError(commandError);
   const failed = await markCommandFailed(env, {
@@ -672,7 +625,7 @@ async function markCloudCommandFailed(env, command, commandError) {
     actualExecutor: "cloud",
     timeoutPhase: String(commandError?.stage || "").trim().includes("timeout") ? "result-timeout" : "",
     lastDiagnosticCode: commandError?.code || "cloud_execution_failed",
-    lastDiagnosticDetail: commandError?.detail || commandError?.message || "Direct cloud execution failed.",
+    lastDiagnosticDetail: commandError?.detail || commandError?.message || "Trusted cloud bridge execution failed.",
     errorMessage: normalizedError,
     resultAt: new Date().toISOString()
   });
@@ -688,69 +641,24 @@ async function markCloudCommandFailed(env, command, commandError) {
   return failed.value || command;
 }
 
-async function answerCloudCommand(env, command, result) {
-  const nowIso = new Date().toISOString();
-
-  await upsertMessages(env, [{
-    id: `cloud:${command.id}:${String(result.responseId || crypto.randomUUID()).trim()}`,
-    clientId: command.clientId,
-    threadId: command.threadId,
-    threadLabel: command.threadLabel,
-    commandId: command.id,
-    role: "assistant",
-    text: result.answerText,
-    createdAt: nowIso
-  }]);
-
-  const answered = await markCommandAnswered(env, {
-    id: command.id,
-    dispatchMode: DISPATCH_MODE_CLOUD,
-    progressStage: "answered",
-    actualExecutor: "cloud",
-    firstAckAt: command.firstAckAt || command.dispatchedAt || nowIso,
-    firstExecutorAckSeenAt: command.firstExecutorAckSeenAt || nowIso,
-    firstReplySeenAt: nowIso,
-    replyIngestedAt: nowIso,
-    replyMatched: true,
-    replyMatchedBy: "direct-api",
-    resultAt: nowIso,
-    completedAt: nowIso
-  });
-
-  await refreshBridgeStatusFromCommands(env, {
-    dispatchMode: DISPATCH_MODE_CLOUD,
-    executorLabel: getDispatchModeLabel(DISPATCH_MODE_CLOUD),
-    bridgeOnline: true,
-    state: "idle",
-    lastRunAt: nowIso,
-    lastSuccessAt: nowIso,
-    lastDeliveredCount: 1,
-    lastError: ""
-  });
-
-  return answered.value || command;
-}
-
-async function executeDirectCloudCommand(env, command) {
+async function executeTrustedCloudCommand(env, command, runtimeConfig) {
   const dispatchStartedAt = new Date().toISOString();
   const dispatched = await markCommandDispatched(env, {
     id: command.id,
     dispatchMode: DISPATCH_MODE_CLOUD,
-    progressStage: "sent",
+    progressStage: "sending",
     dispatchStartedAt,
-    dispatchedAt: dispatchStartedAt
+    dispatchedAt: dispatchStartedAt,
+    progressMessage: "Sending request to trusted cloud bridge."
   });
   const inFlight = dispatched.value || command;
-
-  await upsertCommandDispatchState(env, {
+  const staged = await upsertCommandDispatchState(env, {
     id: inFlight.id,
     dispatchMode: DISPATCH_MODE_CLOUD,
-    status: "processing",
-    progressStage: "processing",
+    status: "dispatched",
+    progressStage: "waiting",
     actualExecutor: "cloud",
-    firstAckAt: dispatchStartedAt,
-    firstExecutorAckSeenAt: dispatchStartedAt,
-    processingStartedAt: dispatchStartedAt
+    progressMessage: "Waiting for trusted cloud bridge to accept the job."
   });
 
   await refreshBridgeStatusFromCommands(env, {
@@ -763,65 +671,43 @@ async function executeDirectCloudCommand(env, command) {
     lastError: ""
   });
 
-  const latest = await getCommandById(env, inFlight.id) || inFlight;
-  const result = await createOpenAiCloudResponse(env, latest);
+  const latest = await getCommandById(env, staged.value?.id || inFlight.id) || staged.value || inFlight;
 
-  if (result.ok) {
-    return answerCloudCommand(env, latest, result);
-  }
-
-  const runtimeConfig = await readRuntimeConfig(env);
-
-  if (result.retryable && canFallbackToSlack(latest, runtimeConfig)) {
-    const rerouted = await rerouteCommandToSlack(env, {
-      id: latest.id,
-      progressStage: "switched-to-cloud",
-      fallbackReason: "direct cloud execution unavailable",
-      lastDiagnosticCode: result.commandError?.code || "cloud_execution_failed",
-      lastDiagnosticDetail: result.commandError?.detail || result.commandError?.message || "Direct cloud execution failed.",
-      errorMessage: stringifyCommandError({
-        ...(result.commandError || {}),
-        code: "fallback_to_slack",
-        stage: "switched-to-cloud-via-slack",
-        message: "Direct cloud execution failed. Switched to cloud via Slack.",
-        detail: result.commandError?.detail || result.commandError?.message || "Direct cloud execution failed.",
-        fallback: "slack-codex-cloud"
-      })
+  if (!isCloudDispatchConfigured(runtimeConfig)) {
+    return markCloudCommandFailed(env, latest, {
+      code: "cloud_bridge_not_configured",
+      stage: "cloud-config-missing",
+      message: "Trusted cloud bridge is not configured.",
+      detail: "Set CLOUD_BRIDGE_BASE_URL and CLOUD_BRIDGE_SHARED_SECRET in the Pages environment."
     });
-
-    const redispatched = await getCommandById(env, rerouted.value?.id || latest.id);
-
-    if (redispatched) {
-      const redispatchedResult = await dispatchCommandIfNeeded(env, redispatched, runtimeConfig);
-      return redispatchedResult?.command || redispatched;
-    }
   }
 
-  if (result.retryable && canFallbackToLocalBridge(latest)) {
-    const fallbackCommand = await fallbackToLocalBridge(env, latest, {
-      ...(result.commandError || {}),
-      code: "fallback_to_bridge",
-      stage: "switched-to-bridge",
-      message: "Direct cloud execution failed. Switched to local bridge.",
-      detail: result.commandError?.detail || result.commandError?.message || "Direct cloud execution failed.",
-      fallback: "local-bridge"
+  const brokered = await submitTrustedCloudCommand(runtimeConfig, latest);
+
+  if (!brokered.ok) {
+    return markCloudCommandFailed(env, latest, {
+      code: brokered.error?.code || "cloud_bridge_dispatch_failed",
+      stage: "cloud-bridge-dispatch-failed",
+      message: "Trusted cloud bridge rejected the job.",
+      detail: brokered.error?.message || "The trusted cloud bridge did not accept the command."
     });
-
-    const redispatched = await getCommandById(env, fallbackCommand.id);
-    if (redispatched) {
-      const rerouted = await dispatchCommandIfNeeded(env, redispatched, runtimeConfig);
-      return rerouted?.command || redispatched;
-    }
-
-    return fallbackCommand;
   }
 
-  return markCloudCommandFailed(env, latest, result.commandError || {
-    code: "cloud_execution_failed",
-    stage: "cloud-execution-failed",
-    message: "Direct cloud execution failed.",
-    detail: "The cloud request did not complete successfully."
+  const acceptedAt = brokered.acceptedAt || new Date().toISOString();
+  const accepted = await upsertCommandDispatchState(env, {
+    id: latest.id,
+    dispatchMode: DISPATCH_MODE_CLOUD,
+    status: "processing",
+    progressStage: "waiting",
+    actualExecutor: "cloud",
+    firstAckAt: acceptedAt,
+    firstExecutorAckSeenAt: acceptedAt,
+    processingStartedAt: acceptedAt,
+    cloudJobId: brokered.jobId,
+    progressMessage: brokered.progressMessage || "Trusted cloud bridge accepted the job."
   });
+
+  return accepted.value || latest;
 }
 
 export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
@@ -833,7 +719,7 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   if (dispatchMode === DISPATCH_MODE_CLOUD) {
     return {
       ok: true,
-      command: await executeDirectCloudCommand(env, command)
+      command: await executeTrustedCloudCommand(env, command, config)
     };
   }
 
@@ -1216,6 +1102,8 @@ export async function onRequest(context) {
       progressStage: payload?.progressStage,
       completedAt: payload?.completedAt,
       actualExecutor: payload?.actualExecutor || payload?.actualDispatchMode,
+      cloudJobId: payload?.cloudJobId,
+      progressMessage: payload?.progressMessage,
       firstAckAt: payload?.firstAckAt,
       firstExecutorAckSeenAt: payload?.firstExecutorAckSeenAt,
       firstReplySeenAt: payload?.firstReplySeenAt,
@@ -1246,6 +1134,8 @@ export async function onRequest(context) {
       fallbackApplied: payload?.fallbackApplied,
       fallbackCount: payload?.fallbackCount,
       fallbackReason: payload?.fallbackReason,
+      cloudJobId: payload?.cloudJobId,
+      progressMessage: payload?.progressMessage,
       firstAckAt: payload?.firstAckAt,
       firstExecutorAckSeenAt: payload?.firstExecutorAckSeenAt,
       firstReplySeenAt: payload?.firstReplySeenAt,
@@ -1295,6 +1185,8 @@ export async function onRequest(context) {
       photoSeenByBridge: payload?.photoSeenByBridge,
       photoProcessed: payload?.photoProcessed,
       photoUnsupportedReason: payload?.photoUnsupportedReason,
+      cloudJobId: payload?.cloudJobId,
+      progressMessage: payload?.progressMessage,
       lastDiagnosticCode: payload?.lastDiagnosticCode,
       lastDiagnosticDetail: payload?.lastDiagnosticDetail
     });
