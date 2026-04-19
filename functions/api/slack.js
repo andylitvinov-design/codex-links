@@ -1,9 +1,9 @@
-import { getCommandBySlackThread, readCommands, upsertCommandDispatchState } from "../_lib/commands.js";
+import { getCommandById, upsertCommandDispatchState } from "../_lib/commands.js";
 import { handleOptions, json } from "../_lib/http.js";
 import { upsertMessages } from "../_lib/messages.js";
 import { DISPATCH_MODE_SLACK, getDispatchModeLabel } from "../_lib/dispatch.js";
 import {
-  classifySlackReply,
+  deriveSlackReplyOutcome,
   extractSlackMessageText,
   isIgnorableSlackReplyText,
   isLikelyCodexSlackActor,
@@ -13,45 +13,50 @@ import {
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
 import { stringifyCommandError } from "../_lib/command-debug.js";
-
-const RECENT_COMMAND_WINDOW_MS = 30 * 60 * 1000;
-
-function logSlackIngestError(context, error, extra = {}) {
-  console.error("[codex-links][slack]", context, {
-    ...extra,
-    error: error instanceof Error ? error.message : String(error || "Unknown error")
-  });
-}
+import {
+  clearSlackActiveChannelCommand,
+  getSlackActiveChannelCommandId,
+  getSlackThreadCommandId
+} from "../_lib/delivery.js";
 
 function shouldTrackSlackEvent(event) {
   const channel = String(event?.channel || "").trim();
-  const threadTs = String(event?.thread_ts || "").trim();
-  const ts = String(event?.ts || "").trim();
+  const subtype = String(event?.subtype || "").trim();
 
   if (!channel) {
     return false;
   }
 
-  if (!threadTs || threadTs === ts) {
-    return false;
-  }
-
-  if (event?.subtype === "message_changed" || event?.subtype === "message_deleted") {
+  if (subtype === "message_changed" || subtype === "message_deleted") {
     return false;
   }
 
   return true;
 }
 
-function getSlackEventTimestamp(event) {
-  const raw = String(event?.event_ts || event?.ts || "").trim();
-  const value = Number(raw);
+function isSlackCloudDiagnosticsEnabled(runtimeConfig) {
+  const value = String(runtimeConfig?.SLACK_CLOUD_DIAGNOSTICS || "").trim().toLowerCase();
+  return value === "1" || value === "true";
+}
 
-  if (!Number.isFinite(value) || value <= 0) {
-    return 0;
+function mergeDeliveryEvidence(command, incoming = {}, runtimeConfig = {}) {
+  const current = command?.deliveryEvidence && typeof command.deliveryEvidence === "object"
+    ? command.deliveryEvidence
+    : {};
+  const next = incoming && typeof incoming === "object" ? incoming : {};
+  const diagnosticsEnabled = isSlackCloudDiagnosticsEnabled(runtimeConfig);
+
+  const merged = {
+    ...current,
+    ...next
+  };
+
+  if (diagnosticsEnabled) {
+    merged.matchedChannelId = String(next.matchedChannelId || current.matchedChannelId || command?.slackChannelId || "").trim();
+    merged.matchedThreadTs = String(next.matchedThreadTs || current.matchedThreadTs || command?.slackThreadTs || command?.slackMessageTs || "").trim();
   }
 
-  return value * 1000;
+  return merged;
 }
 
 async function markSlackCommandDiagnostic(env, command, input = {}) {
@@ -75,87 +80,67 @@ async function markSlackCommandDiagnostic(env, command, input = {}) {
     fallbackReason: input.fallbackReason,
     lastDiagnosticCode: input.code,
     lastDiagnosticDetail: input.detail,
+    deliveryStopPoint: input.deliveryStopPoint || command.deliveryStopPoint,
+    deliveryEvidence: Object.prototype.hasOwnProperty.call(input, "deliveryEvidence")
+      ? input.deliveryEvidence
+      : command.deliveryEvidence,
     slackChannelId: String(input.channelId || command.slackChannelId || "").trim(),
     slackThreadTs: String(input.threadTs || command.slackThreadTs || command.slackMessageTs || "").trim(),
     slackMessageTs: String(command.slackMessageTs || "").trim(),
     errorMessage: stringifyCommandError(input.error || {}),
     processingStartedAt: String(command.processingStartedAt || "").trim(),
-    firstAckAt: String(command.firstAckAt || "").trim()
+    firstAckAt: String(command.firstAckAt || "").trim(),
+    firstExecutorAckSeenAt: String(command.firstExecutorAckSeenAt || "").trim(),
+    firstReplySeenAt: String(command.firstReplySeenAt || "").trim(),
+    replyIngestedAt: String(command.replyIngestedAt || "").trim()
   });
 }
 
-async function findLikelyUnthreadedSlackCommand(env, runtimeConfig, event) {
+async function resolveSlackCommand(env, runtimeConfig, event) {
   const channelId = String(event?.channel || "").trim();
-  const eventTimestamp = getSlackEventTimestamp(event) || Date.now();
-
-  const commands = await readCommands(env);
-  const candidates = commands.filter((command) => {
-    const status = String(command?.status || "").trim().toLowerCase();
-    const createdAt = Date.parse(String(command?.createdAt || "").trim());
-    const dispatchedAt = Date.parse(String(command?.dispatchedAt || command?.createdAt || "").trim());
-
-    return command.dispatchMode === DISPATCH_MODE_SLACK
-      && command.slackChannelId === channelId
-      && (status === "dispatched" || status === "processing")
-      && !command.replyMatched
-      && !Number.isNaN(createdAt)
-      && !Number.isNaN(dispatchedAt)
-      && createdAt <= eventTimestamp
-      && dispatchedAt <= eventTimestamp
-      && (eventTimestamp - createdAt) <= RECENT_COMMAND_WINDOW_MS;
-  });
-
-  if (!candidates.length) {
-    return null;
-  }
-
-  if (!isLikelyCodexSlackActor(runtimeConfig, event, { candidateCount: candidates.length })) {
-    return null;
-  }
-
-  const command = [...candidates].sort((left, right) =>
-    Date.parse(String(left?.dispatchedAt || left?.createdAt || "").trim())
-      - Date.parse(String(right?.dispatchedAt || right?.createdAt || "").trim())
-    || Date.parse(String(left?.createdAt || "").trim()) - Date.parse(String(right?.createdAt || "").trim())
-  )[0];
-
-  return { command };
-}
-
-async function findLikelyThreadedSlackCommand(env, runtimeConfig, event) {
-  const channelId = String(event?.channel || "").trim();
-  const eventTimestamp = getSlackEventTimestamp(event) || Date.now();
+  const threadTs = String(event?.thread_ts || "").trim();
 
   if (!channelId) {
-    return null;
+    return { command: null, matchedVia: "" };
   }
 
-  const commands = await readCommands(env);
-  const candidates = commands.filter((command) => {
-    const status = String(command?.status || "").trim().toLowerCase();
-    const createdAt = Date.parse(String(command?.createdAt || "").trim());
+  if (threadTs) {
+    const exactCommandId = await getSlackThreadCommandId(env, channelId, threadTs);
 
-    return command.dispatchMode === DISPATCH_MODE_SLACK
-      && command.slackChannelId === channelId
-      && (status === "dispatched" || status === "processing")
-      && !command.replyMatched
-      && !Number.isNaN(createdAt)
-      && createdAt <= eventTimestamp
-      && (eventTimestamp - createdAt) <= RECENT_COMMAND_WINDOW_MS;
-  });
+    if (exactCommandId) {
+      const exactCommand = await getCommandById(env, exactCommandId);
 
-  if (!candidates.length) {
-    return null;
+      if (exactCommand && isLikelyCodexSlackActor(runtimeConfig, event, { candidateCount: 1 })) {
+        return {
+          command: exactCommand,
+          matchedVia: "thread-map"
+        };
+      }
+    }
   }
 
-  if (!isLikelyCodexSlackActor(runtimeConfig, event, { candidateCount: candidates.length })) {
-    return null;
+  const activeCommandId = await getSlackActiveChannelCommandId(env, channelId);
+
+  if (!activeCommandId) {
+    return { command: null, matchedVia: "" };
   }
 
-  return [...candidates].sort((left, right) =>
-    Date.parse(String(left?.dispatchedAt || left?.createdAt || "").trim())
-      - Date.parse(String(right?.dispatchedAt || right?.createdAt || "").trim())
-  )[0] || null;
+  const activeCommand = await getCommandById(env, activeCommandId);
+  const activeStatus = String(activeCommand?.status || "").trim().toLowerCase();
+
+  if (
+    !activeCommand
+    || activeCommand.dispatchMode !== DISPATCH_MODE_SLACK
+    || !["dispatched", "processing"].includes(activeStatus)
+    || !isLikelyCodexSlackActor(runtimeConfig, event, { candidateCount: 1 })
+  ) {
+    return { command: null, matchedVia: "" };
+  }
+
+  return {
+    command: activeCommand,
+    matchedVia: "active-channel"
+  };
 }
 
 async function ingestSlackReply(env, command, event, options = {}) {
@@ -179,8 +164,30 @@ async function ingestSlackReply(env, command, event, options = {}) {
     };
   }
 
-  const classification = classifySlackReply(text);
-  const progressStage = options.progressStage || "slack-reply-received";
+  const classification = deriveSlackReplyOutcome(command, text);
+  const eventIso = new Date(Number(String(event.event_ts || event.ts || "0")) * 1000 || Date.now()).toISOString();
+  const replyIngestedAt = new Date().toISOString();
+  const isFirstAck = classification.executionAckValid && !String(command.firstExecutorAckSeenAt || "").trim();
+  const isFirstReply = Boolean(text) && !String(command.firstReplySeenAt || "").trim();
+  const deliveryEvidence = mergeDeliveryEvidence(command, {
+    inspectedAt: replyIngestedAt,
+    slackRootPosted: true,
+    slackThreadMapped: true,
+    workerReplySeen: true,
+    workerAckSeen: Boolean(classification.executionAckPresent),
+    workerPhotoReadySeen: classification.executionAckPhotoReady === true,
+    executionAckSeen: Boolean(classification.executionAckPresent),
+    photoReadySeen: classification.executionAckPhotoReady === true,
+    ...(options.diagnosticsEnabled ? {
+      matchedChannelId: channelId,
+      matchedThreadTs: effectiveThreadTs,
+      workerReplySeenAt: eventIso,
+      ...(classification.executionAckPresent ? { workerAckSeenAt: eventIso } : {}),
+      ...(classification.executionAckPhotoReady === true ? { workerPhotoReadySeenAt: eventIso } : {})
+    } : {})
+  }, options.runtimeConfig);
+  const progressStage = options.progressStage
+    || (isFirstAck && classification.status === "processing" ? "accepted" : classification.progressStage || "processing");
 
   const nextState = await upsertCommandDispatchState(env, {
     id: command.id,
@@ -189,23 +196,32 @@ async function ingestSlackReply(env, command, event, options = {}) {
     progressStage,
     actualExecutor: "cloud",
     slackReplyReceived: true,
-    slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
+    slackReplyThreaded: Boolean(replyThreadTs),
     replyMatched: true,
-    replyMatchedBy: progressStage === "slack-reply-received-unthreaded" ? "unthreaded-fallback" : "thread",
-    firstAckAt: command.firstAckAt || new Date().toISOString(),
+    replyMatchedBy: options.replyMatchedBy || (replyThreadTs ? "thread" : "unthreaded-fallback"),
+    firstAckAt: classification.executionAckValid ? (command.firstAckAt || eventIso) : command.firstAckAt,
+    firstExecutorAckSeenAt: classification.executionAckValid ? (command.firstExecutorAckSeenAt || eventIso) : command.firstExecutorAckSeenAt,
+    firstReplySeenAt: isFirstReply ? eventIso : command.firstReplySeenAt,
+    replyIngestedAt,
     timeoutPhase: "",
-    lastDiagnosticCode: progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : "",
-    lastDiagnosticDetail: progressStage === "slack-reply-received-unthreaded"
-      ? "A Codex reply arrived outside the original Slack thread and was reconciled back to the command."
-      : "",
+    lastDiagnosticCode: classification.lastDiagnosticCode || (!replyThreadTs ? "slack_reply_unthreaded" : ""),
+    lastDiagnosticDetail: classification.lastDiagnosticDetail || (!replyThreadTs
+      ? "A Codex reply arrived outside the original Slack thread and was reconciled using the active channel mapping."
+      : ""),
+    deliveryStopPoint: classification.executionAckPhotoReady === true
+      ? "worker_photo_ready_seen"
+      : (classification.executionAckPresent
+          ? "worker_ack_seen"
+          : "worker_reply_seen"),
+    deliveryEvidence,
     slackChannelId: channelId,
     slackThreadTs: effectiveThreadTs,
     slackMessageTs: command.slackMessageTs,
     prUrl: classification.prUrl,
     branchName: classification.branchName,
     errorMessage: classification.status === "failed" ? text : "",
-    processingStartedAt: classification.status === "processing" ? new Date().toISOString() : "",
-    resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""
+    processingStartedAt: classification.status === "processing" ? (command.processingStartedAt || replyIngestedAt) : "",
+    resultAt: classification.status === "answered" || classification.status === "failed" ? replyIngestedAt : ""
   });
 
   if (text) {
@@ -217,8 +233,12 @@ async function ingestSlackReply(env, command, event, options = {}) {
       commandId: command.id,
       role: "assistant",
       text,
-      createdAt: new Date(Number(String(event.event_ts || event.ts || "0")) * 1000 || Date.now()).toISOString()
+      createdAt: eventIso
     }]);
+  }
+
+  if (classification.status === "answered" || classification.status === "failed") {
+    await clearSlackActiveChannelCommand(env, channelId, command.id);
   }
 
   await refreshBridgeStatusFromCommands(env, {
@@ -226,8 +246,8 @@ async function ingestSlackReply(env, command, event, options = {}) {
     executorLabel: getDispatchModeLabel(DISPATCH_MODE_SLACK),
     bridgeOnline: true,
     state: classification.status === "processing" ? "running" : "idle",
-    lastRunAt: new Date().toISOString(),
-    lastSuccessAt: classification.status === "answered" ? new Date().toISOString() : undefined,
+    lastRunAt: replyIngestedAt,
+    lastSuccessAt: classification.status === "answered" ? replyIngestedAt : undefined,
     lastDeliveredCount: classification.status === "answered" ? 1 : 0,
     lastError: classification.status === "failed" ? text : ""
   });
@@ -261,52 +281,28 @@ export async function onRequest(context) {
 
       if (isSlackMessageEvent(payload)) {
         const event = payload.event || {};
-        const threadTs = String(event.thread_ts || "").trim();
-        const channelId = String(event.channel || "").trim();
+        const resolved = await resolveSlackCommand(env, runtimeConfig, event);
 
-        if (threadTs && channelId) {
-          const command = await getCommandBySlackThread(env, channelId, threadTs);
-
-          if (command) {
-            await markSlackCommandDiagnostic(env, command, {
-              progressStage: "slack-signature-failed",
-              status: "failed",
-              channelId,
-              threadTs,
-              slackReplyReceived: true,
-              slackReplyThreaded: true,
-              slackReplyMatched: true,
-              error: {
-                code: "slack_signature_failed",
-                stage: "slack-signature-failed",
-                message: "Slack signature validation failed.",
-                detail: "Slack webhook request was rejected with HTTP 401 before reply ingestion."
-              },
-              code: "slack_webhook_unauthorized",
-              detail: "Slack webhook request was rejected with HTTP 401 before reply ingestion."
-            });
-          }
-        } else {
-          const likely = await findLikelyUnthreadedSlackCommand(env, runtimeConfig, event);
-
-          if (likely?.command) {
-            await markSlackCommandDiagnostic(env, likely.command, {
-              progressStage: "slack-signature-failed",
-              status: likely.command.status || "processing",
-              channelId,
-              threadTs,
-              slackReplyReceived: true,
-              slackReplyThreaded: false,
-              slackReplyMatched: false,
-              code: "slack_webhook_unauthorized",
-              detail: "Slack webhook request for an unthreaded reply was rejected before reconciliation."
-            });
-          }
+        if (resolved?.command) {
+          await markSlackCommandDiagnostic(env, resolved.command, {
+            progressStage: "slack-signature-failed",
+            status: resolved.command.status || "processing",
+            channelId: String(event.channel || "").trim(),
+            threadTs: String(event.thread_ts || "").trim(),
+            slackReplyReceived: true,
+            slackReplyThreaded: Boolean(String(event.thread_ts || "").trim()),
+            slackReplyMatched: resolved.matchedVia === "thread-map",
+            code: "slack_webhook_unauthorized",
+            detail: "Slack webhook request was rejected with HTTP 401 before reply ingestion.",
+            deliveryEvidence: mergeDeliveryEvidence(resolved.command, {
+              inspectedAt: new Date().toISOString(),
+              matchedChannelId: String(event.channel || "").trim(),
+              matchedThreadTs: String(event.thread_ts || resolved.command.slackThreadTs || resolved.command.slackMessageTs || "").trim()
+            }, runtimeConfig)
+          });
         }
       }
-    } catch (error) {
-      logSlackIngestError("signatureFailureDiagnostic", error);
-    }
+    } catch {}
 
     return json({ error: "Unauthorized." }, { status: 401 });
   }
@@ -330,53 +326,24 @@ export async function onRequest(context) {
   const event = payload.event;
 
   if (!shouldTrackSlackEvent(event)) {
-    const likely = await findLikelyUnthreadedSlackCommand(env, runtimeConfig, event);
-
-    if (likely) {
-      const result = await ingestSlackReply(env, likely.command, event, {
-        progressStage: "slack-reply-received-unthreaded"
-      });
-
-      return json({
-        ok: true,
-        matchedVia: "unthreaded-fallback",
-        command: result.command
-      });
-    }
-
     return json({ ok: true });
   }
 
-  const threadTs = String(event.thread_ts || "").trim();
-  const channelId = String(event.channel || "").trim();
-  const command = await getCommandBySlackThread(env, channelId, threadTs);
+  const resolved = await resolveSlackCommand(env, runtimeConfig, event);
 
-  if (!command) {
-    const likely = await findLikelyThreadedSlackCommand(env, runtimeConfig, event);
-
-    if (likely) {
-      await markSlackCommandDiagnostic(env, likely, {
-        progressStage: "slack-reply-unmatched",
-        status: likely.status || "processing",
-        channelId,
-        threadTs,
-        slackReplyReceived: true,
-        slackReplyThreaded: true,
-        slackReplyMatched: false,
-        code: "slack_reply_unmatched",
-        detail: "A Codex Slack reply arrived in a thread, but it did not match the stored thread identifiers for the command."
-      });
-    }
-
-    return json({ ok: true });
+  if (!resolved?.command) {
+    return json({ ok: true, matchedVia: "none" });
   }
 
-  const result = await ingestSlackReply(env, command, event, {
-    progressStage: "slack-reply-received"
+  const result = await ingestSlackReply(env, resolved.command, event, {
+    replyMatchedBy: resolved.matchedVia === "active-channel" ? "unthreaded-fallback" : "thread",
+    diagnosticsEnabled: isSlackCloudDiagnosticsEnabled(runtimeConfig),
+    runtimeConfig
   });
 
   return json({
     ok: true,
+    matchedVia: resolved.matchedVia,
     command: result.command
   });
 }
