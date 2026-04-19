@@ -49,10 +49,10 @@ function buildSlackAuthHeaders(token, headers = {}) {
   };
 }
 
-function encodeSlackFormBody(payload = {}) {
+function encodeSlackFormBody(body) {
   const params = new URLSearchParams();
 
-  Object.entries(payload).forEach(([key, value]) => {
+  Object.entries(body || {}).forEach(([key, value]) => {
     if (value === undefined || value === null) {
       return;
     }
@@ -65,7 +65,37 @@ function encodeSlackFormBody(payload = {}) {
     params.set(key, String(value));
   });
 
-  return params.toString();
+  return params;
+}
+
+function formatSlackError(data, fallbackMessage) {
+  const error = normalizeText(data?.error);
+  const metadataMessages = Array.isArray(data?.response_metadata?.messages)
+    ? data.response_metadata.messages.map((entry) => normalizeText(entry)).filter(Boolean)
+    : [];
+  const detail = metadataMessages.join(" ");
+
+  if (error && detail) {
+    return `${error}: ${detail}`;
+  }
+
+  return error || detail || fallbackMessage;
+}
+
+function formatSlackUploadDiagnostic(method, body, error) {
+  const methodName = normalizeText(method) || "slack_upload";
+  const argKeys = Object.keys(body && typeof body === "object" ? body : {})
+    .map((key) => normalizeText(key))
+    .filter(Boolean)
+    .join(",");
+  const reason = normalizeText(error instanceof Error ? error.message : error) || "unknown_error";
+
+  return {
+    method: methodName,
+    argKeys,
+    error: reason,
+    detail: `${methodName} failed: ${reason}${argKeys ? ` [args=${argKeys}]` : ""}`
+  };
 }
 
 function normalizeSlackQueryTs(rawValue) {
@@ -92,7 +122,7 @@ function withCommandError(error, input) {
   const wrapped = error instanceof Error ? error : new Error(String(error || "Slack request failed."));
   wrapped.commandError = {
     ...createCommandError(input),
-    ...(input?.deliveryStopPoint ? { deliveryStopPoint: normalizeText(input.deliveryStopPoint, 80) } : {}),
+    ...(input?.deliveryStopPoint ? { deliveryStopPoint: normalizeText(input.deliveryStopPoint) } : {}),
     ...(input && Object.prototype.hasOwnProperty.call(input, "deliveryEvidence") ? { deliveryEvidence: input.deliveryEvidence } : {})
   };
   return wrapped;
@@ -109,41 +139,30 @@ async function callSlackApi(token, method, body = null, query = null, options = 
     });
   }
 
-  const formEncoded = options?.formEncoded === true;
+  const bodyEncoding = normalizeText(options.bodyEncoding).toLowerCase() || "json";
+  const headers = bodyEncoding === "form"
+    ? buildSlackAuthHeaders(token, {
+        "content-type": "application/x-www-form-urlencoded"
+      })
+    : buildSlackHeaders(token);
+  const requestBody = body
+    ? (bodyEncoding === "form" ? encodeSlackFormBody(body) : JSON.stringify(body))
+    : undefined;
+
   const response = await fetch(url.toString(), {
     method: body ? "POST" : "GET",
-    headers: formEncoded
-      ? buildSlackAuthHeaders(token, {
-          "content-type": "application/x-www-form-urlencoded; charset=utf-8"
-        })
-      : buildSlackHeaders(token),
-    body: body
-      ? (formEncoded ? encodeSlackFormBody(body) : JSON.stringify(body))
-      : undefined
+    headers,
+    body: requestBody
   });
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || `Slack API ${method} failed with ${response.status}.`);
+    throw new Error(formatSlackError(data, `Slack API ${method} failed with ${response.status}.`));
   }
 
   return data;
 }
 
-function formatSlackUploadDiagnostic(method, body, error) {
-  const methodName = normalizeText(method, 80) || "slack_upload";
-  const argKeys = Object.keys(body && typeof body === "object" ? body : {})
-    .map((key) => normalizeText(key, 40))
-    .filter(Boolean)
-    .join(",");
-  const reason = normalizeText(error instanceof Error ? error.message : error, 160) || "unknown_error";
-  return {
-    method: methodName,
-    argKeys,
-    error: reason,
-    detail: `${methodName} failed: ${reason}${argKeys ? ` [args=${argKeys}]` : ""}`
-  };
-}
 function decodeSlackDataUrl(dataUrl) {
   const value = normalizeText(dataUrl);
   const match = value.match(/^data:([^;,]+)?;base64,(.+)$/i);
@@ -207,58 +226,52 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
 
   try {
     upload = await callSlackApi(token, "files.getUploadURLExternal", uploadUrlPayload, null, {
-      formEncoded: true
+      bodyEncoding: "form"
     });
   } catch (error) {
     const diagnostic = formatSlackUploadDiagnostic("files.getUploadURLExternal", uploadUrlPayload, error);
-    throw withCommandError(
-      new Error(diagnostic.detail),
-      {
-        code: "slack_photo_upload_failed",
-        stage: "slack-photo-upload-failed",
-        message: "Slack photo upload failed.",
-        detail: diagnostic.detail,
-        fallback: "local-bridge",
-        deliveryStopPoint: "slack_thread_mapped",
-        deliveryEvidence: {
-          ...baseEvidence,
-          slackUploadMethod: diagnostic.method,
-          slackUploadArgKeys: diagnostic.argKeys,
-          slackUploadError: diagnostic.error
-        }
+    throw withCommandError(new Error(diagnostic.detail), {
+      code: "slack_photo_upload_failed",
+      stage: "slack-photo-upload-failed",
+      message: "Slack photo upload failed.",
+      detail: diagnostic.detail,
+      fallback: "local-bridge",
+      deliveryStopPoint: "slack_thread_mapped",
+      deliveryEvidence: {
+        ...baseEvidence,
+        slackUploadMethod: diagnostic.method,
+        slackUploadArgKeys: diagnostic.argKeys,
+        slackUploadError: diagnostic.error
       }
-    );
+    });
   }
 
   const uploadResponse = await fetch(String(upload.upload_url || ""), {
     method: "POST",
-    headers: buildSlackAuthHeaders(token, {
+    headers: {
       "content-type": contentType,
       "content-length": String(length)
-    }),
+    },
     body: decoded.bytes
   });
 
   if (!uploadResponse.ok) {
     const diagnostic = formatSlackUploadDiagnostic("files.uploadExternal", { upload_url: true }, `http_${uploadResponse.status}`);
-    throw withCommandError(
-      new Error(diagnostic.detail),
-      {
-        code: "slack_photo_upload_failed",
-        stage: "slack-photo-upload-failed",
-        message: "Slack photo upload failed.",
-        detail: diagnostic.detail,
-        fallback: "local-bridge",
-        deliveryStopPoint: "slack_thread_mapped",
-        deliveryEvidence: {
-          ...baseEvidence,
-          fileId: normalizeText(upload.file_id),
-          slackUploadMethod: diagnostic.method,
-          slackUploadArgKeys: diagnostic.argKeys,
-          slackUploadError: diagnostic.error
-        }
+    throw withCommandError(new Error(diagnostic.detail), {
+      code: "slack_photo_upload_failed",
+      stage: "slack-photo-upload-failed",
+      message: "Slack photo upload failed.",
+      detail: diagnostic.detail,
+      fallback: "local-bridge",
+      deliveryStopPoint: "slack_thread_mapped",
+      deliveryEvidence: {
+        ...baseEvidence,
+        fileId: normalizeText(upload.file_id),
+        slackUploadMethod: diagnostic.method,
+        slackUploadArgKeys: diagnostic.argKeys,
+        slackUploadError: diagnostic.error
       }
-    );
+    });
   }
 
   const completePayload = {
@@ -274,50 +287,34 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
 
   try {
     completed = await callSlackApi(token, "files.completeUploadExternal", completePayload, null, {
-      formEncoded: true
+      bodyEncoding: "form"
     });
   } catch (error) {
     const diagnostic = formatSlackUploadDiagnostic("files.completeUploadExternal", completePayload, error);
-    throw withCommandError(
-      new Error(diagnostic.detail),
-      {
-        code: "slack_photo_upload_failed",
-        stage: "slack-photo-upload-failed",
-        message: "Slack photo upload failed.",
-        detail: diagnostic.detail,
-        fallback: "local-bridge",
-        deliveryStopPoint: "slack_thread_mapped",
-        deliveryEvidence: {
-          ...baseEvidence,
-          fileId: normalizeText(upload.file_id),
-          slackUploadMethod: diagnostic.method,
-          slackUploadArgKeys: diagnostic.argKeys,
-          slackUploadError: diagnostic.error
-        }
+    throw withCommandError(new Error(diagnostic.detail), {
+      code: "slack_photo_upload_failed",
+      stage: "slack-photo-upload-failed",
+      message: "Slack photo upload failed.",
+      detail: diagnostic.detail,
+      fallback: "local-bridge",
+      deliveryStopPoint: "slack_thread_mapped",
+      deliveryEvidence: {
+        ...baseEvidence,
+        fileId: normalizeText(upload.file_id),
+        slackUploadMethod: diagnostic.method,
+        slackUploadArgKeys: diagnostic.argKeys,
+        slackUploadError: diagnostic.error
       }
-    );
+    });
   }
 
-  const completedFile = (Array.isArray(completed?.files) ? completed.files : [])
-    .find((entry) => normalizeText(entry?.id) === normalizeText(upload.file_id))
-    || (Array.isArray(completed?.files) ? completed.files[0] : null);
-
-  let permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
-  let fileMode = normalizeText(completedFile?.mode);
-  let fileAccess = normalizeText(completedFile?.file_access || completedFile?.access);
-  let urlPrivate = normalizeText(completedFile?.url_private_download || completedFile?.url_private);
-
-  if (!permalink || !fileMode || !fileAccess || !urlPrivate) {
-    try {
-      const info = await callSlackApi(token, "files.info", null, {
-        file: normalizeText(upload.file_id)
-      });
-      fileMode = fileMode || normalizeText(info?.file?.mode);
-      fileAccess = fileAccess || normalizeText(info?.file?.file_access);
-      urlPrivate = urlPrivate || normalizeText(info?.file?.url_private_download || info?.file?.url_private);
-      permalink = permalink || normalizeText(info?.file?.permalink || info?.file?.permalink_public);
-    } catch {}
-  }
+  const completedFile = Array.isArray(completed?.files)
+    ? completed.files.find((file) => normalizeText(file?.id) === normalizeText(upload.file_id)) || completed.files[0]
+    : null;
+  const permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
+  const fileMode = normalizeText(completedFile?.mode);
+  const fileAccess = normalizeText(completedFile?.file_access);
+  const urlPrivate = normalizeText(completedFile?.url_private_download || completedFile?.url_private);
 
   const probe = urlPrivate
     ? await probeSlackFileOpen(token, urlPrivate).catch(() => ({ canOpen: false, status: 0 }))
@@ -722,19 +719,18 @@ export async function postSlackCommand(env, command, mention) {
         ].filter(Boolean).join(" ")
       );
     } catch (error) {
-      const commandError = error && typeof error === "object" && error.commandError
-        ? error.commandError
-        : null;
+      if (error?.commandError) {
+        throw error;
+      }
+
       throw withCommandError(
         new Error(error instanceof Error ? error.message : "Slack photo upload failed."),
         {
-          code: commandError?.code || "slack_photo_upload_failed",
-          stage: commandError?.stage || "slack-photo-upload-failed",
-          message: commandError?.message || "Slack photo upload failed.",
-          detail: commandError?.detail || (error instanceof Error ? error.message : "Slack photo upload failed."),
-          fallback: commandError?.fallback || "local-bridge",
-          deliveryStopPoint: commandError?.deliveryStopPoint,
-          deliveryEvidence: commandError?.deliveryEvidence
+          code: "slack_photo_upload_failed",
+          stage: "slack-photo-upload-failed",
+          message: "Slack photo upload failed.",
+          detail: error instanceof Error ? error.message : "Slack photo upload failed.",
+          fallback: "local-bridge"
         }
       );
     }

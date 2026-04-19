@@ -4,19 +4,13 @@ import path from "node:path";
 const ROOT = process.cwd();
 const DEV_VARS_PATH = path.join(ROOT, ".dev.vars");
 const PROD_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
+const CLOUD_BRIDGE_HEALTH_URL = process.env.CLOUD_BRIDGE_HEALTH_URL || "http://127.0.0.1:8788/healthz";
 const IS_CI = Boolean(String(process.env.GITHUB_ACTIONS || process.env.CI || "").trim());
 const REQUIRED = [
   "LINKS_WRITE_TOKEN",
-  "COMMAND_DISPATCH_MODE"
-];
-const OPTIONAL = [
-  "OPENAI_API_KEY",
-  "GITHUB_OWNER",
-  "GITHUB_TOKEN",
-  "SLACK_BOT_TOKEN",
-  "SLACK_SIGNING_SECRET",
-  "SLACK_CODEX_CHANNEL_ID",
-  "SLACK_CODEX_USER_ID"
+  "COMMAND_DISPATCH_MODE",
+  "CLOUD_BRIDGE_BASE_URL",
+  "CLOUD_BRIDGE_SHARED_SECRET"
 ];
 
 function parseEnvFile(filePath) {
@@ -63,9 +57,9 @@ function mask(value) {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
-async function loadProdStatus() {
+async function loadJson(url) {
   try {
-    const response = await fetch(`${PROD_URL}/api/status?_=${Date.now()}`, {
+    const response = await fetch(url, {
       headers: { accept: "application/json" }
     });
 
@@ -73,8 +67,10 @@ async function loadProdStatus() {
       return { ok: false, error: `HTTP ${response.status}` };
     }
 
-    const data = await response.json();
-    return { ok: true, status: data.status || null };
+    return {
+      ok: true,
+      body: await response.json().catch(() => null)
+    };
   } catch (error) {
     return {
       ok: false,
@@ -87,9 +83,10 @@ async function main() {
   const fileVars = parseEnvFile(DEV_VARS_PATH);
   const merged = { ...fileVars, ...process.env };
 
-  console.log("Codex Links cloud setup check");
+  console.log("Codex Links trusted cloud setup check");
   console.log(`Project: ${ROOT}`);
-  console.log(`Status URL: ${PROD_URL}/api/status`);
+  console.log(`Pages status URL: ${PROD_URL}/api/status`);
+  console.log(`Bridge health URL: ${CLOUD_BRIDGE_HEALTH_URL}`);
   console.log("");
 
   for (const key of REQUIRED) {
@@ -97,22 +94,8 @@ async function main() {
   }
 
   console.log("");
-  console.log("Optional / legacy-only:");
-
-  for (const key of OPTIONAL) {
-    console.log(`${key}: ${mask(merged[key])}`);
-  }
-
-  console.log("");
 
   const missing = REQUIRED.filter((key) => !String(merged[key] || "").trim());
-  const hasOpenAiKey = Boolean(String(merged.OPENAI_API_KEY || "").trim());
-  const hasSlackRoute = Boolean(String(merged.SLACK_BOT_TOKEN || "").trim()) && Boolean(String(merged.SLACK_CODEX_CHANNEL_ID || "").trim());
-  const hasCloudRoute = hasOpenAiKey || hasSlackRoute;
-
-  if (!hasCloudRoute) {
-    missing.push("OPENAI_API_KEY or Slack cloud route");
-  }
 
   if (missing.length) {
     console.log(IS_CI ? "Missing local values (advisory in CI):" : "Missing local values:");
@@ -125,21 +108,38 @@ async function main() {
 
   console.log("");
 
-  const prod = await loadProdStatus();
+  const [prodStatus, bridgeHealth] = await Promise.all([
+    loadJson(`${PROD_URL}/api/status?_=${Date.now()}`),
+    loadJson(`${CLOUD_BRIDGE_HEALTH_URL}?_=${Date.now()}`)
+  ]);
 
-  if (!prod.ok) {
-    console.log(`Could not read production status: ${prod.error}`);
-    process.exitCode = !IS_CI && missing.length ? 1 : 0;
-    return;
+  if (!prodStatus.ok) {
+    console.log(`Could not read production status: ${prodStatus.error}`);
+  } else {
+    const status = prodStatus.body?.status || {};
+    console.log("Production status:");
+    console.log(`- dispatchMode: ${status.dispatchMode || "unknown"}`);
+    console.log(`- executorLabel: ${status.executorLabel || "unknown"}`);
+    console.log(`- bridgeOnline: ${status.bridgeOnline ? "true" : "false"}`);
+    console.log(`- state: ${status.state || "unknown"}`);
+    console.log(`- lastError: ${status.lastError || "none"}`);
+
+    if (String(status.dispatchMode || "").trim() === "slack-codex-cloud") {
+      console.log("- warning: production is still reporting legacy slack-codex-cloud, not trusted cloud.");
+      process.exitCode = 1;
+    }
   }
 
-  const status = prod.status || {};
-  console.log("Production status:");
-  console.log(`- dispatchMode: ${status.dispatchMode || "unknown"}`);
-  console.log(`- executorLabel: ${status.executorLabel || "unknown"}`);
-  console.log(`- bridgeOnline: ${status.bridgeOnline ? "true" : "false"}`);
-  console.log(`- state: ${status.state || "unknown"}`);
-  console.log(`- lastError: ${status.lastError || "none"}`);
+  console.log("");
+
+  if (!bridgeHealth.ok) {
+    console.log(`Could not read private bridge health: ${bridgeHealth.error}`);
+  } else {
+    const health = bridgeHealth.body || {};
+    console.log("Private bridge health:");
+    console.log(`- ready: ${health.ready ? "true" : "false"}`);
+    console.log(`- busy: ${health.busy ? "true" : "false"}`);
+  }
 
   if (missing.length && !IS_CI) {
     process.exitCode = 1;
