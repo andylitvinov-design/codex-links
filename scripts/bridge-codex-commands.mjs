@@ -16,6 +16,7 @@ const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
 const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
+const STATUS_HEARTBEAT_MS = 10 * 1000;
 const LOG_DIR = `${process.env.HOME || ""}/Library/Logs`;
 const BRIDGE_LOG_PATH = `${LOG_DIR}/codex-links-bridge.log`;
 const BRIDGE_ERROR_LOG_PATH = `${LOG_DIR}/codex-links-bridge.error.log`;
@@ -35,6 +36,7 @@ const bridgeRunWatchdog = setTimeout(() => {
 }, BRIDGE_RUN_TIMEOUT_MS);
 
 bridgeRunWatchdog.unref();
+let lastBridgeHeartbeatAt = 0;
 
 async function appendBridgeErrorLog(context, error, extra = {}) {
   const message = error instanceof Error ? error.stack || error.message : String(error || "Unknown error");
@@ -47,9 +49,7 @@ async function appendBridgeErrorLog(context, error, extra = {}) {
 
   try {
     await writeFile(BRIDGE_ERROR_LOG_PATH, line, { flag: "a" });
-  } catch (writeError) {
-    console.error("Failed to write bridge error log", writeError instanceof Error ? writeError.message : String(writeError));
-  }
+  } catch {}
 }
 
 async function appendBridgeLog(path, level, message, meta = {}) {
@@ -61,29 +61,7 @@ async function appendBridgeLog(path, level, message, meta = {}) {
       message,
       ...meta
     })}\n`, "utf8");
-  } catch (writeError) {
-    console.error("Failed to write bridge log", writeError instanceof Error ? writeError.message : String(writeError));
-  }
-}
-
-async function logBridgeInfo(message, meta = {}) {
-  await appendBridgeLog(BRIDGE_LOG_PATH, "info", message, meta);
-}
-
-async function logBridgeError(message, error, meta = {}) {
-  const details = error instanceof Error
-    ? {
-        errorName: error.name,
-        errorMessage: error.message,
-        stack: error.stack
-      }
-    : {
-        errorMessage: String(error || "Unknown error")
-      };
-  await appendBridgeLog(BRIDGE_ERROR_LOG_PATH, "error", message, {
-    ...meta,
-    ...details
-  });
+  } catch {}
 }
 
 function getPendingUrl() {
@@ -147,66 +125,7 @@ function isRealThreadId(value) {
   return /^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(String(value || "").trim());
 }
 
-function normalizeThreadLookupValue(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-let cachedStoredThreadsPromise = null;
-
-async function fetchStoredThreads() {
-  if (!cachedStoredThreadsPromise) {
-    cachedStoredThreadsPromise = (async () => {
-      try {
-        const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/api/threads`, {
-          headers: {
-            accept: "application/json"
-          }
-        }, FETCH_TIMEOUT_MS, "fetchStoredThreads");
-
-        if (!response.ok) {
-          throw new Error(`Failed to load stored threads: ${response.status}`);
-        }
-
-        const data = await response.json().catch(() => ({}));
-        return Array.isArray(data?.threads) ? data.threads : [];
-      } catch {
-        return [];
-      }
-    })();
-  }
-
-  return cachedStoredThreadsPromise;
-}
-
-async function findStoredProjectThreadId(command) {
-  const projectId = normalizeThreadLookupValue(command?.projectId || command?.threadId);
-  const projectLabel = normalizeThreadLookupValue(command?.projectLabel || command?.threadLabel);
-
-  if (!projectId && !projectLabel) {
-    return "";
-  }
-
-  const threads = await fetchStoredThreads();
-  const candidates = threads
-    .filter((thread) => isRealThreadId(thread?.id))
-    .filter((thread) => {
-      const category = normalizeThreadLookupValue(thread?.category);
-      const displayLabel = normalizeThreadLookupValue(thread?.displayLabel);
-      const label = normalizeThreadLookupValue(thread?.label);
-
-      return (
-        (projectId && (category === projectId || displayLabel.startsWith(`${projectId} /`) || label === projectId))
-        || (projectLabel && (category === projectLabel || displayLabel.startsWith(`${projectLabel} /`) || label === projectLabel))
-      );
-    })
-    .sort((left, right) =>
-      Number(right?.updatedAt || right?.createdAt || 0) - Number(left?.updatedAt || left?.createdAt || 0)
-    );
-
-  return String(candidates[0]?.id || "").trim();
-}
-
-async function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
+function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
   const sourceThreadId = String(command?.threadId || "").trim();
   const sourceThreadLabel = String(command?.threadLabel || "").trim();
   const fallbackThreadId = String(command?.fallbackThreadId || "").trim();
@@ -225,8 +144,6 @@ async function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
       || threadLabel.toLowerCase() === "links"
     ) {
       threadId = legacyLinksThreadId || "";
-    } else {
-      threadId = await findStoredProjectThreadId(command);
     }
   }
 
@@ -319,9 +236,7 @@ async function getLegacyLinksThreadId() {
     if (match?.[1]) {
       return match[1];
     }
-  } catch (error) {
-    await appendBridgeErrorLog("getLegacyLinksThreadId.readAutomationToml", error);
-  }
+  } catch {}
 
   try {
     return await withCodexAppServer(async ({ request }) => {
@@ -395,18 +310,64 @@ async function materializePhoto(command) {
   await mkdir(dir, { recursive: true });
   await writeFile(sourcePath, Buffer.from(base64, "base64"));
 
-  if (canPassImageDirectly(contentType)) {
-    return sourcePath;
-  }
-
   const convertedPath = join(dir, `${command.id}.jpg`);
 
   try {
-    await execFileAsync("sips", ["-s", "format", "jpeg", sourcePath, "--out", convertedPath]);
+    await execFileAsync("sips", ["-s", "format", "jpeg", "-Z", "1800", sourcePath, "--out", convertedPath]);
     return convertedPath;
   } catch (error) {
+    if (canPassImageDirectly(contentType)) {
+      return sourcePath;
+    }
     throw new Error(`Unsupported photo format ${contentType}: ${error.message}`);
   }
+}
+
+function isPhotoInspectionOnlyRequest(command) {
+  if (!command?.photo) {
+    return false;
+  }
+
+  const text = sanitizeBridgeText(command?.text).toLowerCase();
+
+  if (!text) {
+    return true;
+  }
+
+  const mutationHints = [
+    "исправ",
+    "fix",
+    "сделай",
+    "сделать",
+    "перенеси",
+    "добавь",
+    "update",
+    "deploy",
+    "commit",
+    "pr",
+    "код",
+    "code",
+    "repo",
+    "branch"
+  ];
+
+  if (mutationHints.some((hint) => text.includes(hint))) {
+    return false;
+  }
+
+  const visionHints = [
+    "что на фото",
+    "прочти фото",
+    "кнопка",
+    "what color",
+    "read the image",
+    "what is in the image",
+    "reset",
+    "photo",
+    "screenshot"
+  ];
+
+  return visionHints.some((hint) => text.includes(hint));
 }
 
 function isPhotoVisibilityFailure(text) {
@@ -498,6 +459,28 @@ async function extractPhotoOcrText(commandId, photoPath) {
   }
 }
 
+function buildInput(command, photoPath, ocrText = "") {
+  const items = [];
+  const text = buildBridgePrompt(command, ocrText);
+
+  if (text) {
+    items.push({
+      type: "text",
+      text,
+      text_elements: []
+    });
+  }
+
+  if (photoPath) {
+    items.push({
+      type: "local_image",
+      path: photoPath
+    });
+  }
+
+  return items;
+}
+
 function buildBridgeContextFilePaths(command) {
   const workspacePath = String(command?.targetWorkspacePath || "").trim();
   const contextFiles = Array.isArray(command?.targetContextFiles)
@@ -509,6 +492,24 @@ function buildBridgeContextFilePaths(command) {
   }
 
   return contextFiles.map((file) => join(workspacePath, file));
+}
+
+function sanitizeBridgeText(rawText) {
+  const text = String(rawText || "").replace(/\r/g, "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  if (/(^|\n)(Codex|Вы)\n\d{1,2}\s.+?\n/s.test(text) && /Ответ Codex/.test(text)) {
+    const parts = text.split(/\nВы\n\d{1,2}\s.+?\n/g).map((entry) => entry.trim()).filter(Boolean);
+
+    if (parts.length) {
+      return parts.at(-1) || "";
+    }
+  }
+
+  return text;
 }
 
 function buildBridgePrompt(command, ocrText = "") {
@@ -523,23 +524,17 @@ function buildBridgePrompt(command, ocrText = "") {
   const contextLine = contextFilePaths.length
     ? `Start by reading these project context files in order: ${contextFilePaths.join(" -> ")}.`
     : "Start by reading the selected project context files first.";
-  if (command?.photo) {
+  if (isPhotoInspectionOnlyRequest(command)) {
     return [
-      "Codex Links photo task.",
-      `Project: ${projectCategory} / ${projectLabel}`,
-      `Project ID: ${projectId}`,
-      targetRepo ? `Repository: ${targetRepo}` : "",
-      targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
-      workspacePath ? `Workspace path: ${workspacePath}` : "",
-      `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
-      `Command ID: ${String(command?.id || "").trim()}`,
-      "Inspect the attached image first.",
+      "Codex Links fast photo task.",
+      "Inspect only the attached image.",
+      "Do not inspect repository files or code for this task.",
       "Answer from visible evidence in the image only.",
       ocrText
         ? "OCR helper text is included below. Use it only as a hint and verify it against the visible image."
         : "",
       "Start with one short sentence beginning with 'Observed:' that describes the key visible UI element or text.",
-      "Then answer the user's question in Russian in at most 4 short sentences.",
+      "Then answer the user's question in Russian in at most 3 short sentences.",
       "Only say the image is missing or unreadable if it is truly not visible to you.",
       ocrText ? "" : "",
       ocrText ? "OCR hint:" : "",
@@ -567,6 +562,12 @@ function buildBridgePrompt(command, ocrText = "") {
     command?.photo
       ? "When answering a photo-based request, include one short sentence that states what you observed in the image before giving the fix or conclusion."
       : "",
+    ocrText
+      ? "OCR hint from the attached image is included below. Treat it as noisy helper text, not ground truth."
+      : "",
+    ocrText ? "" : "",
+    ocrText ? "OCR hint:" : "",
+    ocrText || "",
     "",
     "User request:",
     userRequest || "User sent a photo-only request."
@@ -617,46 +618,6 @@ function buildPhotoOnlyPrompt(command, ocrText = "") {
   ].join("\n");
 }
 
-function buildInput(command, photoPath, ocrText = "") {
-  const items = [];
-  const text = buildBridgePrompt(command, ocrText);
-
-  if (text) {
-    items.push({
-      type: "text",
-      text,
-      text_elements: []
-    });
-  }
-
-  if (photoPath) {
-    items.push({
-      type: "local_image",
-      path: photoPath
-    });
-  }
-
-  return items;
-}
-
-function sanitizeBridgeText(rawText) {
-  const text = String(rawText || "").replace(/\r/g, "").trim();
-
-  if (!text) {
-    return "";
-  }
-
-  if (/(^|\n)(Codex|Вы)\n\d{1,2}\s.+?\n/s.test(text) && /Ответ Codex/.test(text)) {
-    const parts = text.split(/\nВы\n\d{1,2}\s.+?\n/g).map((entry) => entry.trim()).filter(Boolean);
-
-    if (parts.length) {
-      return parts.at(-1) || "";
-    }
-  }
-
-  return text;
-}
-
 function runCodexResume(threadId, prompt, photoPath) {
   const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
   return new Promise((resolve, reject) => {
@@ -681,8 +642,7 @@ function runCodexResume(threadId, prompt, photoPath) {
     execFile(codexBin, args, {
       cwd: process.cwd(),
       timeout: EXEC_TIMEOUT_MS,
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"]
+      maxBuffer: 10 * 1024 * 1024
     }, async (error, stdout, stderr) => {
       const result = {
         stdout: String(stdout || "").trim(),
@@ -692,9 +652,7 @@ function runCodexResume(threadId, prompt, photoPath) {
 
       try {
         result.output = String(await readFile(outputPath, "utf8") || "").trim();
-      } catch (error) {
-        await appendBridgeErrorLog("runCodexResume.readOutput", error, { outputPath });
-      }
+      } catch {}
 
       if (error) {
         reject(new Error(result.stderr || result.stdout || error.message));
@@ -733,8 +691,7 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_
     execFile(codexBin, args, {
       cwd: cwd || process.cwd(),
       timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"]
+      maxBuffer: 10 * 1024 * 1024
     }, async (error, stdout, stderr) => {
       const result = {
         stdout: String(stdout || "").trim(),
@@ -879,6 +836,8 @@ async function updateProgress(commandId, progressStage, extras = {}) {
     const body = await response.text();
     throw new Error(`Failed to update command progress: ${response.status} ${body}`);
   }
+
+  await publishBridgeHeartbeat("running");
 }
 
 async function acknowledge(ids) {
@@ -904,6 +863,11 @@ async function acknowledge(ids) {
   }
 }
 
+function extractPrUrl(text) {
+  const match = String(text || "").match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/i);
+  return match ? match[0] : "";
+}
+
 async function markAnswered(commandId, assistantText, completedAt) {
   if (!commandId) {
     return;
@@ -921,7 +885,7 @@ async function markAnswered(commandId, assistantText, completedAt) {
       progressStage: "answered",
       completedAt,
       actualDispatchMode: "bridge",
-      resultAt: completedAt
+      prUrl: extractPrUrl(assistantText)
     })
   }, FETCH_TIMEOUT_MS, "markAnswered");
 
@@ -948,8 +912,7 @@ async function markFailed(commandId, errorMessage, completedAt) {
       progressStage: "failed",
       completedAt,
       actualDispatchMode: "bridge",
-      errorMessage,
-      resultAt: completedAt
+      errorMessage
     })
   }, FETCH_TIMEOUT_MS, "markFailed");
 
@@ -979,6 +942,32 @@ async function syncMessages(messages) {
   }
 }
 
+async function syncMessagesBestEffort(messages) {
+  if (!messages.length) {
+    return;
+  }
+
+  try {
+    await syncMessages(messages);
+    return;
+  } catch (error) {
+    await appendBridgeErrorLog("syncMessages.batchFailed", error, {
+      messageCount: messages.length
+    });
+  }
+
+  for (const message of messages) {
+    try {
+      await syncMessages([message]);
+    } catch (error) {
+      await appendBridgeErrorLog("syncMessages.singleFailed", error, {
+        messageId: String(message?.id || "").trim(),
+        commandId: String(message?.commandId || "").trim()
+      });
+    }
+  }
+}
+
 async function publishBridgeStatus(status) {
   const response = await fetchWithRetry(getStatusUrl(), {
     method: "POST",
@@ -993,6 +982,21 @@ async function publishBridgeStatus(status) {
     const body = await response.text();
     throw new Error(`Failed to publish bridge status: ${response.status} ${body}`);
   }
+}
+
+async function publishBridgeHeartbeat(state = "running", force = false) {
+  const now = Date.now();
+
+  if (!force && (now - lastBridgeHeartbeatAt) < STATUS_HEARTBEAT_MS) {
+    return;
+  }
+
+  lastBridgeHeartbeatAt = now;
+  await publishBridgeStatus({
+    bridgeOnline: true,
+    state,
+    lastRunAt: new Date(now).toISOString()
+  });
 }
 
 function createMessageId(threadId, timestamp, text) {
@@ -1159,10 +1163,12 @@ async function getThreadFallbackAssistantText(command, threadId) {
 }
 
 function createAssistantMessage(command, threadId, threadLabel, text, createdAt = new Date().toISOString()) {
+  const commandId = String(command?.id || "").trim();
+
   return {
-    id: `assistant-${command.id}`,
+    id: commandId ? `assistant:${commandId}` : createMessageId(threadId, createdAt, text),
     clientId: command.clientId,
-    commandId: command.id,
+    commandId,
     threadId,
     threadLabel,
     role: "assistant",
@@ -1199,25 +1205,19 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
   }
 
   for (const command of batchCompleted) {
-    const message = batchMessages.find((entry) => entry.commandId === command.id) || null;
-
     if (command.result === "failed") {
-      try {
-        if (message) {
-          await syncMessages([message]);
-        }
-      } finally {
-        await markFailed(command.id, command.errorMessage, command.completedAt);
-      }
+      await markFailed(command.id, command.errorMessage, command.completedAt);
       continue;
-    }
-
-    if (message) {
-      await syncMessages([message]);
     }
 
     await markAnswered(command.id, command.assistantText, command.completedAt);
   }
+
+  if (!batchMessages.length) {
+    return;
+  }
+
+  await syncMessagesBestEffort(batchMessages);
 }
 
 const legacyLinksThreadId = await getLegacyLinksThreadId();
@@ -1232,11 +1232,14 @@ await publishBridgeStatus({
   lastDeliveredCount: 0,
   lastError: ""
 });
+lastBridgeHeartbeatAt = Date.now();
 
 while (true) {
   const command = await claimNextCommand();
 
   if (!command) {
+    await publishBridgeHeartbeat("running");
+
     if (Date.now() >= idleDrainUntil) {
       break;
     }
@@ -1260,7 +1263,7 @@ while (true) {
       executionThreadId,
       sourceThreadId,
       sourceThreadLabel
-    } = await getResolvedExecutionThread(command, legacyLinksThreadId);
+    } = getResolvedExecutionThread(command, legacyLinksThreadId);
     let threadId = executionThreadId;
 
     if (!threadId) {
@@ -1298,11 +1301,17 @@ while (true) {
 
     try {
       if (photoPath) {
+        const fastPhotoInspection = isPhotoInspectionOnlyRequest(command);
+        const photoCwd = fastPhotoInspection
+          ? process.cwd()
+          : (String(command?.targetWorkspacePath || "").trim() || process.cwd());
+        const photoTimeoutMs = fastPhotoInspection ? 90_000 : EXEC_TIMEOUT_MS;
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           runCodexExecEphemeral(
             prompt || "See attached image and respond.",
             photoPath,
-            String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            photoCwd,
+            photoTimeoutMs
           )
         );
         assistantText = getImmediateAssistantText(result, prompt);
@@ -1315,7 +1324,8 @@ while (true) {
             runCodexExecEphemeral(
               retryPrompt,
               retryPhotoPath || photoPath,
-              String(command?.targetWorkspacePath || "").trim() || process.cwd()
+              photoCwd,
+              photoTimeoutMs
             )
           );
           assistantText = getImmediateAssistantText(retryResult, retryPrompt) || assistantText;
@@ -1340,7 +1350,10 @@ while (true) {
           runCodexExecEphemeral(
             buildPhotoRetryPrompt(command, photoOcrText),
             retryPhotoPath || photoPath,
-            String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            isPhotoInspectionOnlyRequest(command)
+              ? process.cwd()
+              : (String(command?.targetWorkspacePath || "").trim() || process.cwd()),
+            isPhotoInspectionOnlyRequest(command) ? 90_000 : EXEC_TIMEOUT_MS
           )
         );
         assistantText = getImmediateAssistantText(result, buildPhotoRetryPrompt(command, photoOcrText));
@@ -1359,9 +1372,12 @@ while (true) {
       const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
       const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
         runCodexExecEphemeral(
-          buildPhotoOnlyPrompt(command, photoOcrText),
-          retryPhotoPath || photoPath,
-          String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            buildPhotoOnlyPrompt(command, photoOcrText),
+            retryPhotoPath || photoPath,
+            isPhotoInspectionOnlyRequest(command)
+              ? process.cwd()
+            : (String(command?.targetWorkspacePath || "").trim() || process.cwd()),
+          isPhotoInspectionOnlyRequest(command) ? 90_000 : EXEC_TIMEOUT_MS
         )
       );
       assistantText = getImmediateAssistantText(result);
@@ -1390,7 +1406,11 @@ while (true) {
     }
 
     if (!assistantText) {
-      assistantText = "Codex принял команду, но не вернул текст ответа. Я остановил запрос, чтобы очередь не зависала. Повторите запрос ещё раз.";
+      throw new Error(
+        photoPath
+          ? "Bridge photo executor did not return a final answer text."
+          : "Codex did not return a final answer text."
+      );
     }
 
     await updateProgress(command.id, "saving-reply");
@@ -1431,22 +1451,14 @@ while (true) {
     }
 
     const ackedAt = new Date().toISOString();
-    const threadId = (await getResolvedExecutionThread(command, legacyLinksThreadId)).executionThreadId
-      || String(command?.threadId || "").trim()
-      || legacyLinksThreadId
-      || "";
+    const threadId = String(command?.threadId || "").trim() || legacyLinksThreadId || "";
     const threadLabel = String(command?.threadLabel || "").trim() || threadId;
     let assistantText = "";
 
     if (threadId) {
       try {
         assistantText = await getThreadFallbackAssistantText(command, threadId);
-      } catch (error) {
-        await appendBridgeErrorLog("bridgeCommandFailure.threadFallback", error, {
-          commandId: command?.id || "",
-          threadId
-        });
-      }
+      } catch {}
     }
 
     const completedEntry = {
