@@ -144,7 +144,6 @@ function formatSlackUploadDiagnostic(method, body, error) {
     detail: `${methodName} failed: ${reason}${argKeys ? ` [args=${argKeys}]` : ""}`
   };
 }
-
 function decodeSlackDataUrl(dataUrl) {
   const value = normalizeText(dataUrl);
   const match = value.match(/^data:([^;,]+)?;base64,(.+)$/i);
