@@ -5,6 +5,15 @@ export const DISPATCH_MODE_SLACK = LEGACY_DISPATCH_MODE_SLACK;
 export const CONFIG_DISPATCH_MODE_SLACK = "cloud-via-slack";
 export const CONFIG_DISPATCH_MODE_DIRECT = "direct-openai";
 
+function isLegacyCloudConfigMode(rawMode) {
+  const mode = String(rawMode || "").trim().toLowerCase();
+  return mode === DISPATCH_MODE_SLACK
+    || mode === LEGACY_DISPATCH_MODE_SLACK
+    || mode === CONFIG_DISPATCH_MODE_SLACK
+    || mode === CONFIG_DISPATCH_MODE_DIRECT
+    || mode === DISPATCH_MODE_CLOUD;
+}
+
 function hasTrustedCloudBridgeBaseUrl(env) {
   return Boolean(String(env?.CLOUD_BRIDGE_BASE_URL || "").trim());
 }
@@ -45,9 +54,10 @@ export function isSlackInboundConfigured(env) {
 
 export function getConfiguredDispatchMode(env) {
   const explicit = normalizeDispatchMode(env?.COMMAND_DISPATCH_MODE);
+  const explicitRaw = String(env?.COMMAND_DISPATCH_MODE || "").trim();
 
-  if (String(env?.COMMAND_DISPATCH_MODE || "").trim()) {
-    if (explicit === DISPATCH_MODE_CLOUD) {
+  if (explicitRaw) {
+    if (isLegacyCloudConfigMode(explicitRaw)) {
       return isCloudDispatchConfigured(env) ? DISPATCH_MODE_CLOUD : DISPATCH_MODE_LOCAL;
     }
 

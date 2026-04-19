@@ -1742,6 +1742,27 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
     return command;
   }
 
+  if (!String(command.cloudJobId || "").trim() && !String(command.firstAckAt || "").trim()) {
+    const unackedSince = command.progressUpdatedAt || command.dispatchedAt || command.createdAt;
+
+    if (!isOlderThan(unackedSince, CLOUD_FIRST_ACK_TIMEOUT_MS)) {
+      return command;
+    }
+
+    return createFailedMaintenanceState(command, nowIso, {
+      timeoutPhase: "claim-timeout",
+      lastDiagnosticCode: "cloud_bridge_dispatch_unacked",
+      lastDiagnosticDetail: "Trusted cloud bridge did not acknowledge the job before the cloud first-ack timeout.",
+      actualExecutor: "cloud",
+      errorMessage: stringifyCommandError({
+        code: "cloud_bridge_dispatch_unacked",
+        stage: "cloud-ack-timeout",
+        message: "Trusted cloud bridge did not acknowledge the job in time.",
+        detail: "The command never received a trusted cloud bridge job id or first executor acknowledgement."
+      })
+    });
+  }
+
   const staleSince = command.progressUpdatedAt || command.dispatchedAt || command.createdAt;
 
   if (!isOlderThan(staleSince, CLOUD_RESULT_TIMEOUT_MS)) {

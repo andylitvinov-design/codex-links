@@ -123,6 +123,13 @@ async function main() {
     console.log(`- bridgeOnline: ${status.bridgeOnline ? "true" : "false"}`);
     console.log(`- state: ${status.state || "unknown"}`);
     console.log(`- lastError: ${status.lastError || "none"}`);
+
+    if (String(status.dispatchMode || "").trim() === "slack-codex-cloud") {
+      console.log("- warning: production is still reporting legacy slack-codex-cloud, not trusted cloud.");
+      if (!IS_CI) {
+        process.exitCode = 1;
+      }
+    }
   }
 
   console.log("");

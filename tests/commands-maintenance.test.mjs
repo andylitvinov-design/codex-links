@@ -44,7 +44,9 @@ test("runCommandMaintenance marks stale cloud commands as failed", async () => {
     actualExecutor: "cloud",
     status: "processing",
     progressStage: "processing",
-    fallbackCount: 1
+    fallbackCount: 1,
+    cloudJobId: "job-cloud-timeout",
+    firstAckAt: staleIso
   }]);
 
   const result = await runCommandMaintenance(env, {
@@ -85,6 +87,8 @@ test("runCommandMaintenance preserves compat mode markers on stale cloud photo f
     status: "processing",
     progressStage: "processing",
     fallbackCount: 1,
+    cloudJobId: "job-cloud-photo-timeout",
+    firstAckAt: staleIso,
     mode: "compat",
     cloudInputUnverified: true,
     photoAttached: true
@@ -208,4 +212,40 @@ test("runCommandMaintenance keeps fresh cloud commands active", async () => {
   assert.equal(updated.dispatchMode, "cloud");
   assert.equal(updated.status, "processing");
   assert.equal(updated.progressStage, "running");
+});
+
+test("runCommandMaintenance fails unacked cloud commands instead of treating them as in-flight", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - 10_000).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-cloud-unacked",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "cloud dispatch stuck before ack",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchedAt: staleIso,
+    dispatchMode: "cloud",
+    requestedExecutor: "cloud",
+    actualExecutor: "cloud",
+    status: "dispatched",
+    progressStage: "waiting",
+    fallbackCount: 0,
+    cloudJobId: "",
+    firstAckAt: ""
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: false,
+    preferCloud: false
+  });
+
+  assert.equal(result.changed, true);
+  const updated = result.commands.find((command) => command.id === "cmd-cloud-unacked");
+  assert.ok(updated);
+  assert.equal(updated.status, "failed");
+  assert.equal(updated.timeoutPhase, "claim-timeout");
+  assert.equal(updated.lastDiagnosticCode, "cloud_bridge_dispatch_unacked");
 });

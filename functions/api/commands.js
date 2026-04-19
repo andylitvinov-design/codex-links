@@ -693,6 +693,15 @@ async function executeTrustedCloudCommand(env, command, runtimeConfig) {
     });
   }
 
+  if (!String(brokered.jobId || "").trim()) {
+    return markCloudCommandFailed(env, latest, {
+      code: "cloud_bridge_invalid_ack",
+      stage: "cloud-bridge-invalid-ack",
+      message: "Trusted cloud bridge accepted the job without a job id.",
+      detail: "The trusted cloud bridge response was missing jobId, so the command cannot be tracked safely."
+    });
+  }
+
   const acceptedAt = brokered.acceptedAt || new Date().toISOString();
   const accepted = await upsertCommandDispatchState(env, {
     id: latest.id,

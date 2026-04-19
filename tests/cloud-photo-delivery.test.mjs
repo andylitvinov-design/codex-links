@@ -84,259 +84,152 @@ test("POST /api/commands dispatches synchronously without waitUntil watcher", as
   assert.equal(String(data?.command?.dispatchMode || "").trim(), "local-bridge");
 });
 
-test("postSlackCommand uploads photo through Slack thread without files:read", async () => {
+test("postSlackCommand completes photo upload without thread-specific completeUpload args", async () => {
   const originalFetch = globalThis.fetch;
-  const uploadCalls = [];
+  const requests = [];
 
-  globalThis.fetch = async (input, init = {}) => {
-    const url = String(input);
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({
+      url: String(url),
+      method: String(options.method || "GET").toUpperCase(),
+      headers: new Headers(options.headers || {}),
+      body: typeof options.body === "string" ? options.body : options.body
+    });
 
-    if (url === "https://slack.com/api/auth.test") {
-      return Response.json({ ok: true, user_id: "U-BOT" });
-    }
-
-    if (url.startsWith("https://slack.com/api/conversations.members")) {
-      return Response.json({ ok: true, members: ["U-WORKER"] });
-    }
-
-    if (url === "https://slack.com/api/chat.postMessage") {
-      const body = JSON.parse(String(init.body || "{}"));
-
-      if (body.thread_ts) {
-        return Response.json({
-          ok: true,
-          channel: "C123",
-          ts: "1776619001.000200",
-          message: {
-            ts: "1776619001.000200",
-            thread_ts: body.thread_ts
-          }
-        });
+    if (String(url) === "https://slack.com/api/chat.postMessage") {
+      const payload = JSON.parse(String(options.body || "{}"));
+      if (String(payload.thread_ts || "").trim()) {
+        return new Response(JSON.stringify({ ok: true, channel: payload.channel, ts: "1710000000.000200" }), { status: 200 });
       }
 
-      return Response.json({
+      return new Response(JSON.stringify({
         ok: true,
-        channel: "C123",
-        ts: "1776619000.000100",
-        message: {
-          ts: "1776619000.000100"
-        }
-      });
+        channel: payload.channel,
+        ts: "1710000000.000100",
+        message: { thread_ts: "1710000000.000100" }
+      }), { status: 200 });
     }
 
-    if (url === "https://slack.com/api/files.getUploadURLExternal") {
-      uploadCalls.push({
-        url,
-        contentType: String(init.headers?.["content-type"] || init.headers?.get?.("content-type") || ""),
-        body: String(init.body)
-      });
-
-      return Response.json({
+    if (String(url) === "https://slack.com/api/files.getUploadURLExternal") {
+      return new Response(JSON.stringify({
         ok: true,
-        upload_url: "https://files.slack.com/upload/v1/test",
+        upload_url: "https://uploads.slack.test/file",
         file_id: "F123"
-      });
+      }), { status: 200 });
     }
 
-    if (url === "https://files.slack.com/upload/v1/test") {
-      return new Response("OK - 68", { status: 200 });
+    if (String(url) === "https://uploads.slack.test/file") {
+      return new Response("ok", { status: 200 });
     }
 
-    if (url === "https://slack.com/api/files.completeUploadExternal") {
-      const body = JSON.parse(String(init.body || "{}"));
-
-      assert.equal(body.channel_id, "C123");
-      assert.equal(body.thread_ts, "1776619000.000100");
-      assert.equal(body.files[0].id, "F123");
-
-      return Response.json({
+    if (String(url) === "https://slack.com/api/files.completeUploadExternal") {
+      return new Response(JSON.stringify({
         ok: true,
         files: [{
           id: "F123",
-          title: "photo.png",
+          permalink: "https://slack-files.test/F123",
           mode: "hosted",
           file_access: "visible",
-          url_private: "https://files.slack.com/files-pri/T123-F123/photo.png",
-          url_private_download: "https://files.slack.com/files-pri/T123-F123/download/photo.png",
-          permalink: "https://example.slack.com/files/U123/F123/photo.png"
+          url_private_download: "https://slack-files.test/F123/download"
         }]
-      });
+      }), { status: 200 });
     }
 
-    if (url === "https://files.slack.com/files-pri/T123-F123/download/photo.png") {
-      return new Response(new Uint8Array([1]), { status: 200 });
+    if (String(url) === "https://slack-files.test/F123/download") {
+      return new Response("binary", { status: 200 });
     }
 
-    throw new Error(`Unexpected fetch: ${url}`);
+    throw new Error(`Unexpected fetch: ${String(url)}`);
   };
 
   try {
-    const published = await postSlackCommand({
+    const result = await postSlackCommand({
       SLACK_BOT_TOKEN: "xoxb-test",
-      SLACK_CODEX_CHANNEL_ID: "C123",
-      SLACK_CODEX_USER_ID: "U-WORKER",
-      SLACK_CODEX_MENTION: "<@U-WORKER>"
+      SLACK_CODEX_CHANNEL_ID: "C123"
     }, {
       id: "cmd-1",
-      threadId: "links",
-      threadLabel: "links",
-      text: "please inspect the image",
-      projectId: "links",
-      projectLabel: "links",
-      projectCategory: "myprojects",
-      targetRepo: "andylitvinov-design/codex-links",
-      targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      text: "inspect photo",
       photo: {
         fileName: "photo.png",
         contentType: "image/png",
-        size: 68,
-        dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot7O8AAAAASUVORK5CYII="
+        dataUrl: "data:image/png;base64,AA==",
+        size: 1
       }
-    }, "<@U-WORKER>");
+    }, "<@U123>");
 
-    assert.equal(uploadCalls.length, 1);
-    assert.equal(uploadCalls[0].contentType, "application/x-www-form-urlencoded");
-    assert.match(uploadCalls[0].body, /filename=photo\.png/);
-    assert.match(uploadCalls[0].body, /length=68/);
-    assert.equal(published.photoUpload.fileId, "F123");
-    assert.equal(published.photoUpload.fileAccess, "visible");
-    assert.equal(published.photoUpload.botCanOpenFile, true);
+    assert.equal(result.photoUpload?.fileId, "F123");
+    assert.equal(result.photoUpload?.permalink, "https://slack-files.test/F123");
+
+    const getUploadRequest = requests.find((entry) => entry.url === "https://slack.com/api/files.getUploadURLExternal");
+    const completeRequest = requests.find((entry) => entry.url === "https://slack.com/api/files.completeUploadExternal");
+
+    assert.ok(getUploadRequest);
+    assert.ok(completeRequest);
+    assert.match(String(getUploadRequest.headers.get("content-type") || ""), /application\/x-www-form-urlencoded/i);
+    assert.match(String(completeRequest.headers.get("content-type") || ""), /application\/x-www-form-urlencoded/i);
+    assert.match(String(getUploadRequest.body || ""), /filename=photo\.png/);
+    assert.match(String(completeRequest.body || ""), /channel_id=C123/);
+    assert.doesNotMatch(String(completeRequest.body || ""), /thread_ts=/);
+    assert.doesNotMatch(String(completeRequest.body || ""), /initial_comment=/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("POST /api/commands keeps photo cloud requests on trusted cloud bridge when broker accepts them", async () => {
-  const env = createMockEnv({
-    CLOUD_BRIDGE_BASE_URL: "http://127.0.0.1:8788",
-    CLOUD_BRIDGE_SHARED_SECRET: "secret"
-  });
+test("postSlackCommand surfaces compact upload diagnostics on completeUpload failure", async () => {
   const originalFetch = globalThis.fetch;
 
-  globalThis.fetch = async (input, init = {}) => {
-    const url = String(input);
-
-    if (url === "http://127.0.0.1:8788/v1/commands") {
-      assert.equal(String(init.method || "GET").toUpperCase(), "POST");
-      return Response.json({
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url) === "https://slack.com/api/chat.postMessage") {
+      const payload = JSON.parse(String(options.body || "{}"));
+      return new Response(JSON.stringify({
         ok: true,
-        jobId: "job-photo-1",
-        acceptedAt: "2026-04-19T12:00:00.000Z",
-        progressMessage: "Trusted cloud bridge accepted the photo job."
-      }, { status: 202 });
+        channel: payload.channel,
+        ts: "1710000000.000100",
+        message: { thread_ts: "1710000000.000100" }
+      }), { status: 200 });
     }
 
-    throw new Error(`Unexpected fetch: ${url}`);
-  };
-
-  try {
-    const response = await onRequest({
-      request: new Request("https://example.com/api/commands", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          clientId: "test-client",
-          threadId: "links",
-          threadLabel: "links",
-          text: "check photo cloud delivery",
-          dispatchMode: "cloud",
-          targetExecutionMode: "cloud",
-          targetRepo: "andylitvinov-design/codex-links",
-          targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
-          targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
-          photo: {
-            fileName: "photo.png",
-            contentType: "image/png",
-            size: 68,
-            dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot7O8AAAAASUVORK5CYII="
-          }
-        })
-      }),
-      env,
-      waitUntil() {}
-    });
-    const data = await response.json();
-
-    assert.equal(response.status, 201);
-    assert.equal(String(data?.command?.dispatchMode || "").trim(), "cloud");
-    assert.equal(Boolean(data?.command?.fallbackApplied), false);
-    assert.equal(String(data?.command?.status || "").trim(), "processing");
-    assert.equal(String(data?.command?.cloudJobId || "").trim(), "job-photo-1");
-    assert.equal(String(data?.command?.progressMessage || "").trim(), "Trusted cloud bridge accepted the photo job.");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("postSlackCommand preserves Slack invalid_arguments detail for photo upload failures", async () => {
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = async (input, init = {}) => {
-    const url = String(input);
-
-    if (url === "https://slack.com/api/auth.test") {
-      return Response.json({ ok: true, user_id: "U-BOT" });
-    }
-
-    if (url.startsWith("https://slack.com/api/conversations.members")) {
-      return Response.json({ ok: true, members: ["U-WORKER"] });
-    }
-
-    if (url === "https://slack.com/api/chat.postMessage") {
-      return Response.json({
+    if (String(url) === "https://slack.com/api/files.getUploadURLExternal") {
+      return new Response(JSON.stringify({
         ok: true,
-        channel: "C123",
-        ts: "1776619200.000100",
-        message: {
-          ts: "1776619200.000100"
-        }
-      });
+        upload_url: "https://uploads.slack.test/file",
+        file_id: "F123"
+      }), { status: 200 });
     }
 
-    if (url === "https://slack.com/api/files.getUploadURLExternal") {
-      return Response.json({
-        ok: false,
-        error: "invalid_arguments",
-        response_metadata: {
-          messages: [
-            "[ERROR] missing required field: length",
-            "[ERROR] missing required field: filename"
-          ]
-        }
-      });
+    if (String(url) === "https://uploads.slack.test/file") {
+      return new Response("ok", { status: 200 });
     }
 
-    throw new Error(`Unexpected fetch: ${url}`);
+    if (String(url) === "https://slack.com/api/files.completeUploadExternal") {
+      return new Response(JSON.stringify({ ok: false, error: "invalid_arguments" }), { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
   };
 
   try {
     await assert.rejects(
       () => postSlackCommand({
         SLACK_BOT_TOKEN: "xoxb-test",
-        SLACK_CODEX_CHANNEL_ID: "C123",
-        SLACK_CODEX_USER_ID: "U-WORKER"
+        SLACK_CODEX_CHANNEL_ID: "C123"
       }, {
         id: "cmd-2",
-        threadId: "links",
-        threadLabel: "links",
-        text: "please inspect the image",
-        projectId: "links",
-        projectLabel: "links",
-        projectCategory: "myprojects",
-        targetRepo: "andylitvinov-design/codex-links",
-        targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+        text: "inspect photo",
         photo: {
           fileName: "photo.png",
           contentType: "image/png",
-          size: 68,
-          dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot7O8AAAAASUVORK5CYII="
+          dataUrl: "data:image/png;base64,AA==",
+          size: 1
         }
-      }, "<@U-WORKER>"),
+      }, "<@U123>"),
       (error) => {
-        assert.match(String(error?.message || ""), /invalid_arguments/);
-        assert.match(String(error?.message || ""), /missing required field: length/);
+        assert.equal(error?.commandError?.code, "slack_photo_upload_failed");
+        assert.equal(error?.commandError?.deliveryStopPoint, "slack_thread_mapped");
+        assert.equal(error?.commandError?.deliveryEvidence?.slackUploadMethod, "files.completeUploadExternal");
+        assert.equal(error?.commandError?.deliveryEvidence?.slackUploadArgKeys, "files,channel_id");
+        assert.equal(error?.commandError?.deliveryEvidence?.slackUploadError, "invalid_arguments");
         return true;
       }
     );

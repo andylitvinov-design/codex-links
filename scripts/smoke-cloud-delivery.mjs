@@ -71,6 +71,11 @@ async function postCommand() {
   }
 
   assertManifestContext(data.command, "cloud create");
+
+  if (String(data.command.dispatchMode || "").trim() !== "cloud") {
+    throw new Error(`cloud create: expected dispatchMode=cloud, got ${String(data.command.dispatchMode || "").trim() || "empty"}.`);
+  }
+
   return data.command;
 }
 
@@ -87,8 +92,18 @@ async function pollCommand(id) {
     if (command) {
       assertManifestContext(command, "cloud poll");
       const status = String(command.status || "").trim().toLowerCase();
+      const dispatchMode = String(command.dispatchMode || "").trim();
+      const cloudJobId = String(command.cloudJobId || "").trim();
 
-      console.log(`status=${status || "unknown"} stage=${String(command.progressStage || "").trim() || "unknown"} cloudJobId=${String(command.cloudJobId || "").trim() || "none"}`);
+      console.log(`status=${status || "unknown"} stage=${String(command.progressStage || "").trim() || "unknown"} cloudJobId=${cloudJobId || "none"}`);
+
+      if (dispatchMode && dispatchMode !== "cloud") {
+        throw new Error(`Trusted cloud smoke was routed incorrectly: dispatchMode=${dispatchMode}.`);
+      }
+
+      if ((status === "processing" || status === "answered") && !cloudJobId) {
+        throw new Error("Trusted cloud smoke reached execution without a cloudJobId.");
+      }
 
       if (status === "answered") {
         return command;
@@ -126,6 +141,10 @@ async function main() {
   const answered = await pollCommand(created.id);
   const replies = await fetchAssistantReplies(answered.id);
   const textReply = String(replies.at(-1)?.text || "").trim();
+
+  if (!String(answered.cloudJobId || "").trim()) {
+    throw new Error("Trusted cloud smoke finished without a cloudJobId.");
+  }
 
   if (!/CLOUD_SMOKE_OK/i.test(textReply)) {
     throw new Error(`Unexpected assistant reply: ${textReply || "empty"}`);
