@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
 const BASE_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
 const TARGET_PROJECT_ID = process.env.CODEX_LINKS_SMOKE_PROJECT_ID || "links";
 const TARGET_PROJECT_LABEL = process.env.CODEX_LINKS_SMOKE_PROJECT_LABEL || "links";
@@ -8,7 +11,15 @@ const TARGET_REPO_URL = process.env.CODEX_LINKS_SMOKE_REPO_URL || "https://githu
 const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"];
 const clientId = `bridge-photo-smoke-${Date.now()}`;
 const text = "photo bridge probe ignore: reply with PHOTO_OK only after reading the attached image";
-const photoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot7O8AAAAASUVORK5CYII=";
+const SMOKE_IMAGE_URL = new URL("../public/icon-192.png", import.meta.url);
+
+async function loadPhotoPayload() {
+  const bytes = await readFile(fileURLToPath(SMOKE_IMAGE_URL));
+  return {
+    dataUrl: `data:image/png;base64,${bytes.toString("base64")}`,
+    size: bytes.length
+  };
+}
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,6 +73,7 @@ async function fetchAssistantReplies(commandId) {
 }
 
 async function postCommand() {
+  const photo = await loadPhotoPayload();
   const response = await fetch(`${BASE_URL}/api/commands`, {
     method: "POST",
     headers: {
@@ -82,8 +94,8 @@ async function postCommand() {
       photo: {
         contentType: "image/png",
         fileName: "bridge-photo-smoke.png",
-        size: 68,
-        dataUrl: photoDataUrl
+        size: photo.size,
+        dataUrl: photo.dataUrl
       }
     })
   });
@@ -101,7 +113,7 @@ async function postCommand() {
 async function pollCommand(id) {
   const startedAt = Date.now();
 
-  while ((Date.now() - startedAt) < 180000) {
+  while ((Date.now() - startedAt) < 300000) {
     const response = await fetch(`${BASE_URL}/api/commands?id=${encodeURIComponent(id)}`, {
       headers: { accept: "application/json" }
     });

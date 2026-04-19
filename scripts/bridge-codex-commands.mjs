@@ -11,6 +11,7 @@ const EXEC_TIMEOUT_MS = 4 * 60 * 1000;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const READ_TIMEOUT_MS = 15 * 1000;
 const WRITE_TIMEOUT_MS = 60 * 1000;
+const SNAPSHOT_TIMEOUT_MS = 3 * 1000;
 const BRIDGE_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
@@ -795,11 +796,11 @@ async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC
 }
 
 async function fetchRecentCommands() {
-  const response = await fetchWithRetry(getPendingUrl(), {
+  const response = await fetchWithTimeout(getPendingUrl(), {
     headers: {
       accept: "application/json"
     }
-  }, READ_TIMEOUT_MS, "fetchRecentCommands");
+  }, SNAPSHOT_TIMEOUT_MS);
 
   if (!response.ok) {
     throw new Error(`Failed to load pending commands: ${response.status}`);
