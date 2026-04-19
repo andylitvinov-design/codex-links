@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260419-0246";
+const BUILD_VERSION = "20260419-0515";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -262,6 +262,7 @@ const commandTimeline = document.querySelector("#command-timeline");
 const submitProgress = document.querySelector("#submit-progress");
 const threadSettingsToggle = document.querySelector("#thread-settings-toggle");
 const threadSettingsSummary = document.querySelector("#thread-settings-summary");
+const threadSettingsShowAllBadge = document.querySelector("#thread-settings-show-all-badge");
 const threadSettingsPanel = document.querySelector("#thread-settings-panel");
 const threadSettingsShowAll = document.querySelector("#thread-settings-show-all");
 const threadSettingsSearch = document.querySelector("#thread-settings-search");
@@ -274,6 +275,22 @@ const threadSettingsClear = document.querySelector("#thread-settings-clear");
 const timelineTabDialog = document.querySelector("#timeline-tab-dialog");
 const timelineTabNotifications = document.querySelector("#timeline-tab-notifications");
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+function setThreadSettingsPanelOpen(nextOpen) {
+  if (!threadSettingsPanel) {
+    return;
+  }
+
+  threadSettingsPanel.hidden = !nextOpen;
+
+  if (threadSettingsToggle) {
+    threadSettingsToggle.setAttribute("aria-expanded", String(nextOpen));
+  }
+
+  if (threadSettingsSummary) {
+    threadSettingsSummary.setAttribute("aria-expanded", String(nextOpen));
+  }
+}
 
 function estimateDataUrlBytes(dataUrl) {
   const match = /^data:[^;]+;base64,(.+)$/i.exec(String(dataUrl || "").trim());
@@ -548,41 +565,6 @@ function formatExecutorStatus(status = {}) {
   return `Статус: ${selectedModeLabel} selected · backend ${executorLabel} · ${executorState}`;
 }
 
-function formatWatchdogMessage(rawValue) {
-  const raw = String(rawValue || "").trim();
-
-  if (!raw) {
-    return "ошибок нет";
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-
-    if (!parsed || typeof parsed !== "object") {
-      return raw;
-    }
-
-    const message = String(parsed.message || "").trim();
-    const detail = String(parsed.detail || "").trim();
-
-    if (message && detail) {
-      return `${message} ${detail}`;
-    }
-
-    if (message) {
-      return message;
-    }
-
-    if (detail) {
-      return detail;
-    }
-  } catch {
-    return raw;
-  }
-
-  return raw;
-}
-
 function formatProjectPath(repo) {
   if (!repo) {
     return "";
@@ -731,34 +713,6 @@ function getActiveThreadId() {
   return canonicalizeRepoSelectionId(commandThreadSelect?.value || storage.selectedRepoId || "");
 }
 
-function getVisibleThreadIds() {
-  if (storage.showAllMessages) {
-    return null;
-  }
-
-  if (state.activeThreadCategories.length) {
-    const allowedCategories = new Set(state.activeThreadCategories);
-    const ids = getAllMenuOptions()
-      .filter((option) => allowedCategories.has(option.category))
-      .map((option) => canonicalizeRepoSelectionId(option.id))
-      .filter(Boolean);
-
-    return ids.length ? new Set(ids) : new Set();
-  }
-
-  const activeThreadId = getActiveThreadId();
-  return activeThreadId ? new Set([activeThreadId]) : new Set();
-}
-
-function matchesVisibleThreadSelection(threadId, visibleThreadIds) {
-  if (visibleThreadIds === null) {
-    return true;
-  }
-
-  const normalizedThreadId = canonicalizeRepoSelectionId(threadId);
-  return Boolean(normalizedThreadId) && visibleThreadIds.has(normalizedThreadId);
-}
-
 function getSelectedMenuRepoIds() {
   const availableIds = new Set(getAllMenuOptions().map((option) => option.id));
   const stored = storage.selectedMenuRepoIds
@@ -773,7 +727,16 @@ function getSelectedMenuRepoIds() {
 }
 
 function getFilteredMenuOptions() {
-  return getAllMenuOptions();
+  const activeCategories = new Set(state.activeThreadCategories);
+  const selectedRepoIds = new Set(getSelectedMenuRepoIds());
+
+  return getAllMenuOptions().filter((option) => {
+    if (activeCategories.size && !activeCategories.has(option.category)) {
+      return false;
+    }
+
+    return selectedRepoIds.has(option.id);
+  });
 }
 
 function getThreadDisplayLabel(threadId, fallbackLabel = "") {
@@ -852,10 +815,23 @@ function renderThreadSettingsSummary() {
     return;
   }
 
+  if (threadSettingsPanel) {
+    threadSettingsSummary.setAttribute("role", "button");
+    threadSettingsSummary.setAttribute("tabindex", "0");
+    threadSettingsSummary.setAttribute("aria-controls", "thread-settings-panel");
+    threadSettingsSummary.setAttribute("aria-expanded", String(!threadSettingsPanel.hidden));
+    threadSettingsSummary.setAttribute("title", "Открыть фильтры проектов");
+  }
+
   if (storage.showAllMessages) {
     threadSettingsSummary.textContent = "Показываются все проекты.";
+    threadSettingsShowAllBadge?.setAttribute("aria-pressed", "true");
+    threadSettingsShowAllBadge?.classList.add("is-active");
     return;
   }
+
+  threadSettingsShowAllBadge?.setAttribute("aria-pressed", "false");
+  threadSettingsShowAllBadge?.classList.remove("is-active");
 
   const filteredOptions = getFilteredMenuOptions();
 
@@ -865,7 +841,7 @@ function renderThreadSettingsSummary() {
       return;
     }
 
-    threadSettingsSummary.textContent = `Показываются сообщения групп: ${state.activeThreadCategories.join(", ")} · проектов: ${filteredOptions.length}.`;
+    threadSettingsSummary.textContent = `Группы: ${state.activeThreadCategories.join(", ")} · проектов в меню: ${filteredOptions.length}.`;
     return;
   }
 
@@ -1239,33 +1215,12 @@ function getCommandDeliveryStatus(command) {
   };
 }
 
-function getFallbackMessageDeliveryStatus(commandId) {
-  const normalizedId = String(commandId || "").trim();
-
-  if (!normalizedId) {
-    return null;
-  }
-
-  const hasAssistantMessage = state.messages.some((message) => (
-    String(message?.commandId || "").trim() === normalizedId
-    && String(message?.role || "").trim() === "assistant"
-  ));
-
-  if (hasAssistantMessage) {
-    return null;
-  }
-
-  return {
-    tone: "delivery",
-    text: "Обрабатываю · статус синхронизируется"
-  };
-}
-
 function getVisibleTimelineCommands() {
-  const visibleThreadIds = getVisibleThreadIds();
+  const showAllMessages = storage.showAllMessages;
+  const activeThreadId = showAllMessages ? "" : getActiveThreadId();
 
   return state.commands
-    .filter((command) => matchesVisibleThreadSelection(command.threadId, visibleThreadIds))
+    .filter((command) => !activeThreadId || isSameThreadTarget(command.threadId, activeThreadId))
     .filter((command) => !isHiddenSystemEntry(command))
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
 }
@@ -1315,11 +1270,11 @@ function getCommandAnswerTitle(command) {
   const executor = getCommandActualExecutor(command);
 
   if (executor === "bridge") {
-    return "Ответ Codex bridge";
+    return "Ответ Codex · Bridge";
   }
 
   if (executor === "cloud") {
-    return "Ответ Codex сдщгв";
+    return "Ответ Codex · Cloud";
   }
 
   return "Ответ Codex";
@@ -1427,9 +1382,8 @@ function buildTimelineSignature(items, context = {}) {
       createdAt: entry.createdAt,
       threadId: entry.threadId,
       threadLabel: entry.threadLabel,
-      status: entry.status || entry.command?.status || entry.linkedCommand?.status || "",
-      progressStage: entry.progressStage || entry.command?.progressStage || entry.linkedCommand?.progressStage || "",
-      deliveryStage: entry.command?.deliveryStage || entry.linkedCommand?.deliveryStage || "",
+      status: entry.status || "",
+      progressStage: entry.progressStage || "",
       projectCategory: entry.command?.projectCategory || entry.linkedCommand?.projectCategory || "",
       projectLabel: entry.command?.projectLabel || entry.linkedCommand?.projectLabel || "",
       targetRepo: entry.command?.targetRepo || entry.linkedCommand?.targetRepo || "",
@@ -1868,23 +1822,39 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const detailsId = String(message?.id || "").trim();
-  const title = linkedCommand?.threadLabel
-    ? `Ответ Codex · ${linkedCommand.threadLabel}`
-    : getCommandAnswerTitle(linkedCommand);
+  const deliveryLabel = getCommandDeliveryLabel(linkedCommand);
+  const contextMeta = renderCommandContextMarkup(linkedCommand);
+  const commandMeta = linkedCommand?.branchName
+    ? `<p class="command-answer-meta">Ветка: <code>${escapeHtml(linkedCommand.branchName)}</code></p>`
+    : "";
+  const prMeta = linkedCommand?.prUrl
+    ? `<p class="command-answer-meta"><a href="${escapeHtml(linkedCommand.prUrl)}" target="_blank" rel="noreferrer">Открыть PR</a></p>`
+    : "";
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
       <summary>
-        <span class="command-answer-title">${escapeHtml(title)}</span>
+        <span class="command-answer-title">${escapeHtml(getCommandAnswerTitle(linkedCommand))}</span>
+        <span class="command-answer-badge">${escapeHtml(deliveryLabel)}</span>
       </summary>
       <div class="command-answer-body">
+        ${contextMeta}
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
+        ${prMeta}
+        ${commandMeta}
+        <div class="command-answer-actions">
+          <button class="command-reply-link" type="button" data-thread-id="${escapeHtml(replyEntry?.threadId || "")}">
+            Ответить
+          </button>
+        </div>
       </div>
     </details>
   `;
 }
 
 function bindAssistantReplyInteractions(container, replies) {
+  const normalizedReplies = Array.isArray(replies) ? replies : [];
+
   container.querySelectorAll(".command-answer").forEach((details) => {
     const detailsId = String(details.dataset.entryId || "").trim();
 
@@ -1907,17 +1877,50 @@ function bindAssistantReplyInteractions(container, replies) {
     });
   });
 
+  container.querySelectorAll(".command-reply-link").forEach((replyLink) => {
+    replyLink.addEventListener("click", () => {
+      const threadId = String(replyLink.dataset.threadId || "").trim();
+      const reply = normalizedReplies.find((entry) => String(entry?.threadId || "").trim() === threadId) || normalizedReplies[0];
+      const didActivate = activateReplyThread(threadId);
+
+      if (!didActivate) {
+        setCommandStatusMessage("Не удалось выбрать тему беседы для ответа.", { tone: "error" });
+        return;
+      }
+
+      if (commandInput) {
+        commandInput.value = "";
+      }
+
+      commandInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => {
+        commandInput.focus();
+      }, 180);
+
+      setCommandStatusMessage(`Выбрана беседа: ${getThreadDisplayLabel(threadId, reply?.threadLabel || "")}`);
+    });
+  });
+
+  container.querySelectorAll(".command-retry-link").forEach((button) => {
+    button.addEventListener("click", () => {
+      const commandId = String(button.dataset.commandId || "").trim();
+      const executor = String(button.dataset.executor || "").trim() === "cloud" ? "cloud" : "bridge";
+
+      retryCommandWithExecutor(commandId, executor).catch((error) => {
+        setCommandStatusMessage(String(error?.message || "Не удалось повторить сообщение."), { tone: "error" });
+      });
+    });
+  });
 }
 
 function renderCommands() {
   pruneExpiredAnswerState();
   renderTimelineTabButtons();
   const showAllMessages = storage.showAllMessages;
-  const visibleThreadIds = getVisibleThreadIds();
-  const activeThreadId = showAllMessages || state.activeThreadCategories.length ? "" : getActiveThreadId();
+  const activeThreadId = showAllMessages ? "" : getActiveThreadId();
   const visibleCommands = getVisibleTimelineCommands();
   const visibleMessages = state.messages
-    .filter((message) => matchesVisibleThreadSelection(message.threadId, visibleThreadIds))
+    .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
     .filter((message) => !isHiddenSystemEntry(message))
     .filter((message) => !isNotificationEntry(message));
 
@@ -1998,7 +2001,8 @@ function renderCommands() {
         if (message.role === "assistant" && (commandId || threadedAssistantMessageIds.has(String(message.id || "").trim()))) {
           return false;
         }
-        return true;
+
+        return !(message.role === "user" && commandId && commandsById.has(commandId));
       })
       .map((message) => ({
         id: `message:${message.id}`,
@@ -2018,7 +2022,7 @@ function renderCommands() {
   const notificationItems = [
     getReleaseNotificationEntry(),
     ...state.messages
-      .filter((message) => matchesVisibleThreadSelection(message.threadId, visibleThreadIds))
+      .filter((message) => !activeThreadId || isSameThreadTarget(message.threadId, activeThreadId))
       .filter((message) => isNotificationEntry(message))
       .map((message) => ({
         id: `notification:${message.id}`,
@@ -2081,22 +2085,41 @@ function renderCommands() {
 
     if (entry.kind === "command") {
       const command = entry.command;
+      const failureMessage = getCommandFailureMessage(command);
+      const deliveryStatus = getCommandDeliveryStatus(command);
+      const contextMarkup = renderCommandContextMarkup(command);
+      const latencyMarkup = renderCommandLatencyMarkup(command);
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
-      const deliveryStatus = getCommandDeliveryStatus(command);
-      const failureMessage = getCommandFailureMessage(command);
+      const showRetryActions = canRetryCommand(command);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
+      const retryActionsMarkup = showRetryActions ? `
+        <div class="command-answer-actions">
+          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="bridge">
+            Повторить через bridge
+          </button>
+          <button class="command-retry-link" type="button" data-command-id="${escapeHtml(String(command?.id || ""))}" data-executor="cloud">
+            Повторить через cloud
+          </button>
+        </div>
+      ` : "";
 
       element.innerHTML = `
         <div class="command-item-top">
           <strong>Вы</strong>
           <time>${formatDate(entry.createdAt)}</time>
         </div>
+        ${contextMarkup}
+        ${latencyMarkup}
         <p>${escapeHtml(text)}</p>
         ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
-        ${failureMessage ? `<div class="command-delivery-note" data-tone="error">${escapeHtml(failureMessage)}</div>` : ""}
+        ${failureMessage ? "" : ""}
         ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
+        ${retryActionsMarkup}
         ${repliesMarkup}
+        <div class="command-item-top">
+          <span>${formatCommandStage(command)}</span>
+        </div>
       `;
 
       bindAssistantReplyInteractions(element, entry.replies);
@@ -2107,20 +2130,13 @@ function renderCommands() {
     const message = entry.message;
     const linkedCommand = entry.linkedCommand;
     const isAssistant = entry.role === "assistant";
-    const hasPhoto = Boolean(linkedCommand?.photo);
-    const deliveryStatus = isAssistant
-      ? null
-      : (getCommandDeliveryStatus(linkedCommand) || getFallbackMessageDeliveryStatus(message?.commandId));
-    const failureMessage = isAssistant ? "" : getCommandFailureMessage(linkedCommand);
+    const statusLabel = isAssistant
+      ? (linkedCommand?.prUrl ? "PR готов" : "Ответ получен")
+      : "Сообщение в истории";
+    const contextMarkup = renderCommandContextMarkup(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
-      : `
-        <p>${escapeHtml(entry.text || "")}</p>
-        ${hasPhoto ? '<div class="command-fallback-note">К сообщению приложено фото.</div>' : ""}
-        ${failureMessage ? `<div class="command-delivery-note" data-tone="error">${escapeHtml(failureMessage)}</div>` : ""}
-        ${deliveryStatus?.text ? `<div class="command-delivery-note" data-tone="${escapeHtml(deliveryStatus.tone)}">${escapeHtml(deliveryStatus.text)}</div>` : ""}
-        ${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}
-      `;
+      : `${contextMarkup}<p>${escapeHtml(entry.text || "")}</p>${(entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("")}`;
 
     element.innerHTML = `
       <div class="command-item-top">
@@ -2128,6 +2144,9 @@ function renderCommands() {
         <time>${formatDate(entry.createdAt)}</time>
       </div>
       ${body}
+      <div class="command-item-top">
+        <span>${statusLabel}</span>
+      </div>
     `;
 
     bindAssistantReplyInteractions(element, isAssistant ? [entry] : entry.replies);
@@ -2201,7 +2220,7 @@ function joinVoiceText(baseText, nextText) {
   return `${left}${/[\s\n]$/.test(baseText) ? "" : " "}${right}`;
 }
 
-function stopVoiceRecognition() {
+function stopVoiceRecognition(shouldClearDraft = false) {
   const recognition = state.voiceRecognition;
 
   if (!recognition) {
@@ -2211,6 +2230,11 @@ function stopVoiceRecognition() {
   }
 
   state.voiceRecognitionActive = false;
+
+  if (shouldClearDraft) {
+    state.voiceTranscriptBase = String(commandInput?.value || "");
+    state.voiceDraftText = "";
+  }
 
   try {
     recognition.stop();
@@ -2239,7 +2263,7 @@ function ensureVoiceRecognition() {
     state.voiceHadResult = false;
     state.voiceTranscriptBase = String(commandInput?.value || "");
     state.voiceDraftText = "";
-    setVoiceStatusMessage("Слушаю… говорите.");
+    setVoiceStatusMessage("Слушаю… говорите.", "");
     syncVoiceButton();
   });
 
@@ -2263,10 +2287,11 @@ function ensureVoiceRecognition() {
       commandInput.value = joinVoiceText(state.voiceTranscriptBase, transcript);
     }
 
-    const lastResult = event.results[event.results.length - 1];
     setVoiceStatusMessage(
-      lastResult?.isFinal ? "Голос добавлен в сообщение." : "Распознаю речь…",
-      lastResult?.isFinal ? "success" : ""
+      event.results[event.results.length - 1]?.isFinal
+        ? "Голос добавлен в сообщение."
+        : "Распознаю речь…",
+      event.results[event.results.length - 1]?.isFinal ? "success" : ""
     );
   });
 
@@ -2303,7 +2328,7 @@ function ensureVoiceRecognition() {
     syncVoiceButton();
 
     if (!state.voiceHadResult && !String(state.voiceDraftText || "").trim()) {
-      setVoiceStatusMessage("Диктовка остановлена.");
+      setVoiceStatusMessage("Диктовка остановлена.", "");
       return;
     }
 
@@ -2331,7 +2356,7 @@ function toggleVoiceRecognition() {
 
   if (state.voiceRecognitionActive) {
     stopVoiceRecognition();
-    setVoiceStatusMessage("Останавливаю диктовку…");
+    setVoiceStatusMessage("Останавливаю диктовку…", "");
     return;
   }
 
@@ -2558,30 +2583,6 @@ function renderCommandThreads() {
   renderCommands();
 }
 
-async function fetchJsonWithRetry(resource, init = {}, label = "data") {
-  let lastError = null;
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const response = await fetch(resource, init);
-
-      if (!response.ok) {
-        throw new Error(`Failed to load ${label}: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      lastError = error;
-
-      if (attempt < 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 350));
-      }
-    }
-  }
-
-  throw lastError || new Error(`Failed to load ${label}.`);
-}
-
 async function fetchBridgeStatus() {
   const response = await fetch(`/api/status?_=${Date.now()}`, {
     cache: "no-store",
@@ -2720,33 +2721,6 @@ function mergeMessageCollection(messages) {
   );
 }
 
-function buildOptimisticUserMessage(command) {
-  if (!command || typeof command !== "object") {
-    return null;
-  }
-
-  const commandId = String(command.id || "").trim();
-  const clientId = String(command.clientId || "").trim();
-  const threadId = String(command.threadId || "").trim();
-
-  if (!commandId || !clientId || !threadId) {
-    return null;
-  }
-
-  const text = String(command.text || "").trim() || (command.photo ? "Фото" : "Сообщение без текста");
-
-  return {
-    id: `command:${commandId}`,
-    clientId,
-    threadId,
-    threadLabel: String(command.threadLabel || "").trim(),
-    commandId,
-    role: "user",
-    text,
-    createdAt: String(command.createdAt || new Date().toISOString()).trim()
-  };
-}
-
 function noteNewMessages(previousMessages, nextMessages) {
   const previousCodexReplyIds = new Set(
     previousMessages
@@ -2815,7 +2789,7 @@ function applyDeliverySnapshot(snapshot) {
   }
 
   if (bridgeWatchdogText) {
-    bridgeWatchdogText.textContent = `Watchdog: ${formatWatchdogMessage(status.lastError)}`;
+    bridgeWatchdogText.textContent = `Watchdog: ${status.lastError || "ошибок нет"}`;
   }
 }
 
@@ -2864,12 +2838,18 @@ async function persistCommandVisible(commandId) {
 }
 
 async function fetchMenuRepos() {
-  const data = await fetchJsonWithRetry(`/api/repos?mode=cloud&_=${Date.now()}`, {
+  const response = await fetch(`/api/repos?mode=cloud&_=${Date.now()}`, {
     cache: "no-store",
     headers: {
       accept: "application/json"
     }
-  }, "repos");
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load repos: ${response.status}`);
+  }
+
+  const data = await response.json();
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
@@ -3010,7 +2990,6 @@ async function submitCommand(event) {
   commandInput.value = "";
   clearSelectedPhoto();
   mergeCommandCollection([result?.command].filter(Boolean));
-  mergeMessageCollection([buildOptimisticUserMessage(result?.command)].filter(Boolean));
   enterDeliverySpeedMode();
   startPolling();
   renderCommands();
@@ -3174,17 +3153,36 @@ function bindEvents() {
   });
 
   threadSettingsToggle?.addEventListener("click", () => {
-    if (!threadSettingsPanel) {
+    setThreadSettingsPanelOpen(threadSettingsPanel?.hidden ?? true);
+  });
+
+  threadSettingsSummary?.addEventListener("click", () => {
+    setThreadSettingsPanelOpen(threadSettingsPanel?.hidden ?? true);
+  });
+
+  threadSettingsSummary?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
       return;
     }
 
-    const nextHidden = !threadSettingsPanel.hidden;
-    threadSettingsPanel.hidden = nextHidden;
-    threadSettingsToggle.setAttribute("aria-expanded", String(!nextHidden));
+    event.preventDefault();
+    setThreadSettingsPanelOpen(threadSettingsPanel?.hidden ?? true);
   });
 
   threadSettingsShowAll?.addEventListener("change", () => {
     storage.showAllMessages = Boolean(threadSettingsShowAll.checked);
+    threadSettingsShowAllBadge?.setAttribute("aria-pressed", String(storage.showAllMessages));
+    renderThreadSettingsSummary();
+    renderCommands();
+  });
+
+  threadSettingsShowAllBadge?.addEventListener("click", () => {
+    const nextValue = !storage.showAllMessages;
+    storage.showAllMessages = nextValue;
+    if (threadSettingsShowAll) {
+      threadSettingsShowAll.checked = nextValue;
+    }
+    threadSettingsShowAllBadge.setAttribute("aria-pressed", String(nextValue));
     renderThreadSettingsSummary();
     renderCommands();
   });
@@ -3194,10 +3192,7 @@ function bindEvents() {
   });
 
   threadSettingsSave?.addEventListener("click", () => {
-    if (threadSettingsPanel) {
-      threadSettingsPanel.hidden = true;
-      threadSettingsToggle?.setAttribute("aria-expanded", "false");
-    }
+    setThreadSettingsPanelOpen(false);
   });
 
   threadSettingsSelectAll?.addEventListener("click", () => {
@@ -3263,6 +3258,10 @@ async function boot() {
     threadSettingsShowAll.checked = storage.showAllMessages;
   }
 
+  if (threadSettingsShowAllBadge) {
+    threadSettingsShowAllBadge.setAttribute("aria-pressed", String(storage.showAllMessages));
+  }
+
   state.dispatchMode = storage.dispatchModePreference;
   state.activeTimelineTab = storage.activeTimelineTab;
   renderTimelineTabButtons();
@@ -3273,10 +3272,7 @@ async function boot() {
 
   clearSelectedPhoto();
   syncVoiceButton();
-  setVoiceStatusMessage(
-    SpeechRecognitionCtor ? "" : "Голосовой ввод доступен не во всех браузерах.",
-    SpeechRecognitionCtor ? "" : "error"
-  );
+  setVoiceStatusMessage(SpeechRecognitionCtor ? "" : "Голосовой ввод доступен не во всех браузерах.", SpeechRecognitionCtor ? "" : "error");
   bindEvents();
 
   if (await ensureLatestClient()) {
