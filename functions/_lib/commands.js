@@ -320,6 +320,10 @@ function normalizeExecutionMode(rawValue) {
   return String(rawValue || "").trim().toLowerCase() === "cloud" ? "cloud" : "bridge";
 }
 
+function normalizeCommandMode(rawValue) {
+  return String(rawValue || "").trim().toLowerCase() === "compat" ? "compat" : "default";
+}
+
 function normalizeActualExecutionMode(rawValue) {
   const value = String(rawValue || "").trim().toLowerCase();
   return value === "cloud" || value === "bridge" ? value : "";
@@ -349,6 +353,85 @@ function normalizeDiagnosticText(rawValue, max = 240) {
 
 function normalizePhotoUnsupportedReason(rawValue) {
   return normalizeDiagnosticText(rawValue, 240);
+}
+
+function normalizeDeliveryEvidence(rawValue) {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+
+  const normalized = {
+    inspectedAt: normalizeDateValue(rawValue.inspectedAt),
+    slackRootPosted: normalizeBooleanValue(rawValue.slackRootPosted, normalizeBooleanValue(rawValue.threadRootSeen)),
+    slackThreadMapped: normalizeBooleanValue(rawValue.slackThreadMapped),
+    slackPhotoUploaded: normalizeBooleanValue(rawValue.slackPhotoUploaded, normalizeBooleanValue(rawValue.fileReplySeen, Boolean(rawValue.fileId))),
+    slackFileVisible: normalizeBooleanValue(
+      rawValue.slackFileVisible,
+      normalizeDiagnosticText(rawValue.fileAccess, 40).toLowerCase() === "visible"
+    ),
+    slackFileOpenOk: typeof rawValue.slackFileOpenOk === "boolean"
+      ? rawValue.slackFileOpenOk
+      : (typeof rawValue.botCanOpenFile === "boolean" ? rawValue.botCanOpenFile : false),
+    workerReplySeen: normalizeBooleanValue(rawValue.workerReplySeen),
+    workerAckSeen: normalizeBooleanValue(rawValue.workerAckSeen, normalizeBooleanValue(rawValue.executionAckSeen)),
+    workerPhotoReadySeen: normalizeBooleanValue(rawValue.workerPhotoReadySeen, normalizeBooleanValue(rawValue.photoReadySeen)),
+    slackRootPostedAt: normalizeDateValue(rawValue.slackRootPostedAt),
+    slackThreadMappedAt: normalizeDateValue(rawValue.slackThreadMappedAt),
+    slackPhotoUploadedAt: normalizeDateValue(rawValue.slackPhotoUploadedAt),
+    slackFileVisibleAt: normalizeDateValue(rawValue.slackFileVisibleAt),
+    slackFileOpenOkAt: normalizeDateValue(rawValue.slackFileOpenOkAt),
+    workerReplySeenAt: normalizeDateValue(rawValue.workerReplySeenAt),
+    workerAckSeenAt: normalizeDateValue(rawValue.workerAckSeenAt),
+    workerPhotoReadySeenAt: normalizeDateValue(rawValue.workerPhotoReadySeenAt),
+    matchedChannelId: normalizeSlackValue(rawValue.matchedChannelId),
+    matchedThreadTs: normalizeSlackValue(rawValue.matchedThreadTs),
+    threadRootSeen: normalizeBooleanValue(rawValue.threadRootSeen),
+    uploadNoticeSeen: normalizeBooleanValue(rawValue.uploadNoticeSeen),
+    fileReplySeen: normalizeBooleanValue(rawValue.fileReplySeen),
+    fileId: normalizeSlackValue(rawValue.fileId),
+    fileMode: normalizeDiagnosticText(rawValue.fileMode, 40),
+    fileAccess: normalizeDiagnosticText(rawValue.fileAccess, 40),
+    botCanOpenFile: typeof rawValue.botCanOpenFile === "boolean" ? rawValue.botCanOpenFile : null,
+    botOpenHttpStatus: Number.isFinite(Number(rawValue.botOpenHttpStatus)) ? Number(rawValue.botOpenHttpStatus) : 0,
+    executionAckSeen: normalizeBooleanValue(rawValue.executionAckSeen),
+    photoReadySeen: normalizeBooleanValue(rawValue.photoReadySeen)
+  };
+
+  if (
+    !normalized.inspectedAt
+    && !normalized.slackRootPosted
+    && !normalized.slackThreadMapped
+    && !normalized.slackPhotoUploaded
+    && !normalized.slackFileVisible
+    && !normalized.slackFileOpenOk
+    && !normalized.workerReplySeen
+    && !normalized.workerAckSeen
+    && !normalized.workerPhotoReadySeen
+    && !normalized.slackRootPostedAt
+    && !normalized.slackThreadMappedAt
+    && !normalized.slackPhotoUploadedAt
+    && !normalized.slackFileVisibleAt
+    && !normalized.slackFileOpenOkAt
+    && !normalized.workerReplySeenAt
+    && !normalized.workerAckSeenAt
+    && !normalized.workerPhotoReadySeenAt
+    && !normalized.matchedChannelId
+    && !normalized.matchedThreadTs
+    && !normalized.threadRootSeen
+    && !normalized.uploadNoticeSeen
+    && !normalized.fileReplySeen
+    && !normalized.fileId
+    && !normalized.fileMode
+    && !normalized.fileAccess
+    && normalized.botCanOpenFile === null
+    && !normalized.botOpenHttpStatus
+    && !normalized.executionAckSeen
+    && !normalized.photoReadySeen
+  ) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function normalizeRouteAttempt(input = {}) {
@@ -465,8 +548,14 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
   return {
     requestedExecutor,
     requestedMode: requestedExecutor,
+    mode: normalizeCommandMode(
+      Object.prototype.hasOwnProperty.call(input, "mode") ? input.mode : command?.mode
+    ),
     actualExecutor: normalizedActualExecutor,
     actualDispatchMode: normalizedActualExecutor,
+    cloudInputUnverified: normalizeBooleanValue(
+      Object.prototype.hasOwnProperty.call(input, "cloudInputUnverified") ? input.cloudInputUnverified : command?.cloudInputUnverified
+    ),
     slackDispatchAttempted: normalizeBooleanValue(input.slackDispatchAttempted, Boolean(command?.slackDispatchAttempted)),
     slackDispatchSucceeded: normalizeBooleanValue(input.slackDispatchSucceeded, Boolean(command?.slackDispatchSucceeded)),
     slackReplyReceived: normalizeBooleanValue(input.slackReplyReceived, Boolean(command?.slackReplyReceived)),
@@ -501,6 +590,13 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
       Object.prototype.hasOwnProperty.call(input, "photoUnsupportedReason")
         ? input.photoUnsupportedReason
         : command?.photoUnsupportedReason
+    ),
+    deliveryStopPoint: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "deliveryStopPoint") ? input.deliveryStopPoint : command?.deliveryStopPoint,
+      80
+    ),
+    deliveryEvidence: normalizeDeliveryEvidence(
+      Object.prototype.hasOwnProperty.call(input, "deliveryEvidence") ? input.deliveryEvidence : command?.deliveryEvidence
     ),
     firstAckAt: normalizeDateValue(
       Object.prototype.hasOwnProperty.call(input, "firstAckAt") ? input.firstAckAt : command?.firstAckAt
@@ -627,8 +723,10 @@ function normalizeStoredCommandEntry(entry) {
     targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode),
     requestedExecutor: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
     requestedMode: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
+    mode: normalizeCommandMode(entry.mode),
     actualExecutor: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
     actualDispatchMode: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
+    cloudInputUnverified: normalizeBooleanValue(entry.cloudInputUnverified),
     slackDispatchAttempted: normalizeBooleanValue(entry.slackDispatchAttempted),
     slackDispatchSucceeded: normalizeBooleanValue(entry.slackDispatchSucceeded),
     slackReplyReceived: normalizeBooleanValue(entry.slackReplyReceived),
@@ -647,6 +745,8 @@ function normalizeStoredCommandEntry(entry) {
     photoSeenByBridge: normalizeBooleanValue(entry.photoSeenByBridge),
     photoProcessed: normalizeBooleanValue(entry.photoProcessed),
     photoUnsupportedReason: normalizePhotoUnsupportedReason(entry.photoUnsupportedReason),
+    deliveryStopPoint: normalizeDiagnosticText(entry.deliveryStopPoint, 80),
+    deliveryEvidence: normalizeDeliveryEvidence(entry.deliveryEvidence),
     routeAttempts: normalizeRouteAttempts(entry.routeAttempts),
     firstAckAt: normalizeDateValue(entry.firstAckAt),
     resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
@@ -857,8 +957,10 @@ export function createCommandRecord(input) {
       targetExecutionMode: normalizeExecutionMode(input.targetExecutionMode),
       requestedExecutor: normalizeExecutionMode(input.targetExecutionMode || input.dispatchMode),
       requestedMode: normalizeExecutionMode(input.targetExecutionMode || input.dispatchMode),
+      mode: normalizeCommandMode(input.mode),
       actualExecutor: "",
       actualDispatchMode: "",
+      cloudInputUnverified: false,
       slackDispatchAttempted: false,
       slackDispatchSucceeded: false,
       slackReplyReceived: false,
@@ -877,6 +979,8 @@ export function createCommandRecord(input) {
       photoSeenByBridge: false,
       photoProcessed: false,
       photoUnsupportedReason: "",
+      deliveryStopPoint: "",
+      deliveryEvidence: null,
       routeAttempts: [],
       firstAckAt: "",
       resultAt: "",
@@ -1125,12 +1229,16 @@ export async function fallbackCommandToLocalBridge(env, input = {}) {
     ...command,
     ...mergeCommandDebugState(command, {
       actualExecutor: "bridge",
+      mode: input.mode,
+      cloudInputUnverified: input.cloudInputUnverified,
       fallbackApplied: true,
       fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
       fallbackReason: input.fallbackReason || command.fallbackReason,
       timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
       lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
-      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      deliveryStopPoint: input.deliveryStopPoint,
+      deliveryEvidence: input.deliveryEvidence
     }, DISPATCH_MODE_LOCAL),
     dispatchMode: DISPATCH_MODE_LOCAL,
     status: "queued",
@@ -1172,12 +1280,16 @@ export async function rerouteCommandToLocalBridge(env, input = {}) {
     ...command,
     ...mergeCommandDebugState(command, {
       actualExecutor: "bridge",
+      mode: input.mode,
+      cloudInputUnverified: input.cloudInputUnverified,
       fallbackApplied: true,
       fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
       fallbackReason: input.fallbackReason || command.fallbackReason,
       timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
       lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
-      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      deliveryStopPoint: input.deliveryStopPoint,
+      deliveryEvidence: input.deliveryEvidence
     }, DISPATCH_MODE_LOCAL),
     dispatchMode: DISPATCH_MODE_LOCAL,
     status: "queued",
@@ -1352,10 +1464,14 @@ export async function markCommandDispatched(env, input = {}) {
     ...command,
     ...mergeCommandDebugState(command, {
       actualExecutor: "",
+      mode: input.mode,
+      cloudInputUnverified: input.cloudInputUnverified,
       slackDispatchAttempted: true,
       slackDispatchSucceeded: dispatchMode === DISPATCH_MODE_SLACK,
       timeoutPhase: "",
       resultAt: "",
+      deliveryStopPoint: input.deliveryStopPoint,
+      deliveryEvidence: input.deliveryEvidence,
       dispatchStartedAt: normalizeDateValue(input.dispatchStartedAt) || command.dispatchStartedAt || nowIso,
       slackPostedAt: dispatchMode === DISPATCH_MODE_SLACK
         ? (normalizeDateValue(input.slackPostedAt) || nowIso)

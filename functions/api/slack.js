@@ -34,6 +34,31 @@ function shouldTrackSlackEvent(event) {
   return true;
 }
 
+function isSlackCloudDiagnosticsEnabled(runtimeConfig) {
+  const value = String(runtimeConfig?.SLACK_CLOUD_DIAGNOSTICS || "").trim().toLowerCase();
+  return value === "1" || value === "true";
+}
+
+function mergeDeliveryEvidence(command, incoming = {}, runtimeConfig = {}) {
+  const current = command?.deliveryEvidence && typeof command.deliveryEvidence === "object"
+    ? command.deliveryEvidence
+    : {};
+  const next = incoming && typeof incoming === "object" ? incoming : {};
+  const diagnosticsEnabled = isSlackCloudDiagnosticsEnabled(runtimeConfig);
+
+  const merged = {
+    ...current,
+    ...next
+  };
+
+  if (diagnosticsEnabled) {
+    merged.matchedChannelId = String(next.matchedChannelId || current.matchedChannelId || command?.slackChannelId || "").trim();
+    merged.matchedThreadTs = String(next.matchedThreadTs || current.matchedThreadTs || command?.slackThreadTs || command?.slackMessageTs || "").trim();
+  }
+
+  return merged;
+}
+
 async function markSlackCommandDiagnostic(env, command, input = {}) {
   if (!command?.id) {
     return null;
@@ -55,6 +80,10 @@ async function markSlackCommandDiagnostic(env, command, input = {}) {
     fallbackReason: input.fallbackReason,
     lastDiagnosticCode: input.code,
     lastDiagnosticDetail: input.detail,
+    deliveryStopPoint: input.deliveryStopPoint || command.deliveryStopPoint,
+    deliveryEvidence: Object.prototype.hasOwnProperty.call(input, "deliveryEvidence")
+      ? input.deliveryEvidence
+      : command.deliveryEvidence,
     slackChannelId: String(input.channelId || command.slackChannelId || "").trim(),
     slackThreadTs: String(input.threadTs || command.slackThreadTs || command.slackMessageTs || "").trim(),
     slackMessageTs: String(command.slackMessageTs || "").trim(),
@@ -140,6 +169,23 @@ async function ingestSlackReply(env, command, event, options = {}) {
   const replyIngestedAt = new Date().toISOString();
   const isFirstAck = classification.executionAckValid && !String(command.firstExecutorAckSeenAt || "").trim();
   const isFirstReply = Boolean(text) && !String(command.firstReplySeenAt || "").trim();
+  const deliveryEvidence = mergeDeliveryEvidence(command, {
+    inspectedAt: replyIngestedAt,
+    slackRootPosted: true,
+    slackThreadMapped: true,
+    workerReplySeen: true,
+    workerAckSeen: Boolean(classification.executionAckPresent),
+    workerPhotoReadySeen: classification.executionAckPhotoReady === true,
+    executionAckSeen: Boolean(classification.executionAckPresent),
+    photoReadySeen: classification.executionAckPhotoReady === true,
+    ...(options.diagnosticsEnabled ? {
+      matchedChannelId: channelId,
+      matchedThreadTs: effectiveThreadTs,
+      workerReplySeenAt: eventIso,
+      ...(classification.executionAckPresent ? { workerAckSeenAt: eventIso } : {}),
+      ...(classification.executionAckPhotoReady === true ? { workerPhotoReadySeenAt: eventIso } : {})
+    } : {})
+  }, options.runtimeConfig);
   const progressStage = options.progressStage
     || (isFirstAck && classification.status === "processing" ? "accepted" : classification.progressStage || "processing");
 
@@ -162,6 +208,12 @@ async function ingestSlackReply(env, command, event, options = {}) {
     lastDiagnosticDetail: classification.lastDiagnosticDetail || (!replyThreadTs
       ? "A Codex reply arrived outside the original Slack thread and was reconciled using the active channel mapping."
       : ""),
+    deliveryStopPoint: classification.executionAckPhotoReady === true
+      ? "worker_photo_ready_seen"
+      : (classification.executionAckPresent
+          ? "worker_ack_seen"
+          : "worker_reply_seen"),
+    deliveryEvidence,
     slackChannelId: channelId,
     slackThreadTs: effectiveThreadTs,
     slackMessageTs: command.slackMessageTs,
@@ -241,7 +293,12 @@ export async function onRequest(context) {
             slackReplyThreaded: Boolean(String(event.thread_ts || "").trim()),
             slackReplyMatched: resolved.matchedVia === "thread-map",
             code: "slack_webhook_unauthorized",
-            detail: "Slack webhook request was rejected with HTTP 401 before reply ingestion."
+            detail: "Slack webhook request was rejected with HTTP 401 before reply ingestion.",
+            deliveryEvidence: mergeDeliveryEvidence(resolved.command, {
+              inspectedAt: new Date().toISOString(),
+              matchedChannelId: String(event.channel || "").trim(),
+              matchedThreadTs: String(event.thread_ts || resolved.command.slackThreadTs || resolved.command.slackMessageTs || "").trim()
+            }, runtimeConfig)
           });
         }
       }
@@ -279,7 +336,9 @@ export async function onRequest(context) {
   }
 
   const result = await ingestSlackReply(env, resolved.command, event, {
-    replyMatchedBy: resolved.matchedVia === "active-channel" ? "unthreaded-fallback" : "thread"
+    replyMatchedBy: resolved.matchedVia === "active-channel" ? "unthreaded-fallback" : "thread",
+    diagnosticsEnabled: isSlackCloudDiagnosticsEnabled(runtimeConfig),
+    runtimeConfig
   });
 
   return json({

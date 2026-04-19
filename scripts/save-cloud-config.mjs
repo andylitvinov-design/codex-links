@@ -46,6 +46,7 @@ async function main() {
   }
 
   const config = {
+    CLOUD_PHOTO_COMPAT_MODE: env.CLOUD_PHOTO_COMPAT_MODE || "",
     COMMAND_DISPATCH_MODE: env.COMMAND_DISPATCH_MODE || "",
     GITHUB_OWNER: env.GITHUB_OWNER || "",
     GITHUB_TOKEN: env.GITHUB_TOKEN || "",

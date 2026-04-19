@@ -63,7 +63,40 @@ test("bulk GET /api/commands omits photo data by default", async () => {
   assert.equal("dataUrl" in payload.commands[0].photo, false);
 });
 
-test("GET /api/commands can include photo data explicitly", async () => {
+test("GET /api/commands?id=... can include photo data explicitly", async () => {
+  const env = createMockEnv();
+
+  await writeCommands(env, [{
+    id: "cmd-photo",
+    clientId: "client-1",
+    threadId: "links",
+    threadLabel: "links",
+    text: "photo command",
+    createdAt: new Date().toISOString(),
+    status: "queued",
+    photo: {
+      contentType: "image/jpeg",
+      fileName: "photo.jpg",
+      size: 12,
+      dataUrl: "data:image/jpeg;base64,AAAA"
+    }
+  }]);
+
+  const response = await onRequest({
+    request: new Request("https://example.com/api/commands?id=cmd-photo&includePhotoData=1", {
+      headers: {
+        "x-write-token": "test-token"
+      }
+    }),
+    env
+  });
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.command.photo.dataUrl, "data:image/jpeg;base64,AAAA");
+});
+
+test("GET /api/commands bulk list ignores includePhotoData=1 to stay slim", async () => {
   const env = createMockEnv();
 
   await writeCommands(env, [{
@@ -94,7 +127,7 @@ test("GET /api/commands can include photo data explicitly", async () => {
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.commands.length, 1);
-  assert.equal(payload.commands[0].photo.dataUrl, "data:image/jpeg;base64,AAAA");
+  assert.equal("dataUrl" in payload.commands[0].photo, false);
 });
 
 test("GET /api/commands?scope=public stays slim and does not require auth", async () => {

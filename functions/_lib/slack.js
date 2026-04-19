@@ -7,6 +7,21 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function isSlackCloudDiagnosticsEnabled(env) {
+  const value = normalizeText(env?.SLACK_CLOUD_DIAGNOSTICS).toLowerCase();
+  return value === "1" || value === "true";
+}
+
+function withStageTimestamp(enabled, stage, timestamp) {
+  if (!enabled || !stage) {
+    return {};
+  }
+
+  return {
+    [`${stage}At`]: normalizeText(timestamp || new Date().toISOString())
+  };
+}
+
 async function signSlackPayload(secret, payload) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -146,18 +161,33 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   });
 
   let permalink = "";
+  let fileMode = "";
+  let fileAccess = "";
+  let urlPrivate = "";
 
   try {
     const info = await callSlackApi(token, "files.info", null, {
       file: normalizeText(upload.file_id)
     });
+    fileMode = normalizeText(info?.file?.mode);
+    fileAccess = normalizeText(info?.file?.file_access);
+    urlPrivate = normalizeText(info?.file?.url_private_download || info?.file?.url_private);
     permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
   } catch {}
+
+  const probe = urlPrivate
+    ? await probeSlackFileOpen(token, urlPrivate).catch(() => ({ canOpen: false, status: 0 }))
+    : { canOpen: false, status: 0 };
 
   return {
     fileId: normalizeText(upload.file_id),
     permalink,
-    fileName
+    fileName,
+    fileMode,
+    fileAccess,
+    urlPrivate,
+    botCanOpenFile: Boolean(probe.canOpen),
+    botOpenHttpStatus: Number(probe.status || 0)
   };
 }
 
@@ -204,6 +234,159 @@ export async function fetchSlackThreadReplies(env, channel, threadTs) {
       botId: normalizeText(message?.bot_id),
       subtype: normalizeText(message?.subtype)
     }));
+}
+
+function extractFileFromMessage(message) {
+  const files = Array.isArray(message?.files) ? message.files : [];
+  const file = files.find((entry) => normalizeText(entry?.id)) || null;
+
+  if (!file) {
+    return null;
+  }
+
+  return {
+    id: normalizeText(file.id),
+    mode: normalizeText(file.mode),
+    access: normalizeText(file.file_access),
+    urlPrivate: normalizeText(file.url_private_download || file.url_private)
+  };
+}
+
+async function probeSlackFileOpen(token, url) {
+  const target = normalizeText(url);
+
+  if (!token || !target) {
+    return { canOpen: false, status: 0 };
+  }
+
+  const response = await fetch(target, {
+    headers: buildSlackAuthHeaders(token, {
+      range: "bytes=0-0"
+    }),
+    signal: AbortSignal.timeout(10_000)
+  });
+
+  try {
+    await response.arrayBuffer();
+  } catch {}
+
+  return {
+    canOpen: response.ok,
+    status: response.status
+  };
+}
+
+export async function inspectSlackPhotoDelivery(env, runtimeConfig, input = {}) {
+  const token = normalizeText(env?.SLACK_BOT_TOKEN || runtimeConfig?.SLACK_BOT_TOKEN);
+  const diagnosticsEnabled = isSlackCloudDiagnosticsEnabled(runtimeConfig || env);
+  const channelId = normalizeText(input.channelId);
+  const threadTs = normalizeText(input.threadTs);
+  const requestedFileId = normalizeText(input.fileId);
+  const inspectedAt = new Date().toISOString();
+
+  if (!token || !channelId || !threadTs) {
+    return {
+      inspectedAt,
+      threadRootSeen: false,
+      slackRootPosted: false,
+      slackThreadMapped: false,
+      slackPhotoUploaded: false,
+      slackFileVisible: false,
+      slackFileOpenOk: false,
+      uploadNoticeSeen: false,
+      fileReplySeen: false,
+      fileId: requestedFileId,
+      fileMode: "",
+      fileAccess: "",
+      botCanOpenFile: false,
+      botOpenHttpStatus: 0,
+      workerReplySeen: false,
+      workerAckSeen: false,
+      workerPhotoReadySeen: false,
+      executionAckSeen: false,
+      photoReadySeen: false,
+      ...(diagnosticsEnabled ? {
+        matchedChannelId: channelId,
+        matchedThreadTs: threadTs
+      } : {})
+    };
+  }
+
+  const data = await callSlackApi(token, "conversations.replies", null, {
+    channel: channelId,
+    ts: threadTs,
+    inclusive: true,
+    limit: 100
+  });
+  const messages = Array.isArray(data?.messages) ? data.messages : [];
+  const replies = messages.filter((message) => normalizeText(message?.ts) && normalizeText(message?.ts) !== threadTs);
+  const root = messages.find((message) => normalizeText(message?.ts) === threadTs) || null;
+  const uploadNotice = replies.find((message) => isIgnorableSlackReplyText(extractSlackMessageText(message))) || null;
+  const fileMessage = replies.find((message) => extractFileFromMessage(message)) || null;
+  const fileFromMessage = extractFileFromMessage(fileMessage);
+  const fileId = requestedFileId || normalizeText(fileFromMessage?.id);
+
+  let fileFromInfo = null;
+
+  if (fileId) {
+    try {
+      const info = await callSlackApi(token, "files.info", null, {
+        file: fileId
+      });
+      const file = info?.file || {};
+      fileFromInfo = {
+        id: normalizeText(file.id),
+        mode: normalizeText(file.mode),
+        access: normalizeText(file.file_access),
+        urlPrivate: normalizeText(file.url_private_download || file.url_private)
+      };
+    } catch {}
+  }
+
+  const workerReplies = replies.filter((message) =>
+    isLikelyCodexSlackActor(runtimeConfig, message, { candidateCount: 1 })
+      && !isIgnorableSlackReplyText(extractSlackMessageText(message))
+  );
+  const ack = workerReplies
+    .map((message) => parseStructuredExecutionAck(extractSlackMessageText(message)))
+    .find((entry) => entry.present) || null;
+  const file = fileFromInfo || fileFromMessage;
+  const probe = file?.urlPrivate
+    ? await probeSlackFileOpen(token, file.urlPrivate).catch(() => ({ canOpen: false, status: 0 }))
+    : { canOpen: false, status: 0 };
+
+  return {
+    inspectedAt,
+    threadRootSeen: Boolean(root),
+    slackRootPosted: Boolean(root),
+    slackThreadMapped: Boolean(root) && Boolean(channelId) && Boolean(threadTs),
+    slackPhotoUploaded: Boolean(fileFromMessage || fileId),
+    slackFileVisible: normalizeText(file?.access).toLowerCase() === "visible",
+    slackFileOpenOk: Boolean(probe.canOpen),
+    uploadNoticeSeen: Boolean(uploadNotice),
+    fileReplySeen: Boolean(fileFromMessage),
+    fileId: normalizeText(file?.id || fileId),
+    fileMode: normalizeText(file?.mode),
+    fileAccess: normalizeText(file?.access),
+    botCanOpenFile: Boolean(probe.canOpen),
+    botOpenHttpStatus: Number(probe.status || 0),
+    workerReplySeen: workerReplies.length > 0,
+    workerAckSeen: Boolean(ack?.present),
+    workerPhotoReadySeen: ack?.photoReady === true,
+    executionAckSeen: Boolean(ack?.present),
+    photoReadySeen: ack?.photoReady === true,
+    ...(diagnosticsEnabled ? {
+      matchedChannelId: channelId,
+      matchedThreadTs: threadTs,
+      ...withStageTimestamp(true, "slackRootPosted", root?.ts ? new Date(Number(root.ts) * 1000 || Date.now()).toISOString() : ""),
+      ...withStageTimestamp(true, "slackPhotoUploaded", fileFromMessage?.ts ? new Date(Number(fileFromMessage.ts) * 1000 || Date.now()).toISOString() : ""),
+      ...withStageTimestamp(true, "slackFileVisible", normalizeText(file?.access).toLowerCase() === "visible" ? inspectedAt : ""),
+      ...withStageTimestamp(true, "slackFileOpenOk", probe.canOpen ? inspectedAt : ""),
+      ...withStageTimestamp(true, "workerReplySeen", workerReplies[0]?.ts ? new Date(Number(workerReplies[0].ts) * 1000 || Date.now()).toISOString() : ""),
+      ...withStageTimestamp(true, "workerAckSeen", ack?.present ? inspectedAt : ""),
+      ...withStageTimestamp(true, "workerPhotoReadySeen", ack?.photoReady === true ? inspectedAt : "")
+    } : {})
+  };
 }
 
 export async function fetchSlackChannelMessages(env, channel, options = {}) {

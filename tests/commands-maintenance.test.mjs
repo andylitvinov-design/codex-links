@@ -66,6 +66,41 @@ test("runCommandMaintenance marks stale cloud commands as failed", async () => {
   assert.ok(updated.completedAt);
 });
 
+test("runCommandMaintenance preserves compat mode markers on stale cloud photo failures", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (4 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-cloud-photo-compat-timeout",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "inspect the photo",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchedAt: staleIso,
+    dispatchMode: "cloud",
+    requestedExecutor: "cloud",
+    actualExecutor: "cloud",
+    status: "processing",
+    progressStage: "processing",
+    fallbackCount: 1,
+    mode: "compat",
+    cloudInputUnverified: true,
+    photoAttached: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: false,
+    preferSlack: false
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-cloud-photo-compat-timeout");
+  assert.ok(updated);
+  assert.equal(updated.mode, "compat");
+  assert.equal(updated.cloudInputUnverified, true);
+});
+
 test("runCommandMaintenance schedules queued cloud fallback commands for dispatch", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();
