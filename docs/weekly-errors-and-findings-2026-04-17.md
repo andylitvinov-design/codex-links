@@ -218,52 +218,6 @@ New error knowledge recorded:
 
 New fixes prepared:
 
-## 2026-04-18 Live KV And Bridge Photo Follow-Up
-
-### Newly confirmed production errors
-
-- Cloudflare Pages production hit Workers KV free tier limit:
-  - `1000 Workers KV list operations per day`
-  - list-related KV calls returned `429`
-  - result on live: queue visibility and UI refresh became unreliable
-- Photo delivery path was confirmed to reach local bridge correctly:
-  - UI attach present
-  - API create stored photo payload
-  - bridge claim succeeded
-  - `photoSeenByBridge=true`
-- The actual live photo blocker moved downstream:
-  - `codex exec` hung after `waiting-for-codex`
-  - manual retry path `retrying-photo-read` could also hang
-  - commands stayed visually stuck unless manually failed
-
-### Fixes landed
-
-- PR `#49` `Reduce KV hot-path pressure for bridge delivery`
-- commands and messages hot paths were moved away from full-store refresh patterns toward:
-  - key-by-id storage
-  - client indexes
-  - active queue indexes
-- UI polling on the main page now prefers client-scoped delivery snapshot instead of separate full public refresh calls for commands and messages
-- storage APIs now return explicit rate-limited responses instead of silent UI hangs
-
-### Operational discoveries that must not be forgotten
-
-- Even after KV hot-path reduction, the live local bridge still needs a hard timeout around image executor subprocesses.
-- Photo commands can be:
-  - delivered correctly
-  - seen by bridge
-  - still fail because the executor never returns output
-- The correct failure mode for this case is explicit:
-  - code: `bridge_photo_retry_timeout`
-  - detail: bridge saw the image, retry subprocess started, but no final answer came back
-
-### Current recommended next action
-
-1. Add hard timeout and final `mark failed` behavior for:
-   - main photo `codex exec`
-   - retry `Attached image task`
-2. Re-run live photo smoke after that worker change.
-
 - removed automatic `cloud -> bridge` fallback for Slack-cloud execution
 - kept `bridge -> cloud` fallback for stalled bridge commands
 - after Slack photo upload, the app now posts an explicit thread nudge with the uploaded file reference and asks Codex to acknowledge in the same thread
@@ -277,26 +231,15 @@ Newly confirmed error knowledge:
   - code: `slack_photo_upload_failed`
   - detail: `invalid_arguments`
 - most likely cause in app code:
-  - the photo handoff used Slack file-upload API methods through the generic JSON helper
-  - Slack `files.getUploadURLExternal` rejected that transport and returned:
-    - `invalid_arguments`
-    - response metadata: missing required field `length`
-    - response metadata: missing required field `filename`
+  - the photo handoff used Slack external upload completion with thread-oriented arguments that Slack rejected
   - result: image never became available to the Codex cloud worker even though thread creation succeeded
 
 Fix prepared:
 
 - simplify Slack photo handoff:
-  - call Slack external file-upload methods with form-encoded payloads instead of the generic JSON helper
   - complete external upload into the channel
   - do not rely on thread-specific completion arguments during `files.completeUploadExternal`
   - then post an explicit thread reply with the uploaded file permalink and instructions for Codex to read the image in the same thread
-- follow-up fix:
-  - use the permalink returned directly by `files.completeUploadExternal`
-  - avoid depending on a later `files.info` round-trip to build the thread nudge
-- remove hidden Slack-dispatch fallback:
-  - if a task was selected as cloud-only and Slack dispatch fails, mark it failed
-  - do not silently convert it into `local-bridge`
 
 Product rule retained:
 
@@ -307,31 +250,77 @@ Product rule retained:
   - run cloud-only
   - do not auto-fallback back into bridge, so cloud-worker failures stay visible
 
-## 2026-04-17 Bridge Thread Resolution And UI Refresh Reliability
-
-Newly confirmed error knowledge:
-
-- bridge-only commands for non-UUID project ids such as `ezohata` could reach the local bridge with `threadId=ezohata`
-- Codex app server expects a real thread UUID, so bridge returned:
-  - `invalid thread id`
-  - `expected an optional prefix of \`urn:uuid:\` ... found 'z'`
-- the red UI warning `Часть данных не обновилась...` can also be triggered by any one transient failure across the separate `status`, `commands`, `messages`, or `repos` refresh calls, even when cached data is otherwise usable
-- UI command refresh had an additional hard client bug:
-  - `mergeCommandCollection()` compared command freshness using `getCommandFreshnessTs(...)`
-  - but that helper function was missing from `public/app.js`
-  - result: once an existing command was refreshed, the browser could throw during merge and keep showing stale cards such as `stage: created` even while server-side status had already advanced to `processing` or `dispatched`
-
-Fix prepared:
-
-- bridge now resolves bridge-only project ids through stored `/api/threads` metadata and chooses the latest matching real Codex thread UUID for that project/category
-- UI polling now retries the critical JSON refresh requests once before showing partial-refresh degradation
-- Slack cloud prompt now also resolves the latest stored real Codex thread UUID for the selected project and includes it in the Slack task when available, instead of sending only a human project label
-- Slack cloud wait window was reduced so the UI does not sit in `waiting (cloud)` for several minutes when the external worker is not replying:
-  - dispatch grace: `15s`
-  - total result wait: `60s`
-  - after that the command fails explicitly instead of hanging silently
-- client merge now has a concrete command freshness helper, so refreshed server status can replace stale local cards instead of freezing them
-
 ## Related Notes
 
 - Context routing audit: [project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
+
+## 2026-04-18 Photo Delivery Incident And Fix
+
+### Confirmed root cause
+
+- Photo reading itself did not disappear from Codex.
+- The live failure sat between bridge execution and reply finalization.
+- The unstable segment was the ephemeral photo run launched from the Node bridge process:
+  - direct local `codex exec -i` on the same image succeeded;
+  - the launchd bridge could still leave photo commands in `waiting-for-codex` or close them without a durable assistant reply;
+  - stale photo commands could also be re-routed back toward Slack even though Slack is not the safe executor for photo recovery.
+
+### Why it looked like Codex stopped reading photos
+
+- At `10:51`, the bridge photo run both read the image and saved the answer in time.
+- Later failures were race/runtime failures after image read started:
+  - assistant reply was not durably synced in time, or
+  - the bridge worker stalled in the ephemeral photo execution path, or
+  - stale photo commands were requeued instead of being terminally resolved.
+- Yellow processing cards only exposed this more honestly; they were not the cause.
+
+### Fix applied
+
+- Moved ephemeral photo execution off the Node child-process path into a dedicated Python runner script.
+- Kept photo prompts on the bridge photo-only prompt path.
+- Prevented stale photo commands from falling back to Slack.
+- Required command finalization only after assistant reply sync.
+- Revalidated live with two real photo smokes:
+  - `4113f59d-9aa5-45ad-9e5b-4cb107ee748c` requested `cloud`, auto-routed to `bridge`, finished `answered`
+  - `79bcae9d-b1b2-49b8-98aa-f34a37f4457a` requested `bridge`, finished `answered`
+
+### Saved stable point
+
+- Live rollback point saved: production build `20260418-1518`
+- App notification sent with working-state confirmation and version anchor
+
+## 2026-04-19 Slack Executor Identity Check
+
+### Newly confirmed observations
+
+- In the production Slack workspace, manual mention attempts in the dispatch thread do not expose a separate `@Codex` actor.
+- Typing `@Codex` in the tested thread resolves to `@Codex Links`, which is the local Slack app used by Links itself.
+- Manual thread prompts sent to `@Codex Links` produced no executor reply, which is expected for the Links app and does not validate Codex Cloud execution.
+- Local/prod-aligned config inspection shows `SLACK_CODEX_USER_ID=U0ATJCS3UE5`.
+- Slack channel history confirms `U0ATJCS3UE5` is the same human Slack user who authored the manual test messages in the dispatch channel.
+- Therefore, Links root task messages are currently mentioning the human operator instead of a distinct Codex executor actor.
+- Fresh production probes still show:
+  - text commands can stop at `slack_thread_mapped` with no `workerReplySeen`, or occasionally surface only an unthreaded fallback reply;
+  - photo commands reach `slack_file_open_ok` with hosted Slack file access confirmed, but still show no `workerReplySeen`.
+
+### Updated interpretation
+
+- The remaining blocker is no longer consistent with `OPENAI_API_KEY` being missing on the Links Pages project for the Slack route.
+- The more likely remaining failure is that the configured Slack executor identity is wrong.
+- The current `SLACK_CODEX_USER_ID` points to a human Slack user, not to a distinct Codex executor app/user.
+- This moves the primary suspicion away from Links photo upload and toward one of these external conditions:
+  - the official OpenAI Codex Slack integration is not installed or not available in the workspace;
+  - the configured `SLACK_CODEX_USER_ID` points to a non-executor actor;
+  - the intended external executor exists, but its Slack thread/event behavior is not wired to respond in the observed channel/thread context.
+
+### Operational consequence
+
+- Manual Slack testing with `@Codex Links` must not be treated as a valid Codex Cloud test.
+- Until a distinct executor actor is identified in Slack, `cloud via Slack` cannot be considered fully verified even when Links dispatch, thread mapping, photo upload, and Slack file-open checks all succeed.
+
+### Recommended next actions
+
+1. In Slack admin/app inventory, verify whether an official OpenAI Codex app or any distinct executor app/user is installed in the workspace.
+2. Replace the production `SLACK_CODEX_USER_ID` with the real executor app/user id, not the human operator id `U0ATJCS3UE5`.
+3. If no distinct executor actor exists, treat the issue as missing Slack executor installation/access rather than a Links-side runtime bug.
+4. If a distinct executor actor does exist, test that actor manually in the same channel/thread and confirm whether replies stay threaded.

@@ -5,7 +5,7 @@ import {
   runCommandMaintenance
 } from "../../_lib/commands.js";
 import { handleOptions, json } from "../../_lib/http.js";
-import { isSlackDispatchConfigured } from "../../_lib/dispatch.js";
+import { isCloudDispatchConfigured, isSlackDispatchConfigured } from "../../_lib/dispatch.js";
 import { isAuthorized } from "../../_lib/security.js";
 import { readRuntimeConfig } from "../../_lib/config.js";
 import {
@@ -60,6 +60,7 @@ export async function onRequest(context) {
   }
 
   const runtimeConfig = await readRuntimeConfig(env);
+  const allowCloud = isCloudDispatchConfigured(runtimeConfig);
   const allowSlack = isSlackDispatchConfigured(runtimeConfig);
   const commandId = String(payload?.commandId || "").trim();
   const clientId = String(payload?.clientId || "").trim();
@@ -97,7 +98,7 @@ export async function onRequest(context) {
   }
 
   const maintenance = await runCommandMaintenance(env, {
-    preferSlack: allowSlack,
+    preferCloud: allowCloud,
     fallbackToLocal: true
   });
 

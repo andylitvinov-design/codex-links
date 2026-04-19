@@ -1,13 +1,12 @@
 # Codex Links
 
-Cloudflare Pages inbox for links and Codex tasks, with production cloud execution routed through Slack-backed Codex Cloud by default and direct OpenAI kept as an optional path.
+Cloudflare Pages inbox for links and Codex tasks, with production cloud execution routed through a private trusted cloud bridge running on a machine that is already logged into Codex via ChatGPT.
 
 ## Current Architecture
 
 - Public UI and API: Cloudflare Pages
-- Primary executor: `Codex Cloud via Slack`
+- Primary executor: `Trusted Codex Cloud`
 - Secondary executor: local bridge on Mac
-- Optional executor: `Direct OpenAI cloud`
 - Source repo for cloud tasks: `andylitvinov-design/codex-links`
 
 Delivery pipeline is intentionally narrow:
@@ -19,15 +18,14 @@ Operational rules now are:
 - `POST /api/commands` creates and dispatches only the new command
 - `GET /api/commands` and `GET /api/status` are read-only
 - `POST /api/commands` is the primary cloud execution path
-- fallback is one-shot only and ordered as `direct-openai -> cloud-via-slack -> local-bridge`
-- stale timeout recovery and legacy reply sync moved out of hot paths into admin maintenance
+- stale timeout recovery and bridge-to-cloud reroute live in admin maintenance
+- legacy Slack records remain readable, but new production cloud dispatch must not depend on Slack or API keys
 
 ## What The App Does
 
 - Stores links in Cloudflare KV
 - Accepts commands from the mobile UI through `POST /api/commands`
-- Dispatches cloud commands to Slack-backed Codex Cloud by default
-- Keeps direct OpenAI Responses API available for explicit opt-in
+- Dispatches cloud commands to a private trusted cloud bridge
 - Mirrors assistant replies and PR links back into the mobile timeline
 
 ## Delivery Maintenance
@@ -40,10 +38,38 @@ This endpoint is authorized-only and is the place for:
 
 - stale timeout evaluation
 - one-shot fallback application
-- optional legacy Slack reply sync
+- optional legacy Slack reply sync for old records only
 - redispatch of commands that were switched to cloud during maintenance
 
 Normal UI polling must not depend on this endpoint.
+
+## Trusted Cloud Mode
+
+Production Cloud mode is:
+
+- `browser -> Cloudflare Pages -> private cloud bridge -> local Codex CLI using existing ChatGPT login`
+
+Important boundaries:
+
+- the browser never talks directly to the private bridge
+- the browser never receives Codex auth material
+- Pages never stores or proxies local Codex login state
+- the private bridge authenticates Pages requests with an HMAC shared secret
+- the private bridge pushes progress and results back through `/api/commands`, `/api/messages`, and `/api/status`
+
+Security notes and limitations:
+
+- this is a personal trusted setup, not a public multi-user execution service
+- do not expose `CLOUD_BRIDGE_SHARED_SECRET`, `LINKS_WRITE_TOKEN`, or any local Codex auth files to the browser
+- keep the private bridge bound to a private interface or a private tunnel only
+- if the trusted machine is offline, Cloud mode should fail clearly; it should not silently fall back to API-key or Slack execution
+
+Minimal diagnostics:
+
+- Pages executor status: `GET /api/status`
+- Browser-visible command lifecycle: `GET /api/commands?id=<command-id>`
+- Private bridge readiness: `GET /healthz` on the trusted bridge
+- Local checks: `npm run cloud:check`, `npm run cloud:smoke`, `npm run cloud:photo-smoke`
 
 ## Saved Audit Notes
 
@@ -52,6 +78,15 @@ Latest saved context-routing summary:
 - repo copy: [docs/project-context-audit-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/project-context-audit-2026-04-17.md)
 - static online copy after deploy: `/project-context-audit-2026-04-17.md`
 - weekly error and findings log: [docs/weekly-errors-and-findings-2026-04-17.md](/Users/andriilitvinov/projects/MYPROJECTS/links/docs/weekly-errors-and-findings-2026-04-17.md)
+
+Latest saved live rollback point:
+
+- production build: `20260418-1518`
+- verified on: `2026-04-18`
+- verified paths:
+  - `Bridge` photo -> `answered`
+  - `Cloud` photo -> auto-route to local bridge for photo -> `answered`
+- notification written to app tab `Уведомления`: `notification:all-good:20260418-1708`
 
 ## Project To Repo Alignment
 
@@ -105,6 +140,8 @@ Normalized delivery fields stored on commands:
 - `replyMatched`
 - `replyMatchedBy`
 - `timeoutPhase`
+- `cloudJobId`
+- `progressMessage`
 
 Legacy status:
 
@@ -118,44 +155,52 @@ Set these in Cloudflare Pages for project `codex-links`:
 
 ```bash
 npx wrangler pages secret put LINKS_WRITE_TOKEN --project-name codex-links
-npx wrangler pages secret put OPENAI_API_KEY --project-name codex-links
 npx wrangler pages secret put COMMAND_DISPATCH_MODE --project-name codex-links
+npx wrangler pages secret put CLOUD_BRIDGE_BASE_URL --project-name codex-links
+npx wrangler pages secret put CLOUD_BRIDGE_SHARED_SECRET --project-name codex-links
 ```
 
-Slack cloud secrets:
+Optional Pages runtime config:
 
 ```bash
-npx wrangler pages secret put SLACK_BOT_TOKEN --project-name codex-links
-npx wrangler pages secret put SLACK_SIGNING_SECRET --project-name codex-links
-npx wrangler pages secret put SLACK_CODEX_CHANNEL_ID --project-name codex-links
-npx wrangler pages secret put SLACK_CODEX_USER_ID --project-name codex-links
+npx wrangler pages secret put CLOUD_BRIDGE_REQUEST_TIMEOUT_MS --project-name codex-links
 ```
 
 Recommended values:
 
-- `COMMAND_DISPATCH_MODE=cloud-via-slack`
-- `COMMAND_DISPATCH_MODE=direct-openai` only when you explicitly want direct OpenAI as default
-- Keep `OPENAI_API_KEY` only in the Pages environment when direct mode is needed
-- Slack variables are the default production route
+- `COMMAND_DISPATCH_MODE=cloud`
+- `CLOUD_BRIDGE_BASE_URL` should point at the private bridge URL, not a public browser-facing URL
+- `CLOUD_BRIDGE_SHARED_SECRET` must match the trusted machine value exactly
+
+Trusted machine environment:
+
+```bash
+export LINKS_BASE_URL="https://codex-links.pages.dev"
+export LINKS_WRITE_TOKEN="<pages-write-token>"
+export CLOUD_BRIDGE_SHARED_SECRET="<same-shared-secret>"
+export CLOUD_BRIDGE_BIND_HOST="127.0.0.1"
+export CLOUD_BRIDGE_PORT="8788"
+export CODEX_BIN="/Users/andriilitvinov/.npm-global/bin/codex"
+```
 
 ## Cloud Setup
 
-1. Set Slack secrets in the Cloudflare Pages project.
-2. Set `COMMAND_DISPATCH_MODE=cloud-via-slack`.
-3. If you need the optional direct path, also set `OPENAI_API_KEY`.
-4. Run `npm run cloud:check`.
-5. Run `npm run cloud:smoke`.
+1. Set the Pages secrets for `LINKS_WRITE_TOKEN`, `COMMAND_DISPATCH_MODE`, `CLOUD_BRIDGE_BASE_URL`, and `CLOUD_BRIDGE_SHARED_SECRET`.
+2. Start the trusted machine bridge with `npm run cloud:bridge:start`.
+3. Run `npm run cloud:check`.
+4. Run `npm run cloud:smoke`.
+5. Run `npm run cloud:photo-smoke`.
 
 Quick helpers added to this repo:
 
-- Slack app manifest for legacy maintenance: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
+- Private bridge server: `npm run cloud:bridge:start`
 - Local/prod setup check: `npm run cloud:check`
-- End-to-end text smoke for the default Slack cloud path: `npm run cloud:smoke`
-- End-to-end text smoke for the optional direct path: `CODEX_LINKS_SMOKE_CLOUD_ROUTE=direct npm run cloud:smoke`
+- End-to-end text smoke for trusted cloud: `npm run cloud:smoke`
+- End-to-end photo smoke for trusted cloud: `npm run cloud:photo-smoke`
 - Bulk Pages secret upload from `.dev.vars`: `npm run cloud:install-secrets`
 - KV-backed runtime config upload from `.dev.vars`: `npm run cloud:save-config`
 
-If you do not want to manage Cloudflare Pages settings manually, `cloud:save-config` can store non-secret runtime settings in KV using only `LINKS_WRITE_TOKEN`. Keep `OPENAI_API_KEY` in the Pages environment; do not store it in KV.
+If you do not want to manage Cloudflare Pages settings manually, `cloud:save-config` can store non-secret runtime settings in KV using only `LINKS_WRITE_TOKEN`. Keep `CLOUD_BRIDGE_SHARED_SECRET` in the Pages environment; do not store it in KV.
 
 ## Local Development
 
@@ -179,7 +224,6 @@ Production flow is now fixed as:
 
 - `branch -> PR -> merge -> Pages deploy`
 - `main` is the only production branch
-- do not batch merges for later release; each merged production fix must be deployed to live immediately in the same work session
 - ChatGPT/Codex changes are complete only after a commit or PR exists and the deploy status is known
 
 Expected platform setup for this repo:
@@ -252,6 +296,8 @@ curl -X POST "https://<your-domain>/api/commands" \
 ```
 
 ### Slack inbound
+
+Legacy only for historical reply ingestion and maintenance. New production Cloud mode must not depend on this path.
 
 Slack sends signed webhook events to:
 

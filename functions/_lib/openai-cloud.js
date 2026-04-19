@@ -52,17 +52,12 @@ function buildCloudInput(command) {
 
   return [
     {
-      role: "user",
-      content: [
-        {
-          type: "input_text",
-          text: prompt
-        },
-        {
-          type: "input_image",
-          image_url: photoDataUrl
-        }
-      ]
+      type: "input_text",
+      text: prompt
+    },
+    {
+      type: "input_image",
+      image_url: photoDataUrl
     }
   ];
 }
