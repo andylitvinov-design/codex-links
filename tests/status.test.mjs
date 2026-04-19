@@ -41,3 +41,21 @@ test("readBridgeStatus rewrites legacy slack cloud status to trusted cloud when 
   assert.equal(status.dispatchMode, "cloud");
   assert.equal(status.executorLabel, "Trusted Codex Cloud");
 });
+
+test("readBridgeStatus rewrites local bridge status to trusted cloud when bridge is configured", async () => {
+  const env = createMockEnv();
+  env.CLOUD_BRIDGE_BASE_URL = "https://bridge.codex-links.example.com";
+  env.CLOUD_BRIDGE_SHARED_SECRET = "secret";
+
+  await env.LINKS_STORE.put(BRIDGE_STATUS_STORAGE_KEY, JSON.stringify({
+    bridgeOnline: true,
+    state: "running",
+    dispatchMode: "local-bridge",
+    executorLabel: "Local bridge"
+  }));
+
+  const status = await readBridgeStatus(env);
+
+  assert.equal(status.dispatchMode, "cloud");
+  assert.equal(status.executorLabel, "Trusted Codex Cloud");
+});

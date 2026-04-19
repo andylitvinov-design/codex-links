@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 
 import { verifyBridgeRequestSignature } from "./cloud-bridge-auth.mjs";
 import { createCloudBridgeHealthPayload, processTrustedCloudJob } from "./cloud-bridge-runner.mjs";
-import { getFailureAssistantText } from "./shared-codex-executor.mjs";
+import { classifyTrustedCloudFailure, getFailureAssistantText } from "./shared-codex-executor.mjs";
 
 const LINKS_BASE_URL = String(process.env.LINKS_BASE_URL || "https://codex-links.pages.dev").trim().replace(/\/+$/, "");
 const LINKS_WRITE_TOKEN = String(process.env.LINKS_WRITE_TOKEN || "").trim();
@@ -127,10 +127,18 @@ async function markAnswered(command, jobId, assistantText, acceptedAt) {
     progressMessage: "Trusted cloud bridge completed the job.",
     prUrl: extractPrUrl(assistantText)
   });
+  await publishStatus("idle", {
+    lastCompletedAt: completedAt,
+    lastSuccessAt: completedAt,
+    lastDeliveredCount: 1,
+    lastError: ""
+  });
 }
 
 async function markFailed(command, jobId, acceptedAt, error) {
   const completedAt = new Date().toISOString();
+  const diagnosticCode = classifyTrustedCloudFailure(error);
+  const diagnosticDetail = String(error?.message || "").trim().slice(0, 500);
   await postJson("/api/commands", {
     action: "fail",
     id: command.id,
@@ -141,10 +149,20 @@ async function markFailed(command, jobId, acceptedAt, error) {
     firstExecutorAckSeenAt: acceptedAt,
     actualDispatchMode: "cloud",
     cloudJobId: jobId,
-    progressMessage: "Trusted cloud bridge failed the job.",
-    lastDiagnosticCode: "cloud_bridge_execution_failed",
-    lastDiagnosticDetail: String(error?.message || "").trim().slice(0, 500),
+    progressMessage: diagnosticCode === "cloud_bridge_timeout"
+      ? "Trusted cloud bridge timed out while running Codex."
+      : diagnosticCode === "cloud_bridge_photo_not_visible"
+        ? "Trusted cloud bridge could not read visible photo content."
+        : diagnosticCode === "cloud_bridge_no_final_answer"
+          ? "Trusted cloud bridge completed without a final assistant reply."
+          : "Trusted cloud bridge failed the job.",
+    lastDiagnosticCode: diagnosticCode,
+    lastDiagnosticDetail: diagnosticDetail,
     errorMessage: getFailureAssistantText(error)
+  });
+  await publishStatus("degraded", {
+    lastCompletedAt: completedAt,
+    lastError: diagnosticDetail || "Trusted cloud bridge execution failed."
   });
 }
 
@@ -172,19 +190,11 @@ async function processJob(job) {
   if (result.ok) {
     lastError = "";
     lastCompletedAt = new Date().toISOString();
-    await publishStatus("idle", {
-      lastSuccessAt: lastCompletedAt,
-      lastDeliveredCount: 1,
-      lastError: ""
-    });
     return;
   }
 
   lastError = String(result.error?.message || "Trusted cloud bridge execution failed.").trim();
   lastCompletedAt = new Date().toISOString();
-  await publishStatus("degraded", {
-    lastError
-  });
 }
 
 async function drainQueue() {

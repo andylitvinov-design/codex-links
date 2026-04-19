@@ -8,6 +8,7 @@
     "deploy": "wrangler pages deploy public --project-name codex-links",
     "kv:seed": "node scripts/seed-demo.mjs",
     "cloud:check": "node scripts/check-cloud-setup.mjs",
+    "cloud:preview-check": "node scripts/check-preview-cloud-status.mjs",
     "cloud:smoke": "node scripts/smoke-cloud-delivery.mjs",
     "cloud:photo-smoke": "node scripts/smoke-cloud-photo-delivery.mjs",
     "cloud:bridge:start": "node scripts/cloud-bridge-server.mjs",

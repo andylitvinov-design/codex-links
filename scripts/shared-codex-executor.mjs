@@ -407,6 +407,43 @@ export async function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = 
   };
 }
 
+const ECHO_PREFIXES = [
+  "New Codex Links task.",
+  "Codex Links fast photo task.",
+  "Codex Links photo retry.",
+  "New Codex Links bridge task.",
+  "Codex Links photo task."
+];
+
+function stripKnownTaskPreamble(text) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  const paragraphs = value
+    .split(/\n\s*\n/g)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (!paragraphs.length) {
+    return "";
+  }
+
+  const startsWithEchoPrefix = ECHO_PREFIXES.some((prefix) => paragraphs[0].startsWith(prefix));
+
+  if (!startsWithEchoPrefix) {
+    return value;
+  }
+
+  if (paragraphs.length === 1) {
+    return "";
+  }
+
+  return paragraphs.slice(1).join("\n\n").trim();
+}
+
 export function stripPromptEcho(text, prompt = "") {
   const value = String(text || "").trim();
   const promptText = String(prompt || "").trim();
@@ -421,19 +458,11 @@ export function stripPromptEcho(text, prompt = "") {
     }
 
     if (value.startsWith(promptText)) {
-      return value.slice(promptText.length).trim();
+      return stripKnownTaskPreamble(value.slice(promptText.length).trim());
     }
   }
 
-  if (
-    value.startsWith("New Codex Links task.")
-    || value.startsWith("Codex Links fast photo task.")
-    || value.startsWith("Codex Links photo retry.")
-  ) {
-    return "";
-  }
-
-  return value;
+  return stripKnownTaskPreamble(value);
 }
 
 export function getImmediateAssistantText(result, prompt = "") {
@@ -447,11 +476,37 @@ export function getImmediateAssistantText(result, prompt = "") {
   return stdout || "";
 }
 
+export function classifyTrustedCloudFailure(error) {
+  const message = String(error?.message || "").trim();
+
+  if (/timed?\s*out|ETIMEDOUT|SIGTERM|killed/i.test(message)) {
+    return "cloud_bridge_timeout";
+  }
+
+  if (error?.photoUnsupportedReason) {
+    return "cloud_bridge_photo_not_visible";
+  }
+
+  if (/did not return a final answer text/i.test(message)) {
+    return "cloud_bridge_no_final_answer";
+  }
+
+  return "cloud_bridge_execution_failed";
+}
+
 export function getFailureAssistantText(error) {
   const message = String(error?.message || "").trim();
 
   if (/timed?\s*out|ETIMEDOUT|SIGTERM|killed/i.test(message)) {
     return "Codex did not answer in time. Retry with a shorter request or open Codex on the trusted machine for a longer task.";
+  }
+
+  if (error?.photoUnsupportedReason) {
+    return "PHOTO_NOT_VISIBLE";
+  }
+
+  if (/did not return a final answer text/i.test(message)) {
+    return "Trusted cloud completed without a final assistant reply. Check the bridge runner output and retry the command.";
   }
 
   return `Failed to get an answer from Codex: ${message || "unknown error"}`;

@@ -26,5 +26,11 @@ jobs:
       - name: Cloud setup check
         run: npm run cloud:check
 
+      - name: Preview trusted cloud check
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+        run: npm run cloud:preview-check
+
       - name: Release smoke check
         run: npm run smoke:release

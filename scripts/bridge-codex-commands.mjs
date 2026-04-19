@@ -39,6 +39,7 @@ const BRIDGE_ERROR_LOG_PATH = `${LOG_DIR}/codex-links-bridge.error.log`;
 const FETCH_RETRY_LIMIT = 3;
 const FETCH_RETRY_DELAY_MS = 1200;
 const OCR_TIMEOUT_MS = 20 * 1000;
+const BRIDGE_PROCESSOR_ID = String(process.env.LINKS_BRIDGE_PROCESSOR_ID || "codex-links-bridge").trim();
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
@@ -681,52 +682,7 @@ function runCodexResume(threadId, prompt, photoPath) {
 }
 
 function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
-  const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
-  return new Promise((resolve, reject) => {
-    const outputPath = join(tmpdir(), `codex-links-output-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
-    const args = [
-      "exec",
-      prompt,
-      "--ephemeral",
-      "--skip-git-repo-check",
-      "--dangerously-bypass-approvals-and-sandbox",
-      "-c",
-      'service_tier="fast"',
-      "-o",
-      outputPath
-    ];
-
-    if (cwd) {
-      args.push("-C", cwd);
-    }
-
-    if (photoPath) {
-      args.push("-i", photoPath);
-    }
-
-    execFile(codexBin, args, {
-      cwd: cwd || process.cwd(),
-      timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024
-    }, async (error, stdout, stderr) => {
-      const result = {
-        stdout: String(stdout || "").trim(),
-        stderr: String(stderr || "").trim(),
-        output: ""
-      };
-
-      try {
-        result.output = String(await readFile(outputPath, "utf8") || "").trim();
-      } catch {}
-
-      if (error) {
-        reject(new Error(result.stderr || result.stdout || error.message));
-        return;
-      }
-
-      resolve(result);
-    });
-  });
+  return sharedRunCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs);
 }
 
 async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC_TIMEOUT_MS, options = {}) {
@@ -789,7 +745,7 @@ async function claimNextCommand() {
       },
       body: JSON.stringify({
         action: "claim",
-        processorId: "launchd-bridge",
+        processorId: BRIDGE_PROCESSOR_ID,
         leaseMs: CLAIM_LEASE_MS
       })
     }, FETCH_TIMEOUT_MS, "claimNextCommand");
@@ -1023,48 +979,11 @@ function createMessageId(threadId, timestamp, text) {
 }
 
 function stripPromptEcho(text, prompt = "") {
-  const value = String(text || "").trim();
-  const promptText = String(prompt || "").trim();
-
-  if (!value) {
-    return "";
-  }
-
-  if (promptText) {
-    if (value === promptText) {
-      return "";
-    }
-
-    if (value.startsWith(promptText)) {
-      return value.slice(promptText.length).trim();
-    }
-  }
-
-  if (
-    value.startsWith("New Codex Links bridge task.")
-    || value.startsWith("Codex Links photo task.")
-    || value.startsWith("Codex Links photo retry.")
-  ) {
-    return "";
-  }
-
-  return value;
+  return sharedStripPromptEcho(text, prompt);
 }
 
 function getImmediateAssistantText(result, prompt = "") {
-  const output = stripPromptEcho(result?.output, prompt);
-
-  if (output) {
-    return output;
-  }
-
-  const stdout = stripPromptEcho(result?.stdout, prompt);
-
-  if (!stdout) {
-    return "";
-  }
-
-  return stdout;
+  return sharedGetImmediateAssistantText(result, prompt);
 }
 
 function extractTurnText(item) {

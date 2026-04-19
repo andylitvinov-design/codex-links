@@ -6,6 +6,7 @@ CLOUD_BRIDGE_LABEL=Trusted Codex Cloud
 CLOUD_BRIDGE_REQUEST_TIMEOUT_MS=20000
 PUBLIC_GA4_MEASUREMENT_ID=G-XXXXXXXXXX
 PUBLIC_GA4_DEBUG_MODE=0
+# Local dev may use 127.0.0.1. Preview and production must use a stable named Cloudflare Tunnel hostname, not trycloudflare.com.
 # Optional legacy-only Slack config:
 SLACK_BOT_TOKEN=xoxb-replace-me
 SLACK_SIGNING_SECRET=replace-me

@@ -13,6 +13,10 @@ const REQUIRED = [
   "CLOUD_BRIDGE_SHARED_SECRET"
 ];
 
+function isQuickTunnelUrl(value) {
+  return /(?:^https?:\/\/)?[^/]*trycloudflare\.com(?:\/|$)/i.test(String(value || "").trim());
+}
+
 function parseEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
     return {};
@@ -96,6 +100,8 @@ async function main() {
   console.log("");
 
   const missing = REQUIRED.filter((key) => !String(merged[key] || "").trim());
+  const localDispatchMode = String(merged.COMMAND_DISPATCH_MODE || "").trim();
+  const localBridgeBaseUrl = String(merged.CLOUD_BRIDGE_BASE_URL || "").trim();
 
   if (missing.length) {
     console.log(IS_CI ? "Missing local values (advisory in CI):" : "Missing local values:");
@@ -104,6 +110,20 @@ async function main() {
     }
   } else {
     console.log("All required local values are present.");
+  }
+
+  if (localDispatchMode && localDispatchMode !== "cloud") {
+    console.log(`Local dispatch mode must be cloud for trusted-cloud rollout, got: ${localDispatchMode}`);
+    if (!IS_CI) {
+      process.exitCode = 1;
+    }
+  }
+
+  if (localBridgeBaseUrl && isQuickTunnelUrl(localBridgeBaseUrl)) {
+    console.log("Local CLOUD_BRIDGE_BASE_URL points at a trycloudflare.com quick tunnel. Use a named tunnel hostname instead.");
+    if (!IS_CI) {
+      process.exitCode = 1;
+    }
   }
 
   console.log("");
@@ -124,8 +144,15 @@ async function main() {
     console.log(`- state: ${status.state || "unknown"}`);
     console.log(`- lastError: ${status.lastError || "none"}`);
 
-    if (String(status.dispatchMode || "").trim() === "slack-codex-cloud") {
-      console.log("- warning: production is still reporting legacy slack-codex-cloud, not trusted cloud.");
+    if (String(status.dispatchMode || "").trim() !== "cloud") {
+      console.log("- warning: production is not reporting trusted cloud dispatch mode.");
+      if (!IS_CI) {
+        process.exitCode = 1;
+      }
+    }
+
+    if (String(status.lastError || "").trim()) {
+      console.log("- warning: production status still reports a trusted-cloud error.");
       if (!IS_CI) {
         process.exitCode = 1;
       }
