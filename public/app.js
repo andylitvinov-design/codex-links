@@ -26,7 +26,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260419-0540";
+const BUILD_VERSION = "20260419-0605";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1020,9 +1020,18 @@ function formatProgressStage(progressStage, status) {
   const mapped = {
     created: "Команда создана",
     dispatching: "Отправляется исполнителю",
+    "slack-dispatched": "Отправлено в Slack Cloud",
+    "slack-creating-thread": "Slack создаёт thread для задачи",
+    "slack-waiting-ack": "Жду ack от Slack Cloud",
+    "slack-waiting-reply": "Slack Cloud принял задачу, жду reply",
+    "slack-reply-received": "Reply получен из Slack",
+    "slack-reply-received-unthreaded": "Reply найден вне thread и синхронизирован",
+    "slack-reply-unmatched": "Reply пришёл, но не привязался к команде",
     sent: "Отправлено в cloud",
     accepted: "Исполнитель подтвердил задачу",
     claimed: "Bridge забрал сообщение",
+    "preparing-input": "Готовлю входные данные",
+    "reading-codex-reply": "Читаю ответ Codex",
     processing: "Исполнитель работает",
     "waiting-for-codex": "Codex обрабатывает сообщение",
     "saving-reply": "Сохраняю ответ",
@@ -1113,6 +1122,18 @@ function getCommandDiagnosticMessage(command) {
     return "Bridge не забрал сообщение из очереди вовремя.";
   }
 
+  if (diagnosticCode === "slack_reply_unmatched") {
+    return "Cloud через Slack прислал reply, но система не смогла привязать его к этой команде.";
+  }
+
+  if (diagnosticCode === "slack_reply_unthreaded") {
+    return "Cloud через Slack ответил вне исходного thread. Ответ был найден через reconcile.";
+  }
+
+  if (diagnosticCode === "slack_dispatch_failed") {
+    return "Не удалось отправить задачу в Slack Cloud.";
+  }
+
   if (status === "failed" && fallbackReason === "local bridge stopped heartbeating") {
     return "Bridge перестал heartbeat'ить во время обработки.";
   }
@@ -1127,6 +1148,14 @@ function getCommandDiagnosticMessage(command) {
 
   if (fallbackReason === "local bridge stopped heartbeating") {
     return "Bridge перестал heartbeat’ить во время обработки.";
+  }
+
+  if (fallbackReason === "slack dispatch succeeded, but no codex acknowledgement was observed within the slack first-ack window.") {
+    return "Slack Cloud не подтвердил photo-задачу вовремя. Перевёл на bridge.";
+  }
+
+  if (fallbackReason === "no slack dispatch thread or codex acknowledgement was observed within the slack dispatch grace window.") {
+    return "Slack Cloud не создал thread вовремя. Перевёл на bridge.";
   }
 
   return "";
@@ -1313,18 +1342,19 @@ function syncCommandStatusFromState() {
   const isProcessing = ["dispatching", "accepted", "processing", "switched-to-bridge", "switched-to-cloud"].includes(lifecycleState);
   const tone = isProcessing ? "processing" : "queued";
   const deliveryLabel = getCommandActualExecutor(activeCommand);
+  const stageLabel = formatProgressStage(activeCommand?.progressStage, String(activeCommand?.status || "").trim().toLowerCase());
   const message = lifecycleState === "created"
     ? `Команда создана для ${getCommandRequestedExecutor(activeCommand)}…`
     : lifecycleState === "dispatching"
-      ? `Отправляю через ${getCommandRequestedExecutor(activeCommand)}…`
+      ? `${stageLabel}…`
     : lifecycleState === "accepted"
-      ? `Исполнитель ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel} подтвердил задачу…`
+      ? `${stageLabel}…`
     : lifecycleState === "switched-to-bridge"
       ? "Перевёл задачу на bridge…"
       : lifecycleState === "switched-to-cloud"
         ? "Перевёл задачу в cloud…"
         : isProcessing
-          ? `Обработка через ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel}…`
+          ? `${stageLabel}…`
           : `Сообщение в очереди (${getCommandRequestedExecutor(activeCommand)})…`;
 
   setCommandStatusMessage(message, { tone });

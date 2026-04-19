@@ -68,6 +68,24 @@ function getSlackResultWaitMs(command) {
   return command?.photo ? SLACK_PHOTO_RESULT_WAIT_MS : SLACK_RESULT_WAIT_MS;
 }
 
+async function setProgressStageIfChanged(env, command, progressStage, extras = {}) {
+  if (!command?.id || !progressStage) {
+    return command;
+  }
+
+  if (String(command.progressStage || "").trim() === String(progressStage).trim()) {
+    return command;
+  }
+
+  const updated = await updateCommandProgress(env, {
+    id: command.id,
+    progressStage,
+    ...extras
+  });
+
+  return updated.ok ? (updated.value || command) : command;
+}
+
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
   const hasPhoto = Boolean(payload?.photo && typeof payload.photo === "object");
   const requestedExecutor = String(
@@ -701,7 +719,7 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     const dispatched = await markCommandDispatched(env, {
       id: command.id,
       dispatchMode,
-      progressStage: "dispatched",
+      progressStage: "slack-dispatched",
       dispatchStartedAt,
       slackPostedAt: new Date().toISOString(),
       slackChannelId: published.channel,
@@ -806,6 +824,11 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
 
       if (String(command.slackChannelId || "").trim() && String(command.slackThreadTs || command.slackMessageTs || "").trim()) {
         dispatchObservedAt = dispatchObservedAt || Date.now();
+        command = await setProgressStageIfChanged(
+          env,
+          command,
+          String(command.firstExecutorAckSeenAt || "").trim() ? "slack-waiting-reply" : "slack-waiting-ack"
+        );
 
         try {
           await syncSpecificSlackReplies(env, runtimeConfig, [command]);
@@ -855,6 +878,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
       }
 
       if ((Date.now() - startedAt) < SLACK_DISPATCH_GRACE_MS) {
+        command = await setProgressStageIfChanged(env, command, "slack-creating-thread");
         continue;
       }
 
