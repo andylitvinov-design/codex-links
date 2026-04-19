@@ -49,6 +49,8 @@ const SLACK_DISPATCH_GRACE_MS = 10_000;
 const SLACK_FIRST_ACK_TIMEOUT_MS = 12_000;
 const SLACK_RESULT_WAIT_MS = 30_000;
 const SLACK_SYNC_POLL_MS = 2_000;
+const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 45_000;
+const SLACK_PHOTO_RESULT_WAIT_MS = 120_000;
 
 function logCommandError(context, error, extra = {}) {
   const message = error instanceof Error ? error.message : String(error || "Unknown error");
@@ -56,6 +58,14 @@ function logCommandError(context, error, extra = {}) {
     ...extra,
     error: message
   });
+}
+
+function getSlackFirstAckTimeoutMs(command) {
+  return command?.photo ? SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS : SLACK_FIRST_ACK_TIMEOUT_MS;
+}
+
+function getSlackResultWaitMs(command) {
+  return command?.photo ? SLACK_PHOTO_RESULT_WAIT_MS : SLACK_RESULT_WAIT_MS;
 }
 
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
@@ -772,8 +782,10 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
   if (command.dispatchMode === DISPATCH_MODE_SLACK) {
     const startedAt = Date.now();
     let dispatchObservedAt = 0;
+    const firstAckTimeoutMs = getSlackFirstAckTimeoutMs(command);
+    const resultWaitMs = getSlackResultWaitMs(command);
 
-    while ((Date.now() - startedAt) < SLACK_RESULT_WAIT_MS) {
+    while ((Date.now() - startedAt) < resultWaitMs) {
       await sleep(SLACK_SYNC_POLL_MS);
       command = await getCommandById(env, commandId);
 
@@ -819,7 +831,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
         }
 
         if (
-          (Date.now() - dispatchObservedAt) >= SLACK_FIRST_ACK_TIMEOUT_MS
+          (Date.now() - dispatchObservedAt) >= firstAckTimeoutMs
           && canFallbackToLocalBridge(command)
         ) {
           const fallbackCommand = await fallbackToLocalBridge(env, command, {

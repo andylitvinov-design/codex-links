@@ -1301,8 +1301,11 @@ export async function markCommandAnswered(env, input = {}) {
       resultAt: normalizeDateValue(input.resultAt) || nowIso,
       photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoAttached || command.photoSeenByBridge),
       timeoutPhase: "",
-      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
-      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      fallbackApplied: typeof input.fallbackApplied === "boolean" ? input.fallbackApplied : command.fallbackApplied,
+      fallbackCount: Object.prototype.hasOwnProperty.call(input, "fallbackCount") ? input.fallbackCount : command.fallbackCount,
+      fallbackReason: input.fallbackReason || command.fallbackReason,
+      lastDiagnosticCode: Object.prototype.hasOwnProperty.call(input, "lastDiagnosticCode") ? input.lastDiagnosticCode : "",
+      lastDiagnosticDetail: Object.prototype.hasOwnProperty.call(input, "lastDiagnosticDetail") ? input.lastDiagnosticDetail : "",
       firstExecutorAckSeenAt: normalizeDateValue(input.firstExecutorAckSeenAt) || command.firstExecutorAckSeenAt || normalizeDateValue(input.firstAckAt) || nowIso,
       firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt) || command.firstReplySeenAt || nowIso,
       replyIngestedAt: normalizeDateValue(input.replyIngestedAt) || command.replyIngestedAt || nowIso
