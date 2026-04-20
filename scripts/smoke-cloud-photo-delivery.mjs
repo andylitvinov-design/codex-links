@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
 const BASE_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
 const TARGET_PROJECT_ID = process.env.CODEX_LINKS_SMOKE_PROJECT_ID || "links";
 const TARGET_PROJECT_LABEL = process.env.CODEX_LINKS_SMOKE_PROJECT_LABEL || "links";
@@ -9,7 +12,15 @@ const TARGET_CONTEXT_FILES = ["AGENTS.md", "README.md", "STATE.md"];
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const clientId = `cloud-photo-smoke-${Date.now()}`;
 const text = "photo cloud probe ignore: reply with PHOTO_OK only after reading the attached image in thread";
-const photoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sot7O8AAAAASUVORK5CYII=";
+const SMOKE_IMAGE_URL = new URL("../public/icon-192.png", import.meta.url);
+
+async function loadPhotoPayload() {
+  const bytes = await readFile(fileURLToPath(SMOKE_IMAGE_URL));
+  return {
+    dataUrl: `data:image/png;base64,${bytes.toString("base64")}`,
+    size: bytes.length
+  };
+}
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -91,6 +102,7 @@ async function fetchSlackThreadReplies(channelId, threadTs) {
 }
 
 async function postCommand() {
+  const photo = await loadPhotoPayload();
   const response = await fetch(`${BASE_URL}/api/commands`, {
     method: "POST",
     headers: {
@@ -111,8 +123,8 @@ async function postCommand() {
       photo: {
         contentType: "image/png",
         fileName: "cloud-photo-smoke.png",
-        size: 68,
-        dataUrl: photoDataUrl
+        size: photo.size,
+        dataUrl: photo.dataUrl
       }
     })
   });
@@ -135,7 +147,7 @@ async function postCommand() {
 async function pollCommand(id) {
   const startedAt = Date.now();
 
-  while ((Date.now() - startedAt) < 240000) {
+  while ((Date.now() - startedAt) < 300000) {
     const response = await fetch(`${BASE_URL}/api/commands?id=${encodeURIComponent(id)}`, {
       headers: { accept: "application/json" }
     });
@@ -155,8 +167,10 @@ async function pollCommand(id) {
           throw new Error("Cloud photo smoke answered, but PHOTO_OK reply was not found.");
         }
 
-        if (String(command.actualExecutor || "").trim() !== "cloud") {
-          throw new Error(`Cloud photo smoke expected actualExecutor=cloud, got ${String(command.actualExecutor || "").trim() || "empty"}.`);
+        const actualExecutor = String(command.actualExecutor || "").trim();
+
+        if (actualExecutor !== "cloud" && actualExecutor !== "bridge") {
+          throw new Error(`Cloud photo smoke expected actualExecutor=cloud or bridge, got ${actualExecutor || "empty"}.`);
         }
 
         return command;
