@@ -253,36 +253,61 @@ function sleep(ms) {
 
 async function runWithProgressHeartbeat(commandId, progressStage, task) {
   if (!commandId) {
-    return task()
+    return task();
   }
 
-  let stopped = false
-  let timer = null
+  let stopped = false;
+  let timer = null;
+  let activeTick = null;
 
   const tick = async () => {
     if (stopped) {
-      return
+      return;
     }
+
+    const currentTick = (async () => {
+      try {
+        await updateProgress(commandId, progressStage);
+      } catch (error) {
+        await appendBridgeErrorLog("runWithProgressHeartbeat.updateProgress", error, {
+          commandId,
+          progressStage
+        });
+      }
+    })();
+
+    activeTick = currentTick;
 
     try {
-      await updateProgress(commandId, progressStage)
+      await currentTick;
     } finally {
+      if (activeTick === currentTick) {
+        activeTick = null;
+      }
+
       if (!stopped) {
-        timer = setTimeout(tick, TURN_PROGRESS_HEARTBEAT_MS)
-        timer.unref?.()
+        timer = setTimeout(() => {
+          void tick();
+        }, TURN_PROGRESS_HEARTBEAT_MS);
+        timer.unref?.();
       }
     }
-  }
+  };
 
-  timer = setTimeout(tick, TURN_PROGRESS_HEARTBEAT_MS)
-  timer.unref?.()
+  timer = setTimeout(() => {
+    void tick();
+  }, TURN_PROGRESS_HEARTBEAT_MS);
+  timer.unref?.();
 
   try {
-    return await task()
+    return await task();
   } finally {
-    stopped = true
+    stopped = true;
     if (timer) {
-      clearTimeout(timer)
+      clearTimeout(timer);
+    }
+    if (activeTick) {
+      await activeTick;
     }
   }
 }
