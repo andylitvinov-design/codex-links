@@ -502,6 +502,26 @@ async function extractPhotoOcrText(commandId, photoPath) {
   }
 }
 
+function normalizePhotoOcrHint(rawText) {
+  const text = String(rawText || "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const collapsed = text.replace(/\s+/g, " ").trim();
+
+  if (collapsed.length < 3) {
+    return "";
+  }
+
+  if (!/[A-Za-z0-9\u0400-\u04FF]/.test(collapsed)) {
+    return "";
+  }
+
+  return collapsed;
+}
+
 function buildBridgeContextFilePaths(command) {
   const workspacePath = String(command?.targetWorkspacePath || "").trim();
   const contextFiles = Array.isArray(command?.targetContextFiles)
@@ -1282,7 +1302,7 @@ while (true) {
 
     await updateProgress(command.id, "preparing-input");
     const photoPath = await materializePhoto(command);
-    const photoOcrText = photoPath ? await extractPhotoOcrText(command.id, photoPath) : "";
+    const photoOcrText = photoPath ? normalizePhotoOcrHint(await extractPhotoOcrText(command.id, photoPath)) : "";
     const input = buildInput(command, photoPath, photoOcrText);
 
     if (!input.length) {
@@ -1294,6 +1314,7 @@ while (true) {
       .map((item) => String(item.text).trim())
       .filter(Boolean)
       .join("\n\n");
+    const photoPrompt = photoPath ? buildPhotoOnlyPrompt(command, photoOcrText) : "";
 
     if (!prompt && !photoPath) {
       throw new Error(`Command ${command.id} has no CLI-deliverable content.`);
@@ -1313,12 +1334,12 @@ while (true) {
       if (photoPath) {
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           runCodexExecEphemeral(
-            prompt || "See attached image and respond.",
+            photoPrompt || "See attached image and respond.",
             photoPath,
             String(command?.targetWorkspacePath || "").trim() || process.cwd()
           )
         );
-        assistantText = getImmediateAssistantText(result, prompt);
+        assistantText = getImmediateAssistantText(result, photoPrompt);
 
         if (isPhotoVisibilityFailure(assistantText)) {
           await updateProgress(command.id, "retrying-photo-read");
@@ -1385,7 +1406,7 @@ while (true) {
       assistantText = await getThreadFallbackAssistantText(command, threadId);
     }
 
-    assistantText = stripPromptEcho(assistantText, prompt);
+    assistantText = stripPromptEcho(assistantText, photoPath ? photoPrompt : prompt);
 
     const photoUnsupportedReason = photoPath ? getPhotoUnsupportedReason(assistantText) : "";
 
