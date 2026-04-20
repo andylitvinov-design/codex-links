@@ -975,20 +975,26 @@ export async function claimNextCommand(env, input = {}) {
   }
 
   const queuedCommands = await readStoredCommandsByIds(env, queuedIds);
-  const candidate = queuedCommands.find((command) => {
+  const isClaimableLocalQueued = (command) => {
     if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "queued") {
       return false;
     }
 
     const threadKey = getCommandThreadKey(command);
     return threadKey === "::" || !activeThreadKeys.has(threadKey);
-  });
+  };
+  let candidate = queuedCommands.find((command) => isClaimableLocalQueued(command));
 
   if (!candidate) {
-    return {
-      ok: true,
-      value: null
-    };
+    const snapshotCommands = await readCommands(env);
+    candidate = snapshotCommands.find((command) => isClaimableLocalQueued(command)) || null;
+
+    if (!candidate) {
+      return {
+        ok: true,
+        value: null
+      };
+    }
   }
 
   const claimed = {
