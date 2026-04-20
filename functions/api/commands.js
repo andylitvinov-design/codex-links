@@ -45,9 +45,9 @@ import {
 } from "../_lib/delivery.js";
 
 const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
-const SLACK_DISPATCH_GRACE_MS = 10_000;
-const SLACK_FIRST_ACK_TIMEOUT_MS = 12_000;
-const SLACK_RESULT_WAIT_MS = 30_000;
+const SLACK_DISPATCH_GRACE_MS = 15_000;
+const SLACK_FIRST_ACK_TIMEOUT_MS = 30_000;
+const SLACK_RESULT_WAIT_MS = 120_000;
 const SLACK_SYNC_POLL_MS = 2_000;
 
 function logCommandError(context, error, extra = {}) {
