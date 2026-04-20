@@ -11,6 +11,7 @@ const EXEC_TIMEOUT_MS = 4 * 60 * 1000;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const READ_TIMEOUT_MS = 15 * 1000;
 const WRITE_TIMEOUT_MS = 60 * 1000;
+const SNAPSHOT_TIMEOUT_MS = 3 * 1000;
 const BRIDGE_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
@@ -501,6 +502,26 @@ async function extractPhotoOcrText(commandId, photoPath) {
   }
 }
 
+function normalizePhotoOcrHint(rawText) {
+  const text = String(rawText || "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const collapsed = text.replace(/\s+/g, " ").trim();
+
+  if (collapsed.length < 3) {
+    return "";
+  }
+
+  if (!/[A-Za-z0-9\u0400-\u04FF]/.test(collapsed)) {
+    return "";
+  }
+
+  return collapsed;
+}
+
 function buildBridgeContextFilePaths(command) {
   const workspacePath = String(command?.targetWorkspacePath || "").trim();
   const contextFiles = Array.isArray(command?.targetContextFiles)
@@ -795,11 +816,11 @@ async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC
 }
 
 async function fetchRecentCommands() {
-  const response = await fetchWithRetry(getPendingUrl(), {
+  const response = await fetchWithTimeout(getPendingUrl(), {
     headers: {
       accept: "application/json"
     }
-  }, READ_TIMEOUT_MS, "fetchRecentCommands");
+  }, SNAPSHOT_TIMEOUT_MS);
 
   if (!response.ok) {
     throw new Error(`Failed to load pending commands: ${response.status}`);
@@ -807,6 +828,15 @@ async function fetchRecentCommands() {
 
   const data = await response.json();
   return Array.isArray(data.commands) ? data.commands : [];
+}
+
+async function safeFetchRecentCommands(context = "fetchRecentCommands") {
+  try {
+    return await fetchRecentCommands();
+  } catch (error) {
+    await appendBridgeErrorLog(context, error);
+    return [];
+  }
 }
 
 async function claimNextCommand() {
@@ -1184,7 +1214,7 @@ function getFailureAssistantText(error) {
   return `Не удалось получить ответ от Codex: ${message || "неизвестная ошибка"}`;
 }
 
-const initialCommands = await fetchRecentCommands();
+const initialCommands = await safeFetchRecentCommands("initialRecentCommands");
 const initialQueued = initialCommands
   .filter((command) => command?.status === "queued")
   .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));
@@ -1272,7 +1302,7 @@ while (true) {
 
     await updateProgress(command.id, "preparing-input");
     const photoPath = await materializePhoto(command);
-    const photoOcrText = photoPath ? await extractPhotoOcrText(command.id, photoPath) : "";
+    const photoOcrText = photoPath ? normalizePhotoOcrHint(await extractPhotoOcrText(command.id, photoPath)) : "";
     const input = buildInput(command, photoPath, photoOcrText);
 
     if (!input.length) {
@@ -1284,6 +1314,7 @@ while (true) {
       .map((item) => String(item.text).trim())
       .filter(Boolean)
       .join("\n\n");
+    const photoPrompt = photoPath ? buildPhotoOnlyPrompt(command, photoOcrText) : "";
 
     if (!prompt && !photoPath) {
       throw new Error(`Command ${command.id} has no CLI-deliverable content.`);
@@ -1303,12 +1334,12 @@ while (true) {
       if (photoPath) {
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           runCodexExecEphemeral(
-            prompt || "See attached image and respond.",
+            photoPrompt || "See attached image and respond.",
             photoPath,
             String(command?.targetWorkspacePath || "").trim() || process.cwd()
           )
         );
-        assistantText = getImmediateAssistantText(result, prompt);
+        assistantText = getImmediateAssistantText(result, photoPrompt);
 
         if (isPhotoVisibilityFailure(assistantText)) {
           await updateProgress(command.id, "retrying-photo-read");
@@ -1375,7 +1406,7 @@ while (true) {
       assistantText = await getThreadFallbackAssistantText(command, threadId);
     }
 
-    assistantText = stripPromptEcho(assistantText, prompt);
+    assistantText = stripPromptEcho(assistantText, photoPath ? photoPrompt : prompt);
 
     const photoUnsupportedReason = photoPath ? getPhotoUnsupportedReason(assistantText) : "";
 
@@ -1480,7 +1511,7 @@ while (true) {
   }
 }
 
-const remainingCommands = await fetchRecentCommands();
+const remainingCommands = await safeFetchRecentCommands("remainingRecentCommands");
 const remainingQueued = remainingCommands
   .filter((command) => command?.status === "queued")
   .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));

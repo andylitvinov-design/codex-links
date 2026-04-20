@@ -18,6 +18,8 @@ const RECENT_DUPLICATE_WINDOW_MS = 5 * 60 * 1000;
 const SUPERSEDED_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 const CLOUD_FIRST_ACK_TIMEOUT_MS = 5 * 1000;
 const CLOUD_RESULT_TIMEOUT_MS = 180 * 1000;
+const SLACK_FIRST_ACK_TIMEOUT_MS = 12 * 1000;
+const SLACK_RESULT_TIMEOUT_MS = 30 * 1000;
 const BRIDGE_CLAIM_TIMEOUT_MS = 15 * 1000;
 const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
 
@@ -1535,6 +1537,92 @@ function evaluateCloudMaintenance(command, nowIso, options = {}) {
   });
 }
 
+function evaluateSlackMaintenance(command, nowIso, options = {}) {
+  if (command.dispatchMode !== DISPATCH_MODE_SLACK) {
+    return command;
+  }
+
+  const fallbackAllowed = canFallbackToLocal(command, options);
+  const status = String(command.status || "").trim().toLowerCase();
+
+  if (status !== "processing" && status !== "dispatched") {
+    return command;
+  }
+
+  const dispatchObservedAt = command.slackPostedAt || command.dispatchedAt || command.progressUpdatedAt || command.createdAt;
+  const hasFirstAck = Boolean(String(command.firstExecutorAckSeenAt || command.firstAckAt || "").trim());
+
+  if (!hasFirstAck) {
+    if (!isOlderThan(dispatchObservedAt, SLACK_FIRST_ACK_TIMEOUT_MS)) {
+      return command;
+    }
+
+    if (fallbackAllowed) {
+      return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+        progressStage: "fallback-to-bridge",
+        timeoutPhase: "first-ack-timeout",
+        fallbackReason: "cloud via Slack did not acknowledge in time",
+        lastDiagnosticCode: "slack_first_ack_timeout",
+        lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
+        errorMessage: stringifyCommandError({
+          code: "fallback_to_bridge",
+          stage: "fallback-to-bridge",
+          message: "Cloud via Slack did not acknowledge in time. Switched to local bridge.",
+          detail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
+          fallback: "local-bridge"
+        })
+      });
+    }
+
+    return createFailedMaintenanceState(command, nowIso, {
+      timeoutPhase: "first-ack-timeout",
+      lastDiagnosticCode: "slack_first_ack_timeout",
+      lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
+      actualExecutor: "cloud",
+      errorMessage: stringifyCommandError({
+        code: "slack_first_ack_timeout",
+        stage: "slack-first-ack-timeout",
+        message: "Cloud via Slack did not acknowledge in time.",
+        detail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window."
+      })
+    });
+  }
+
+  if (!isOlderThan(command.progressUpdatedAt || dispatchObservedAt, SLACK_RESULT_TIMEOUT_MS)) {
+    return command;
+  }
+
+  if (fallbackAllowed) {
+    return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+      progressStage: "fallback-to-bridge",
+      timeoutPhase: "result-timeout",
+      fallbackReason: "cloud via Slack did not produce a reply in time",
+      lastDiagnosticCode: "slack_result_timeout",
+      lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window.",
+      errorMessage: stringifyCommandError({
+        code: "fallback_to_bridge",
+        stage: "fallback-to-bridge",
+        message: "Cloud via Slack did not produce a reply in time. Switched to local bridge.",
+        detail: "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window.",
+        fallback: "local-bridge"
+      })
+    });
+  }
+
+  return createFailedMaintenanceState(command, nowIso, {
+    timeoutPhase: "result-timeout",
+    lastDiagnosticCode: "slack_result_timeout",
+    lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window.",
+    actualExecutor: "cloud",
+    errorMessage: stringifyCommandError({
+      code: "slack_result_timeout",
+      stage: "slack-result-timeout",
+      message: "Cloud via Slack did not produce a reply in time.",
+      detail: "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window."
+    })
+  });
+}
+
 function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   if (command.dispatchMode !== DISPATCH_MODE_LOCAL) {
     return command;
@@ -1655,6 +1743,8 @@ export async function runCommandMaintenance(env, options = {}) {
 
     if (command.dispatchMode === DISPATCH_MODE_CLOUD) {
       updated = evaluateCloudMaintenance(command, nowIso, options);
+    } else if (command.dispatchMode === DISPATCH_MODE_SLACK) {
+      updated = evaluateSlackMaintenance(command, nowIso, options);
     } else if (command.dispatchMode === DISPATCH_MODE_LOCAL) {
       updated = evaluateBridgeMaintenance(command, nowIso, {
         ...options,
