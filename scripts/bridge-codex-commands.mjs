@@ -734,7 +734,7 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_
   const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
   return new Promise((resolve, reject) => {
     const outputPath = join(tmpdir(), `codex-links-output-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
-    const args = [
+    const codexArgs = [
       "exec",
       prompt,
       "--ephemeral",
@@ -747,14 +747,19 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_
     ];
 
     if (cwd) {
-      args.push("-C", cwd);
+      codexArgs.push("-C", cwd);
     }
 
     if (photoPath) {
-      args.push("-i", photoPath);
+      codexArgs.push("-i", photoPath);
     }
 
-    execFile(codexBin, args, {
+    const runnerBin = photoPath ? "/usr/bin/script" : codexBin;
+    const runnerArgs = photoPath
+      ? ["-q", "/dev/null", codexBin, ...codexArgs]
+      : codexArgs;
+
+    execFile(runnerBin, runnerArgs, {
       cwd: cwd || process.cwd(),
       timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024,
