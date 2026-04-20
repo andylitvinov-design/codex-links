@@ -99,6 +99,13 @@ function getMessagesUrl() {
   return new URL("/api/messages", baseUrl).toString();
 }
 
+function getRecentMessagesUrl() {
+  const url = new URL("/api/messages", baseUrl);
+  url.searchParams.set("scope", "recent");
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
 function getStatusUrl() {
   return new URL("/api/status", baseUrl).toString();
 }
@@ -1017,6 +1024,59 @@ async function syncMessages(messages) {
   }
 }
 
+async function readRecentMessages() {
+  const response = await fetchWithRetry(getRecentMessagesUrl(), {
+    headers: {
+      accept: "application/json"
+    }
+  }, READ_TIMEOUT_MS, "readRecentMessages");
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to read recent messages: ${response.status} ${body}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  return Array.isArray(data?.messages) ? data.messages : [];
+}
+
+async function readRecentCommands() {
+  const response = await fetchWithRetry(getPendingUrl(), {
+    headers: {
+      accept: "application/json"
+    }
+  }, READ_TIMEOUT_MS, "readRecentCommands");
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to read recent commands: ${response.status} ${body}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  return Array.isArray(data?.commands) ? data.commands : [];
+}
+
+async function wasMessagePersisted(message) {
+  if (!message?.id) {
+    return false;
+  }
+
+  const recent = await readRecentMessages();
+  return recent.some((entry) => String(entry?.id || "").trim() === String(message.id).trim());
+}
+
+async function wasCommandAnswered(commandId) {
+  if (!commandId) {
+    return false;
+  }
+
+  const recent = await readRecentCommands();
+  return recent.some((entry) =>
+    String(entry?.id || "").trim() === String(commandId).trim()
+    && String(entry?.status || "").trim().toLowerCase() === "answered"
+  );
+}
+
 async function publishBridgeStatus(status) {
   const response = await fetchWithRetry(getStatusUrl(), {
     method: "POST",
@@ -1251,10 +1311,31 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
     }
 
     if (message) {
-      await syncMessages([message]);
+      try {
+        await syncMessages([message]);
+      } catch (error) {
+        if (!isRetryableFetchError(error) || !(await wasMessagePersisted(message))) {
+          throw error;
+        }
+
+        await appendBridgeErrorLog("syncMessages.reconciled", error, {
+          commandId: command.id,
+          messageId: message.id
+        });
+      }
     }
 
-    await markAnswered(command.id, command.assistantText, command.completedAt);
+    try {
+      await markAnswered(command.id, command.assistantText, command.completedAt);
+    } catch (error) {
+      if (!isRetryableFetchError(error) || !(await wasCommandAnswered(command.id))) {
+        throw error;
+      }
+
+      await appendBridgeErrorLog("markAnswered.reconciled", error, {
+        commandId: command.id
+      });
+    }
   }
 }
 
