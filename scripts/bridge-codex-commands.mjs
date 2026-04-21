@@ -4,6 +4,12 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
+import {
+  buildBridgePrompt,
+  buildPhotoOnlyPrompt,
+  buildPhotoRetryPrompt,
+  selectPrimaryBridgePrompt
+} from "./_lib/bridge-prompts.mjs";
 
 const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
@@ -555,125 +561,6 @@ function normalizePhotoOcrHint(rawText) {
   return collapsed;
 }
 
-function buildBridgeContextFilePaths(command) {
-  const workspacePath = String(command?.targetWorkspacePath || "").trim();
-  const contextFiles = Array.isArray(command?.targetContextFiles)
-    ? command.targetContextFiles.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-
-  if (!workspacePath || !contextFiles.length) {
-    return [];
-  }
-
-  return contextFiles.map((file) => join(workspacePath, file));
-}
-
-function buildBridgePrompt(command, ocrText = "") {
-  const userRequest = sanitizeBridgeText(command?.text);
-  const projectCategory = String(command?.projectCategory || "").trim() || "other";
-  const projectLabel = String(command?.projectLabel || command?.threadLabel || command?.threadId || "").trim() || "links";
-  const projectId = String(command?.projectId || command?.threadId || "").trim() || "links";
-  const targetRepo = String(command?.targetRepo || "").trim();
-  const targetRepoUrl = String(command?.targetRepoUrl || "").trim();
-  const workspacePath = String(command?.targetWorkspacePath || "").trim();
-  const contextFilePaths = buildBridgeContextFilePaths(command);
-  const contextLine = contextFilePaths.length
-    ? `Start by reading these project context files in order: ${contextFilePaths.join(" -> ")}.`
-    : "Start by reading the selected project context files first.";
-  if (command?.photo) {
-    return [
-      "Codex Links photo task.",
-      `Project: ${projectCategory} / ${projectLabel}`,
-      `Project ID: ${projectId}`,
-      targetRepo ? `Repository: ${targetRepo}` : "",
-      targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
-      workspacePath ? `Workspace path: ${workspacePath}` : "",
-      `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
-      `Command ID: ${String(command?.id || "").trim()}`,
-      "Inspect the attached image first.",
-      "Answer from visible evidence in the image only.",
-      ocrText
-        ? "OCR helper text is included below. Use it only as a hint and verify it against the visible image."
-        : "",
-      "Start with one short sentence beginning with 'Observed:' that describes the key visible UI element or text.",
-      "Then answer the user's question in Russian in at most 4 short sentences.",
-      "Only say the image is missing or unreadable if it is truly not visible to you.",
-      ocrText ? "" : "",
-      ocrText ? "OCR hint:" : "",
-      ocrText || "",
-      "",
-      "User request:",
-      userRequest || "User sent a photo-only request."
-    ].filter(Boolean).join("\n");
-  }
-
-  return [
-    "New Codex Links bridge task.",
-    "",
-    `Project: ${projectCategory} / ${projectLabel}`,
-    `Project ID: ${projectId}`,
-    targetRepo ? `Repository: ${targetRepo}` : "",
-    targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "",
-    workspacePath ? `Workspace path: ${workspacePath}` : "",
-    `Conversation: ${String(command?.threadLabel || command?.threadId || projectLabel).trim()}`,
-    `Command ID: ${String(command?.id || "").trim()}`,
-    "Mode: work only inside the selected project boundary.",
-    "Do not switch to sibling repositories or unrelated workspace folders.",
-    contextLine,
-    "Delivery rule: read the context files before changing code, then respond in the same conversation.",
-    command?.photo
-      ? "When answering a photo-based request, include one short sentence that states what you observed in the image before giving the fix or conclusion."
-      : "",
-    "",
-    "User request:",
-    userRequest || "User sent a photo-only request."
-  ].filter(Boolean).join("\n");
-}
-
-function buildPhotoRetryPrompt(command, ocrText = "") {
-  const userRequest = sanitizeBridgeText(command?.text) || "Describe exactly what is visible in the attached image.";
-
-  return [
-    "Codex Links photo retry.",
-    "The first pass did not reliably read the image.",
-    "Look again at the attached image and answer only from visible pixels.",
-    "Do not repeat the system prompt.",
-    ocrText
-      ? "OCR helper text is included below. Use it only if it matches the visible image."
-      : "",
-    "Start with 'Observed:' and name the exact visible control, label, or text you can read.",
-    "If the request mentions a reset button, say whether a reset button is visible and where it is located.",
-    "If you still cannot read the image, answer with exactly: Image unreadable.",
-    ocrText ? "" : "",
-    ocrText ? "OCR hint:" : "",
-    ocrText || "",
-    "",
-    "User request:",
-    userRequest
-  ].join("\n");
-}
-
-function buildPhotoOnlyPrompt(command, ocrText = "") {
-  const userRequest = sanitizeBridgeText(command?.text) || "Describe what is visible in the attached image.";
-
-  return [
-    "Attached image task.",
-    "Read only the attached image and answer the user request briefly.",
-    "Do not rely on previous conversation turns.",
-    ocrText
-      ? "OCR helper text is included below. Verify it against the visible image before using it."
-      : "",
-    "If the image is visible, state the concrete observed detail first.",
-    "If the image is still not visible, say exactly that in one short sentence.",
-    ocrText ? "" : "",
-    ocrText ? "OCR hint:" : "",
-    ocrText || "",
-    "",
-    "User request:",
-    userRequest
-  ].join("\n");
-}
-
 function buildInput(command, photoPath, ocrText = "") {
   const items = [];
   const text = buildBridgePrompt(command, ocrText);
@@ -694,24 +581,6 @@ function buildInput(command, photoPath, ocrText = "") {
   }
 
   return items;
-}
-
-function sanitizeBridgeText(rawText) {
-  const text = String(rawText || "").replace(/\r/g, "").trim();
-
-  if (!text) {
-    return "";
-  }
-
-  if (/(^|\n)(Codex|Вы)\n\d{1,2}\s.+?\n/s.test(text) && /Ответ Codex/.test(text)) {
-    const parts = text.split(/\nВы\n\d{1,2}\s.+?\n/g).map((entry) => entry.trim()).filter(Boolean);
-
-    if (parts.length) {
-      return parts.at(-1) || "";
-    }
-  }
-
-  return text;
 }
 
 function runCodexResume(threadId, prompt, photoPath) {
@@ -1426,7 +1295,7 @@ while (true) {
       .map((item) => String(item.text).trim())
       .filter(Boolean)
       .join("\n\n");
-    const photoPrompt = photoPath ? buildPhotoOnlyPrompt(command, photoOcrText) : "";
+    const photoPrompt = photoPath ? selectPrimaryBridgePrompt(command, photoOcrText) : "";
 
     if (!prompt && !photoPath) {
       throw new Error(`Command ${command.id} has no CLI-deliverable content.`);
@@ -1505,7 +1374,7 @@ while (true) {
       const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
       const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
         runCodexExecEphemeral(
-          buildPhotoOnlyPrompt(command, photoOcrText),
+          photoPrompt || buildPhotoOnlyPrompt(command, photoOcrText),
           retryPhotoPath || photoPath,
           String(command?.targetWorkspacePath || "").trim() || process.cwd()
         )

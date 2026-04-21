@@ -1,3 +1,5 @@
+import { sanitizeCodexErrorMessage } from "./_lib/command-error-utils.js";
+
 const state = {
   commands: [],
   messages: [],
@@ -26,7 +28,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260419-0246";
+const BUILD_VERSION = "20260421-0135";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1388,7 +1390,7 @@ function getCommandFailureMessage(command) {
     return "";
   }
 
-  const message = String(command?.errorMessage || "").trim();
+  const message = sanitizeCodexErrorMessage(command?.errorMessage);
   const details = parseCommandErrorDetails(command);
   const diagnosticMessage = getCommandDiagnosticMessage(command);
 
@@ -1397,7 +1399,7 @@ function getCommandFailureMessage(command) {
   }
 
   if (details?.message) {
-    return details.detail ? `${details.message} ${details.detail}`.trim() : details.message;
+    return sanitizeCodexErrorMessage(details.detail ? `${details.message} ${details.detail}`.trim() : details.message);
   }
 
   if (!message) {
