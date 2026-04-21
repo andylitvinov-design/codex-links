@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { runCommandMaintenance, writeCommands } from "../functions/_lib/commands.js";
+import {
+  claimNextCommand,
+  runCommandMaintenance,
+  writeCommands
+} from "../functions/_lib/commands.js";
+import {
+  COMMAND_ITEM_PREFIX,
+  COMMAND_LOCAL_PROCESSING_STORAGE_KEY
+} from "../functions/_lib/constants.js";
 
 function createMockEnv() {
   const store = new Map();
@@ -64,6 +72,54 @@ test("runCommandMaintenance marks stale cloud commands as failed", async () => {
   assert.equal(updated.lastDiagnosticCode, "cloud_result_timeout");
   assert.match(updated.errorMessage, /cloud_result_timeout/);
   assert.ok(updated.completedAt);
+});
+
+test("claimNextCommand ignores orphaned local processing entries outside retention", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+  const staleCreatedAt = new Date(Date.now() - (8 * 24 * 60 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-queued-now",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued"
+  }]);
+
+  await env.LINKS_STORE.put(`${COMMAND_ITEM_PREFIX}cmd-orphan-processing`, JSON.stringify({
+    id: "cmd-orphan-processing",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "stale processing entry",
+    createdAt: staleCreatedAt,
+    progressUpdatedAt: staleCreatedAt,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "bridge",
+    status: "processing",
+    progressStage: "waiting-for-codex",
+    processingLeaseUntil: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+  }));
+  await env.LINKS_STORE.put(COMMAND_LOCAL_PROCESSING_STORAGE_KEY, JSON.stringify(["cmd-orphan-processing"]));
+
+  const claimed = await claimNextCommand(env, {
+    processorId: "test-bridge",
+    leaseMs: 30_000
+  });
+
+  assert.equal(claimed.ok, true);
+  assert.ok(claimed.value);
+  assert.equal(claimed.value.id, "cmd-queued-now");
+  assert.equal(claimed.value.status, "processing");
 });
 
 test("runCommandMaintenance schedules queued cloud fallback commands for dispatch", async () => {

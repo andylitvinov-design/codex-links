@@ -86,6 +86,29 @@ async function readStoredCommandsByIds(env, ids) {
   return entries.filter(Boolean);
 }
 
+async function readNormalizedIndexedCommands(env, indexKey, predicate) {
+  const indexedIds = await readIdIndex(env, indexKey).catch(() => []);
+  const rawCommands = await readStoredCommandsByIds(env, indexedIds);
+  const normalizedCommands = rawCommands
+    .map((command) => normalizeStoredCommandEntry(command))
+    .filter(Boolean);
+  const foundIds = new Set(normalizedCommands.map((command) => String(command.id || "").trim()).filter(Boolean));
+  const validCommands = normalizedCommands.filter((command) =>
+    isWithinRetentionWindow(command.createdAt) && predicate(command)
+  );
+  const validIds = validCommands.map((command) => command.id);
+  const missingIds = indexedIds.filter((id) => !foundIds.has(String(id || "").trim()));
+  const invalidIds = normalizedCommands
+    .filter((command) => !isWithinRetentionWindow(command.createdAt) || !predicate(command))
+    .map((command) => command.id);
+
+  if (missingIds.length || invalidIds.length || validIds.length !== indexedIds.length) {
+    await writeIdIndex(env, indexKey, validIds);
+  }
+
+  return validCommands;
+}
+
 function isActiveCommandStatus(status) {
   const normalized = normalizeCommandStatus(status);
   return normalized === "queued" || normalized === "dispatched" || normalized === "processing";
@@ -941,18 +964,13 @@ export async function claimNextCommand(env, input = {}) {
   const nowIso = new Date(now).toISOString();
   const leaseUntil = new Date(now + leaseMs).toISOString();
 
-  const [queuedIds, processingIds] = await Promise.all([
-    readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
-    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => [])
+  const [queuedCommands, processingCommands] = await Promise.all([
+    readNormalizedIndexedCommands(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, isLocalQueueCommand),
+    readNormalizedIndexedCommands(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, isLocalProcessingCommand)
   ]);
-  const processingCommands = await readStoredCommandsByIds(env, processingIds);
   const activeThreadKeys = new Set();
 
   for (const command of processingCommands) {
-    if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "processing") {
-      continue;
-    }
-
     const leaseDeadline = Date.parse(String(command.processingLeaseUntil || "").trim());
 
     if (!Number.isNaN(leaseDeadline) && leaseDeadline <= now) {
@@ -974,7 +992,6 @@ export async function claimNextCommand(env, input = {}) {
     }
   }
 
-  const queuedCommands = await readStoredCommandsByIds(env, queuedIds);
   const isClaimableLocalQueued = (command) => {
     if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "queued") {
       return false;
