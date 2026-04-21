@@ -1025,6 +1025,8 @@ input[type="radio"] {
 }
 
 .command-delivery-note {
+  overflow-wrap: anywhere;
+  word-break: break-word;
   margin: 0;
   padding: 11px 13px;
   border: 1px solid rgba(215, 185, 78, 0.42);
