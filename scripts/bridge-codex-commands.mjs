@@ -18,7 +18,7 @@ const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const READ_TIMEOUT_MS = 15 * 1000;
 const WRITE_TIMEOUT_MS = 60 * 1000;
 const PHOTO_EXEC_TIMEOUT_MS = 90 * 1000;
-const SNAPSHOT_TIMEOUT_MS = 3 * 1000;
+const SNAPSHOT_TIMEOUT_MS = 12 * 1000;
 const BRIDGE_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
@@ -615,15 +615,22 @@ function runCodexResume(threadId, prompt, photoPath) {
         stderr: String(stderr || "").trim(),
         output: ""
       };
+      let readOutputError = null;
 
       try {
         result.output = String(await readFile(outputPath, "utf8") || "").trim();
       } catch (error) {
+        readOutputError = error;
         await appendBridgeErrorLog("runCodexResume.readOutput", error, { outputPath });
       }
 
       if (error) {
         reject(new Error(result.stderr || result.stdout || error.message));
+        return;
+      }
+
+      if (readOutputError && !result.output) {
+        reject(new Error("Codex completed without a readable output file."));
         return;
       }
 
@@ -746,6 +753,27 @@ async function safeFetchRecentCommands(context = "fetchRecentCommands") {
   }
 }
 
+async function fetchCommandById(commandId) {
+  const normalizedId = String(commandId || "").trim();
+
+  if (!normalizedId) {
+    return null;
+  }
+
+  const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/api/commands?id=${encodeURIComponent(normalizedId)}`, {
+    headers: {
+      accept: "application/json"
+    }
+  }, READ_TIMEOUT_MS, "fetchCommandById");
+
+  if (!response.ok) {
+    throw new Error(`Failed to load command ${normalizedId}: ${response.status}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  return data?.command || null;
+}
+
 async function claimNextCommand() {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
@@ -774,6 +802,9 @@ async function claimNextCommand() {
 
     const queuedLocalCount = Number(data?.claimDiagnostics?.queuedLocalCount || 0);
     const processingLocalCount = Number(data?.claimDiagnostics?.processingLocalCount || 0);
+    const processingLocalIds = Array.isArray(data?.claimDiagnostics?.processingLocalIds)
+      ? data.claimDiagnostics.processingLocalIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
 
     if (queuedLocalCount > 0) {
       await appendBridgeErrorLog("claimNextCommand.nullWithQueued", new Error("Claim returned null while queued local commands exist."), {
@@ -781,8 +812,41 @@ async function claimNextCommand() {
         queuedLocalCount,
         processingLocalCount,
         queuedLocalIds: Array.isArray(data?.claimDiagnostics?.queuedLocalIds) ? data.claimDiagnostics.queuedLocalIds.join(",") : "",
-        processingLocalIds: Array.isArray(data?.claimDiagnostics?.processingLocalIds) ? data.claimDiagnostics.processingLocalIds.join(",") : ""
+        processingLocalIds: processingLocalIds.join(",")
       });
+
+      const processingCommandId = processingLocalIds[0];
+
+      if (processingCommandId) {
+        try {
+          const processingCommand = await fetchCommandById(processingCommandId);
+          const leaseDeadline = Date.parse(String(processingCommand?.processingLeaseUntil || "").trim());
+
+          if (!Number.isNaN(leaseDeadline) && leaseDeadline <= Date.now()) {
+            const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-write-token": token
+              },
+              body: JSON.stringify({
+                action: "requeue",
+                id: processingCommandId
+              })
+            }, WRITE_TIMEOUT_MS, "claimNextCommand.requeueStaleProcessing");
+
+            if (!response.ok) {
+              const body = await response.text();
+              throw new Error(`Failed to requeue stale processing command: ${response.status} ${body}`);
+            }
+          }
+        } catch (error) {
+          await appendBridgeErrorLog("claimNextCommand.requeueStaleProcessing", error, {
+            processingCommandId
+          });
+        }
+      }
+
       await sleep(350);
       continue;
     }

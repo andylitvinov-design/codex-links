@@ -416,7 +416,7 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
       : "",
     "",
     "User request:",
-    normalizeText(command?.text) || "User sent a photo-only request.",
+    normalizeText(command?.effectivePrompt || command?.text) || "User sent a photo-only request.",
     photoNote,
     "",
     "Reply in this Slack thread with progress updates. Include the PR URL when ready."

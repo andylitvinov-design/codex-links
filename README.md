@@ -200,6 +200,38 @@ Manual `npm run deploy` remains available as an operator fallback, not as the no
 npm run deploy
 ```
 
+## Cloud Code GitHub Sync
+
+Use this when changes are generated from Cloud Code and should be synced automatically to GitHub:
+
+1. Set a repo-scoped GitHub token in the Cloud Code container:
+
+```bash
+export GITHUB_TOKEN=<your_repo_scoped_PAT>
+```
+
+2. Run the sync task:
+
+```bash
+npm run cloud:sync -- "chore: sync from Cloud Code"
+```
+
+What it does:
+
+- Checks `origin` and updates from remote with `--autostash`
+- Creates a branch `codex-links/auto-sync-YYYYMMDD-HHMMSS` if run on `main`
+- Commits local changes and pushes the branch
+- Suggests `gh pr create` for a PR
+
+Notes:
+
+- `403` means token is missing or lacks repository permission.
+- Prefer `repo`-scoped PAT for `andylitvinov-design/codex-links`.
+
+VS Code/Cloud Code shortcut:
+
+- Use task `Cloud Sync (github)` in `.vscode/tasks.json` to run it interactively.
+
 ## APIs
 
 ### Export to Excel-compatible CSV

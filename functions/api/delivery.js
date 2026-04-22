@@ -1,6 +1,7 @@
 import { getCommandsForClient, readCommands } from "../_lib/commands.js";
 import { deriveBridgeStatusFromCommands } from "../_lib/status.js";
 import { getMessagesForClient, readMessages } from "../_lib/messages.js";
+import { readReports } from "../_lib/reports.js";
 import { handleOptions, json, jsonStorageError } from "../_lib/http.js";
 import { buildLatencyBreakdown, getVisibleDeliveryStage } from "../_lib/delivery.js";
 
@@ -115,15 +116,17 @@ export async function onRequest(context) {
       return json({ error: "clientId is required." }, { status: 400 });
     }
 
-    const [commands, messages, status] = await Promise.all(usePublicScope
+    const [commands, messages, reports, status] = await Promise.all(usePublicScope
       ? [
           readCommands(env),
           readMessages(env),
+          readReports(env),
           deriveBridgeStatusFromCommands(env)
         ]
       : [
           getCommandsForClient(env, clientId),
           getMessagesForClient(env, clientId),
+          readReports(env),
           deriveBridgeStatusFromCommands(env)
         ]);
 
@@ -149,7 +152,8 @@ export async function onRequest(context) {
       serverTime: new Date().toISOString(),
       status,
       commands: filteredCommands.map((command) => serializeCommand(command)),
-      messages: filteredMessages
+      messages: filteredMessages,
+      reports: reports
     });
   } catch (error) {
     return jsonStorageError(error, "Storage is rate limited. Delivery snapshot is temporarily unavailable.");

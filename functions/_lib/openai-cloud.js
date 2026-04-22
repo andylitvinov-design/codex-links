@@ -33,7 +33,7 @@ function buildCloudInstructions(command) {
 }
 
 function buildCloudInput(command) {
-  const text = normalizeText(command?.text, 12_000);
+  const text = normalizeText(command?.effectivePrompt || command?.text, 12_000);
   const projectLabel = normalizeText(command?.projectLabel || command?.threadLabel || "Links", 160);
   const targetRepo = normalizeText(command?.targetRepo, 240);
   const prompt = [

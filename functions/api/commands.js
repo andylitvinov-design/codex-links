@@ -33,6 +33,7 @@ import { isAuthorized } from "../_lib/security.js";
 import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isIgnorableSlackReplyText, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
 import { upsertMessages } from "../_lib/messages.js";
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
+import { readBridgeStatus, isBridgeHeartbeatFresh } from "../_lib/status.js";
 import { readRuntimeConfig } from "../_lib/config.js";
 import { stringifyCommandError } from "../_lib/command-debug.js";
 import { createOpenAiCloudResponse } from "../_lib/openai-cloud.js";
@@ -122,6 +123,34 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   return configuredDispatchMode;
+}
+
+async function getInitialBridgeQueueState(env, payload, dispatchMode) {
+  if (dispatchMode !== DISPATCH_MODE_LOCAL) {
+    return {};
+  }
+
+  const hasPhoto = Boolean(payload?.photo && typeof payload.photo === "object");
+  const status = await readBridgeStatus(env).catch(() => null);
+  const bridgeReady = Boolean(status?.bridgeOnline) && isBridgeHeartbeatFresh(status);
+
+  if (bridgeReady) {
+    return {};
+  }
+
+  if (hasPhoto) {
+    return {
+      progressStage: "waiting-photo-bridge",
+      lastDiagnosticCode: "bridge_temporarily_unavailable",
+      lastDiagnosticDetail: "Bridge is temporarily unavailable. The photo command will stay queued and retry through bridge."
+    };
+  }
+
+  return {
+    progressStage: "retrying-bridge",
+    lastDiagnosticCode: "bridge_temporarily_unavailable",
+    lastDiagnosticDetail: "Bridge is temporarily unavailable. The command will retry through bridge or fallback recovery."
+  };
 }
 
 function normalizeEntryText(entry) {
@@ -1335,9 +1364,11 @@ export async function onRequest(context) {
   }
 
   const requestStartedAt = new Date().toISOString();
+  const initialBridgeQueueState = await getInitialBridgeQueueState(env, payload, requestedDispatchMode);
   const created = await insertCommand(env, {
     ...(payload || {}),
     dispatchMode: requestedDispatchMode,
+    ...initialBridgeQueueState,
     uiSubmitStartedAt: payload?.uiSubmitStartedAt,
     apiCommandsRequestStartedAt: requestStartedAt,
     commandCreatedAt: new Date().toISOString(),

@@ -22,12 +22,16 @@ const SLACK_FIRST_ACK_TIMEOUT_MS = 30 * 1000;
 const SLACK_RESULT_TIMEOUT_MS = 120 * 1000;
 const BRIDGE_CLAIM_TIMEOUT_MS = 20 * 1000;
 const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
+const BRIDGE_PHOTO_CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
+const BRIDGE_PHOTO_RETRY_WINDOW_MS = 30 * 60 * 1000;
 
 export const COMMAND_TIMEOUTS = {
   cloudFirstAckMs: CLOUD_FIRST_ACK_TIMEOUT_MS,
   cloudResultMs: CLOUD_RESULT_TIMEOUT_MS,
   bridgeClaimMs: BRIDGE_CLAIM_TIMEOUT_MS,
-  bridgeResultMs: BRIDGE_RESULT_TIMEOUT_MS
+  bridgeResultMs: BRIDGE_RESULT_TIMEOUT_MS,
+  bridgePhotoClaimMs: BRIDGE_PHOTO_CLAIM_TIMEOUT_MS,
+  bridgePhotoRetryWindowMs: BRIDGE_PHOTO_RETRY_WINDOW_MS
 };
 
 function commandItemKey(id) {
@@ -84,6 +88,29 @@ async function readStoredCommandsByIds(env, ids) {
   const normalizedIds = uniqIds(ids);
   const entries = await Promise.all(normalizedIds.map((id) => readStoredCommand(env, id)));
   return entries.filter(Boolean);
+}
+
+async function readNormalizedIndexedCommands(env, indexKey, predicate) {
+  const indexedIds = await readIdIndex(env, indexKey).catch(() => []);
+  const rawCommands = await readStoredCommandsByIds(env, indexedIds);
+  const normalizedCommands = rawCommands
+    .map((command) => normalizeStoredCommandEntry(command))
+    .filter(Boolean);
+  const foundIds = new Set(normalizedCommands.map((command) => String(command.id || "").trim()).filter(Boolean));
+  const validCommands = normalizedCommands.filter((command) =>
+    isWithinRetentionWindow(command.createdAt) && predicate(command)
+  );
+  const validIds = validCommands.map((command) => command.id);
+  const missingIds = indexedIds.filter((id) => !foundIds.has(String(id || "").trim()));
+  const invalidIds = normalizedCommands
+    .filter((command) => !isWithinRetentionWindow(command.createdAt) || !predicate(command))
+    .map((command) => command.id);
+
+  if (missingIds.length || invalidIds.length || validIds.length !== indexedIds.length) {
+    await writeIdIndex(env, indexKey, validIds);
+  }
+
+  return validCommands;
 }
 
 function isActiveCommandStatus(status) {
@@ -235,6 +262,29 @@ function normalizeText(rawText) {
   return sanitizeCommandText(String(rawText || "")).slice(0, 2000);
 }
 
+function normalizeAssistantReplyContext(rawText) {
+  return String(rawText || "").replace(/\r/g, "").trim().slice(0, 6000);
+}
+
+function buildEffectivePrompt(text, previousAssistantReply) {
+  const userText = normalizeText(text);
+  const assistantReply = normalizeAssistantReplyContext(previousAssistantReply);
+
+  if (!assistantReply) {
+    return userText;
+  }
+
+  return [
+    "Previous Codex answer in this same thread:",
+    assistantReply,
+    "",
+    "New user follow-up:",
+    userText,
+    "",
+    "Use the previous Codex answer as context for this follow-up."
+  ].join("\n");
+}
+
 function canonicalizeText(rawText) {
   return normalizeText(rawText).replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -375,6 +425,13 @@ function derivePhotoBytesPresent(command, input = {}) {
   }
 
   return Boolean(String(command?.photo?.dataUrl || "").trim());
+}
+
+function commandHasPhoto(command) {
+  return Boolean(command?.photo?.dataUrl)
+    || Boolean(command?.photo?.hasDataUrl)
+    || Boolean(command?.photoAttached)
+    || Boolean(command?.photoBytesPresent);
 }
 
 function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispatchMode || command?.dispatchMode) {
@@ -546,6 +603,8 @@ function compactCommandForStorage(command) {
   return {
     ...command,
     status,
+    previousAssistantReply: normalizeAssistantReplyContext(command.previousAssistantReply),
+    effectivePrompt: buildEffectivePrompt(command.text, command.previousAssistantReply),
     photo: compactPhotoForStorage(command.photo, keepPhotoData)
   };
 }
@@ -557,6 +616,8 @@ function normalizeStoredCommandEntry(entry) {
 
   return {
     ...entry,
+    previousAssistantReply: normalizeAssistantReplyContext(entry.previousAssistantReply),
+    effectivePrompt: buildEffectivePrompt(entry.text, entry.previousAssistantReply),
     status: normalizeCommandStatus(entry.status),
     fallbackThreadId: normalizeFallbackThreadId(entry.fallbackThreadId),
     fallbackThreadLabel: normalizeFallbackThreadLabel(entry.fallbackThreadLabel, entry.fallbackThreadId),
@@ -741,6 +802,7 @@ function markCommandAcked(command, nowIso) {
 
 export function createCommandRecord(input) {
   const text = normalizeText(input.text);
+  const previousAssistantReply = normalizeAssistantReplyContext(input.previousAssistantReply);
   const clientId = normalizeClientId(input.clientId);
   const threadId = normalizeThreadId(input.threadId);
   const threadLabel = normalizeThreadLabel(input.threadLabel, threadId);
@@ -778,6 +840,8 @@ export function createCommandRecord(input) {
     value: {
       id: crypto.randomUUID(),
       text,
+      previousAssistantReply,
+      effectivePrompt: buildEffectivePrompt(text, previousAssistantReply),
       clientId,
       threadId,
       threadLabel,
@@ -786,7 +850,7 @@ export function createCommandRecord(input) {
       photo: normalizedPhoto?.value || null,
       createdAt: new Date().toISOString(),
       status: "queued",
-      progressStage: "queued",
+      progressStage: normalizeProgressStage(input.progressStage) || "queued",
       progressUpdatedAt: new Date().toISOString(),
       source: "site",
       dispatchMode: normalizeDispatchValue(input.dispatchMode),
@@ -813,8 +877,8 @@ export function createCommandRecord(input) {
       timeoutPhase: "",
       fallbackApplied: false,
       fallbackReason: "",
-      lastDiagnosticCode: "",
-      lastDiagnosticDetail: "",
+      lastDiagnosticCode: normalizeDiagnosticText(input.lastDiagnosticCode, 80),
+      lastDiagnosticDetail: normalizeDiagnosticText(input.lastDiagnosticDetail, 500),
       photoAttached: Boolean(normalizedPhoto?.value),
       photoBytesPresent: Boolean(String(normalizedPhoto?.value?.dataUrl || "").trim()),
       photoSeenByBridge: false,
@@ -941,18 +1005,13 @@ export async function claimNextCommand(env, input = {}) {
   const nowIso = new Date(now).toISOString();
   const leaseUntil = new Date(now + leaseMs).toISOString();
 
-  const [queuedIds, processingIds] = await Promise.all([
-    readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
-    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => [])
+  const [queuedCommands, processingCommands] = await Promise.all([
+    readNormalizedIndexedCommands(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, isLocalQueueCommand),
+    readNormalizedIndexedCommands(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, isLocalProcessingCommand)
   ]);
-  const processingCommands = await readStoredCommandsByIds(env, processingIds);
   const activeThreadKeys = new Set();
 
   for (const command of processingCommands) {
-    if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "processing") {
-      continue;
-    }
-
     const leaseDeadline = Date.parse(String(command.processingLeaseUntil || "").trim());
 
     if (!Number.isNaN(leaseDeadline) && leaseDeadline <= now) {
@@ -974,7 +1033,6 @@ export async function claimNextCommand(env, input = {}) {
     }
   }
 
-  const queuedCommands = await readStoredCommandsByIds(env, queuedIds);
   const isClaimableLocalQueued = (command) => {
     if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "queued") {
       return false;
@@ -1419,15 +1477,45 @@ function canFallbackToLocal(command, options = {}) {
 }
 
 function canFallbackToSlack(command, options = {}) {
-  const hasPhoto = Boolean(command?.photo?.dataUrl)
-    || Boolean(command?.photo?.hasDataUrl)
-    || Boolean(command?.photoAttached)
-    || Boolean(command?.photoBytesPresent);
-
   return Boolean(options.preferSlack)
     && Number(command?.fallbackCount || 0) < 1
-    && !hasPhoto
+    && !commandHasPhoto(command)
     && Boolean(String(command?.targetRepo || "").trim());
+}
+
+function getBridgeClaimTimeoutMs(command) {
+  return commandHasPhoto(command) ? BRIDGE_PHOTO_CLAIM_TIMEOUT_MS : BRIDGE_CLAIM_TIMEOUT_MS;
+}
+
+function getBridgeQueueState(command, nowIso, input = {}) {
+  return {
+    ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: "bridge",
+      timeoutPhase: input.timeoutPhase || command.timeoutPhase,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      resultAt: ""
+    }, DISPATCH_MODE_LOCAL),
+    dispatchMode: DISPATCH_MODE_LOCAL,
+    status: "queued",
+    progressStage: normalizeProgressStage(input.progressStage) || "retrying-bridge",
+    progressUpdatedAt: nowIso,
+    errorMessage: normalizeErrorMessage(input.errorMessage),
+    dispatchedAt: "",
+    firstAckAt: "",
+    resultAt: "",
+    processingStartedAt: "",
+    processingLeaseUntil: "",
+    processorId: "",
+    completedAt: "",
+    dispatchStartedAt: "",
+    slackPostedAt: "",
+    bridgeClaimedAt: "",
+    firstExecutorAckSeenAt: "",
+    firstReplySeenAt: "",
+    replyIngestedAt: ""
+  };
 }
 
 function createFallbackState(command, nextDispatchMode, nowIso, input = {}) {
@@ -1635,15 +1723,50 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   }
 
   const fallbackAllowed = canFallbackToSlack(command, options);
-  const hasFreshProcessingBridgeCommand = Boolean(options.hasFreshProcessingBridgeCommand);
+  const freshProcessingThreadKeys = options.freshProcessingThreadKeys instanceof Set
+    ? options.freshProcessingThreadKeys
+    : new Set();
+  const threadKey = getCommandThreadKey(command);
+  const hasFreshThreadProcessing = threadKey !== "::" && freshProcessingThreadKeys.has(threadKey);
+  const hasPhoto = commandHasPhoto(command);
 
   if (command.status === "queued") {
-    if (hasFreshProcessingBridgeCommand) {
+    if (hasFreshThreadProcessing) {
       return command;
     }
 
-    if (!isOlderThan(command.progressUpdatedAt || command.createdAt, BRIDGE_CLAIM_TIMEOUT_MS)) {
+    if (!isOlderThan(command.progressUpdatedAt || command.createdAt, getBridgeClaimTimeoutMs(command))) {
       return command;
+    }
+
+    if (hasPhoto) {
+      if (isOlderThan(command.createdAt, BRIDGE_PHOTO_RETRY_WINDOW_MS)) {
+        return createFailedMaintenanceState(command, nowIso, {
+          timeoutPhase: "claim-timeout",
+          lastDiagnosticCode: "bridge_photo_claim_timeout",
+          lastDiagnosticDetail: "Photo command exceeded the maximum bridge retry window before claim.",
+          actualExecutor: "bridge",
+          errorMessage: stringifyCommandError({
+            code: "bridge_photo_claim_timeout",
+            stage: "bridge-photo-claim-timeout",
+            message: "Photo command could not be claimed by bridge in time.",
+            detail: "The photo command stayed in the bridge queue past the retry window."
+          })
+        });
+      }
+
+      return getBridgeQueueState(command, nowIso, {
+        progressStage: "waiting-photo-bridge",
+        timeoutPhase: "claim-timeout",
+        lastDiagnosticCode: "bridge_waiting_photo",
+        lastDiagnosticDetail: "Photo command is waiting for bridge availability.",
+        errorMessage: stringifyCommandError({
+          code: "bridge_waiting_photo",
+          stage: "waiting-photo-bridge",
+          message: "Photo is waiting for bridge.",
+          detail: "The bridge has not claimed this photo command yet. Retry is scheduled."
+        })
+      });
     }
 
     if (fallbackAllowed) {
@@ -1694,6 +1817,36 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     ? "The local bridge lease expired before the command completed."
     : "The local bridge stopped heartbeating before the command completed.";
 
+  if (hasPhoto) {
+    if (isOlderThan(command.createdAt, BRIDGE_PHOTO_RETRY_WINDOW_MS)) {
+      return createFailedMaintenanceState(command, nowIso, {
+        timeoutPhase: "result-timeout",
+        lastDiagnosticCode: "bridge_photo_result_timeout",
+        lastDiagnosticDetail: "Photo command exceeded the maximum bridge retry window before completion.",
+        actualExecutor: "bridge",
+        errorMessage: stringifyCommandError({
+          code: "bridge_photo_result_timeout",
+          stage: "bridge-photo-result-timeout",
+          message: "Photo command could not finish through bridge in time.",
+          detail: "The photo command stayed in bridge retry longer than the allowed retry window."
+        })
+      });
+    }
+
+    return getBridgeQueueState(command, nowIso, {
+      progressStage: "retrying-photo-bridge",
+      timeoutPhase: "result-timeout",
+      lastDiagnosticCode: "bridge_result_timeout",
+      lastDiagnosticDetail: detail,
+      errorMessage: stringifyCommandError({
+        code: "retrying_photo_bridge",
+        stage: "retrying-photo-bridge",
+        message: "Bridge timed out while processing the photo. Retrying through bridge.",
+        detail
+      })
+    });
+  }
+
   if (fallbackAllowed) {
     return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
       progressStage: "switched-to-cloud",
@@ -1730,9 +1883,9 @@ export async function runCommandMaintenance(env, options = {}) {
   const nowIso = new Date().toISOString();
   let changedCount = 0;
   const commandsToDispatch = [];
-  const hasFreshProcessingBridgeCommand = current.some((command) => {
+  const freshProcessingThreadKeys = new Set(current.flatMap((command) => {
     if (command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "processing") {
-      return false;
+      return [];
     }
 
     const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
@@ -1740,8 +1893,13 @@ export async function runCommandMaintenance(env, options = {}) {
     const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
     const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
 
-    return !isLeaseExpired && !isResultStale;
-  });
+    if (isLeaseExpired || isResultStale) {
+      return [];
+    }
+
+    const threadKey = getCommandThreadKey(command);
+    return threadKey && threadKey !== "::" ? [threadKey] : [];
+  }));
 
   const next = current.map((command) => {
     const previous = command;
@@ -1754,7 +1912,7 @@ export async function runCommandMaintenance(env, options = {}) {
     } else if (command.dispatchMode === DISPATCH_MODE_LOCAL) {
       updated = evaluateBridgeMaintenance(command, nowIso, {
         ...options,
-        hasFreshProcessingBridgeCommand
+        freshProcessingThreadKeys
       });
     }
 

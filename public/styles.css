@@ -973,6 +973,11 @@ input[type="radio"] {
   background: linear-gradient(180deg, rgba(255, 249, 235, 0.98), rgba(255, 255, 255, 0.94));
 }
 
+.command-item-report {
+  border-left: 4px solid rgba(15, 118, 110, 0.42);
+  background: linear-gradient(180deg, rgba(240, 253, 249, 0.98), rgba(255, 255, 255, 0.94));
+}
+
 .command-item-top {
   display: flex;
   align-items: center;
@@ -1056,6 +1061,104 @@ input[type="radio"] {
     inset 4px 0 0 rgba(220, 38, 38, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
   color: #991b1b;
+}
+
+.report-item-title {
+  margin: 0;
+  font-weight: 700;
+  color: #164e63;
+}
+
+.report-item-metric-list {
+  margin: 0;
+  padding-left: 22px;
+  line-height: 1.45;
+  color: #1f2937;
+}
+
+.report-item-metric-list li {
+  margin-bottom: 6px;
+}
+
+.report-item-metric-list li:last-child {
+  margin-bottom: 0;
+}
+
+.report-item-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  background: rgba(15, 118, 110, 0.1);
+  color: #0b5f59;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.report-item-status[data-status="stable"] {
+  border-color: rgba(101, 163, 13, 0.3);
+  background: rgba(163, 230, 53, 0.12);
+  color: #166534;
+}
+
+.report-item-status[data-status="warning"] {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: rgba(217, 119, 6, 0.12);
+  color: #92400e;
+}
+
+.report-item-status[data-status="baseline"] {
+  border-color: rgba(55, 48, 163, 0.28);
+  background: rgba(99, 102, 241, 0.12);
+  color: #3730a3;
+}
+
+.report-item-source-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.report-item-source-badges span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  background: rgba(15, 118, 110, 0.08);
+  color: #0b5f59;
+  font-size: 0.74rem;
+  line-height: 1;
+}
+
+.report-item-details {
+  margin-top: 6px;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.report-item-details summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.report-item-details pre {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+  background: rgba(15, 118, 110, 0.04);
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  border-radius: 10px;
+  padding: 8px;
+  font-size: 0.72rem;
 }
 
 .command-answer {
