@@ -22,6 +22,9 @@ const state = {
   audioContext: null,
   replySoundGain: null,
   resetInFlight: false,
+  selectedPhotoPayload: null,
+  selectedPhotoPreparePromise: null,
+  selectedPhotoToken: 0,
   voiceRecognition: null,
   voiceRecognitionActive: false,
   voiceTranscriptBase: "",
@@ -32,7 +35,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260422-0950";
+const BUILD_VERSION = "20260422-1645";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -2828,12 +2831,62 @@ function syncPhotoClearButton() {
 }
 
 function clearSelectedPhoto(message = "Фото не выбрано.", tone = "") {
+  state.selectedPhotoPayload = null;
+  state.selectedPhotoPreparePromise = null;
+  state.selectedPhotoToken += 1;
+
   if (commandPhotoInput) {
     commandPhotoInput.value = "";
   }
 
   setPhotoStatusMessage(message, tone);
   syncPhotoClearButton();
+}
+
+function getPhotoSelectionSuffix() {
+  return getActiveDispatchMode() === "cloud"
+    ? ` · cloud route: ${getActiveCloudRoute()}`
+    : getActiveDispatchMode() === "claude"
+      ? " · будет использован Claude bridge"
+      : "";
+}
+
+async function cacheSelectedPhoto(file) {
+  const token = state.selectedPhotoToken + 1;
+  state.selectedPhotoToken = token;
+  state.selectedPhotoPayload = null;
+  setPhotoStatusMessage(`Подготавливаю фото для отправки…${getPhotoSelectionSuffix()}`);
+
+  const preparePromise = preparePhotoPayload(file)
+    .then((payload) => {
+      if (state.selectedPhotoToken !== token) {
+        return null;
+      }
+
+      state.selectedPhotoPayload = payload;
+      const size = Number(payload?.size || 0);
+      const sizeLabel = size > 1_000_000
+        ? `${(size / 1_000_000).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(size / 1000))} KB`;
+      setPhotoStatusMessage(`Фото готово: ${file.name} (${sizeLabel})${getPhotoSelectionSuffix()}`);
+      return payload;
+    })
+    .catch((error) => {
+      if (state.selectedPhotoToken !== token) {
+        return null;
+      }
+
+      state.selectedPhotoPayload = null;
+      throw error;
+    })
+    .finally(() => {
+      if (state.selectedPhotoToken === token) {
+        state.selectedPhotoPreparePromise = null;
+      }
+    });
+
+  state.selectedPhotoPreparePromise = preparePromise;
+  return preparePromise;
 }
 
 function setSubmitProgress(stage = "", tone = "") {
@@ -3542,8 +3595,14 @@ async function submitCommand(event) {
   }
 
   if (photoFile) {
-    setPhotoStatusMessage("Подготавливаю фото для отправки…");
-    payload.photo = await preparePhotoPayload(photoFile);
+    if (state.selectedPhotoPayload) {
+      payload.photo = state.selectedPhotoPayload;
+    } else if (state.selectedPhotoPreparePromise) {
+      setPhotoStatusMessage(`Дожидаюсь подготовки фото…${getPhotoSelectionSuffix()}`);
+      payload.photo = await state.selectedPhotoPreparePromise;
+    } else {
+      payload.photo = await cacheSelectedPhoto(photoFile);
+    }
   }
 
   const response = await fetch("/api/commands", {
@@ -3740,16 +3799,10 @@ function bindEvents() {
       return;
     }
 
-    const sizeLabel = file.size > 1_000_000
-      ? `${(file.size / 1_000_000).toFixed(1)} MB`
-      : `${Math.max(1, Math.round(file.size / 1000))} KB`;
-    const suffix = getActiveDispatchMode() === "cloud"
-      ? ` · cloud route: ${getActiveCloudRoute()}`
-      : getActiveDispatchMode() === "claude"
-        ? " · будет использован Claude bridge"
-      : "";
     syncPhotoClearButton();
-    setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})${suffix}`);
+    cacheSelectedPhoto(file).catch((error) => {
+      clearSelectedPhoto(String(error?.message || "Не удалось прочитать фото."), "error");
+    });
   });
 
   commandPhotoClear?.addEventListener("click", () => {

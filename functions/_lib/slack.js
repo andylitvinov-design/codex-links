@@ -3,7 +3,9 @@ import { createCommandError } from "./command-debug.js";
 import { readThreads } from "./threads.js";
 
 const encoder = new TextEncoder();
-const DEFAULT_SLACK_API_TIMEOUT_MS = 5_000;
+const DEFAULT_SLACK_API_TIMEOUT_MS = 15_000;
+const SLACK_PHOTO_UPLOAD_RETRY_COUNT = 3;
+const SLACK_PHOTO_UPLOAD_RETRY_DELAY_MS = 1_500;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -101,6 +103,10 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_SLACK_API
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function callSlackApi(token, method, body = null, query = null, options = {}) {
   const url = new URL(`https://slack.com/api/${method}`);
 
@@ -185,7 +191,7 @@ function decodeSlackDataUrl(dataUrl) {
   };
 }
 
-async function uploadSlackPhotoToThread(token, channel, threadTs, photo, options = {}) {
+async function uploadSlackPhotoToThreadOnce(token, channel, threadTs, photo, options = {}) {
   if (!photo || typeof photo !== "object") {
     return null;
   }
@@ -221,6 +227,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo, options
       }
     ],
     channel_id: channel,
+    thread_ts: threadTs,
     initial_comment: "Attached image from Codex Links request."
   }, null, { env: options.env, timeoutMs });
 
@@ -244,8 +251,30 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo, options
   return {
     fileId: normalizeText(upload.file_id),
     permalink,
-    fileName
+    fileName,
+    threadTs: normalizeText(threadTs),
+    threaded: Boolean(normalizeText(threadTs))
   };
+}
+
+async function uploadSlackPhotoToThread(token, channel, threadTs, photo, options = {}) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= SLACK_PHOTO_UPLOAD_RETRY_COUNT; attempt += 1) {
+    try {
+      return await uploadSlackPhotoToThreadOnce(token, channel, threadTs, photo, options);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt >= SLACK_PHOTO_UPLOAD_RETRY_COUNT) {
+        break;
+      }
+
+      await sleep(SLACK_PHOTO_UPLOAD_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Slack photo upload failed.");
 }
 
 async function postSlackThreadNudge(token, channel, threadTs, text, options = {}) {
@@ -521,10 +550,11 @@ export async function postSlackCommand(env, command, mention) {
 
   const resolvedChannel = normalizeText(data.channel) || channel;
   const resolvedThreadTs = normalizeText(data.message?.thread_ts) || normalizeText(data.ts);
+  let uploaded = null;
 
   if (command?.photo) {
     try {
-      const uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo, { env });
+      uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo, { env });
       await postSlackThreadNudge(
         token,
         resolvedChannel,
@@ -537,23 +567,28 @@ export async function postSlackCommand(env, command, mention) {
         { env }
       );
     } catch (error) {
-      throw withCommandError(
-        new Error(error instanceof Error ? error.message : "Slack photo upload failed."),
-        {
-          code: "slack_photo_upload_failed",
-          stage: "slack-photo-upload-failed",
-          message: "Slack photo upload failed.",
-          detail: error instanceof Error ? error.message : "Slack photo upload failed.",
-          fallback: "local-bridge"
-        }
-      );
+      console.error("[codex-links][slack] photo upload failed after thread dispatch", {
+        channel: resolvedChannel,
+        threadTs: resolvedThreadTs,
+        commandId: normalizeText(command?.id),
+        error: error instanceof Error ? error.message : String(error || "Slack photo upload failed.")
+      });
+
+      return {
+        channel: resolvedChannel,
+        ts: normalizeText(data.ts),
+        threadTs: resolvedThreadTs,
+        photoUpload: null,
+        photoUploadError: error instanceof Error ? error.message : "Slack photo upload failed."
+      };
     }
   }
 
   return {
     channel: resolvedChannel,
     ts: normalizeText(data.ts),
-    threadTs: resolvedThreadTs
+    threadTs: resolvedThreadTs,
+    photoUpload: uploaded
   };
 }
 

@@ -201,6 +201,7 @@ async function ingestSlackReply(env, command, event, options = {}) {
     lastDiagnosticDetail: progressStage === "slack-reply-received-unthreaded"
       ? "A Codex reply arrived outside the original Slack thread and was reconciled back to the command."
       : "",
+    slackAckObservedAt: command.slackAckObservedAt || new Date().toISOString(),
     slackChannelId: channelId,
     slackThreadTs: effectiveThreadTs,
     slackMessageTs: command.slackMessageTs,

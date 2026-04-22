@@ -81,9 +81,54 @@ test("syncSlackCommandReplies keeps progress-only Slack replies non-terminal", a
   const messages = await readMessages(env);
 
   assert.equal(updated?.status, "processing");
+  assert.ok(updated?.firstAckAt);
+  assert.ok(updated?.slackAckObservedAt);
   assert.equal(updated?.replyMatched, false);
   assert.equal(updated?.replyMatchedBy, "");
   assert.equal(messages.length, 0);
+});
+
+test("syncSlackCommandReplies ignores helper-only Slack replies and does not mark first ack", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-helper-only",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "inspect photo",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackChannelId: "C123",
+    slackMessageTs: "3000.000001",
+    slackThreadTs: "3000.000001",
+    dispatchedAt: createdAt
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => createSlackResponse([
+    { ts: "3000.000001", thread_ts: "3000.000001", text: "root task" },
+    { ts: "3001.000001", thread_ts: "3000.000001", text: "Image uploaded in this thread. File: <https://example.test/file|photo.png>. Acknowledge in this same thread before starting the work." }
+  ]);
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-helper-only");
+    await syncSlackCommandReplies(env, command, { SLACK_CODEX_USER_ID: "U123" });
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const updated = await getCommandById(env, "cmd-slack-helper-only");
+
+  assert.equal(updated?.status, "dispatched");
+  assert.equal(updated?.firstAckAt, "");
+  assert.equal(updated?.slackAckObservedAt || "", "");
 });
 
 test("syncSlackCommandReplies persists terminal Slack replies and marks them matched", async () => {
