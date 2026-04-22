@@ -104,21 +104,24 @@ function assertDirectCloudState(command, label) {
   const requestedExecutor = String(command?.requestedExecutor || "").trim()
   const actualExecutor = String(command?.actualExecutor || "").trim()
   const expectedDispatchMode = CLOUD_ROUTE === "direct" ? "cloud" : "slack-codex-cloud"
+  const expectedRequestedExecutor = "direct-openai"
+  const allowedAnsweredExecutors = CLOUD_ROUTE === "direct"
+    ? new Set(["direct-openai", "bridge"])
+    : new Set(["cloud-via-slack", "bridge"])
 
   if (dispatchMode !== expectedDispatchMode && !(expectedDispatchMode === "slack-codex-cloud" && dispatchMode === "local-bridge")) {
     throw new Error(`${label}: expected dispatchMode=${expectedDispatchMode} for cloud request, got ${dispatchMode || "empty"}.`)
   }
 
-  if (requestedExecutor !== "cloud") {
-    throw new Error(`${label}: expected requestedExecutor=cloud, got ${requestedExecutor || "empty"}.`)
+  if (requestedExecutor !== expectedRequestedExecutor) {
+    throw new Error(`${label}: expected requestedExecutor=${expectedRequestedExecutor}, got ${requestedExecutor || "empty"}.`)
   }
 
   if (
     String(command?.status || "").trim().toLowerCase() === "answered"
-    && actualExecutor !== "cloud"
-    && actualExecutor !== "bridge"
+    && !allowedAnsweredExecutors.has(actualExecutor)
   ) {
-    throw new Error(`${label}: expected actualExecutor=cloud or bridge on answered command, got ${actualExecutor || "empty"}.`)
+    throw new Error(`${label}: expected actualExecutor in ${Array.from(allowedAnsweredExecutors).join(" or ")} on answered command, got ${actualExecutor || "empty"}.`)
   }
 }
 

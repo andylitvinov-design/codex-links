@@ -220,6 +220,16 @@ function filterPublicCommands(commands) {
   return (Array.isArray(commands) ? commands : []).filter((command) => !isHiddenPublicCommand(command));
 }
 
+function slackTsToIso(ts) {
+  const seconds = Number.parseFloat(String(ts || "").trim());
+
+  if (!Number.isFinite(seconds) || seconds < 1_000_000_000) {
+    return new Date().toISOString();
+  }
+
+  return new Date(seconds * 1000).toISOString();
+}
+
 function serializeCommand(command, options = {}) {
   if (!command || typeof command !== "object") {
     return command;
@@ -323,6 +333,7 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
   }
 
   const classification = classifySlackReply(latestReply.text);
+  const isTerminalReply = classification.status === "answered" || classification.status === "failed";
 
   await upsertCommandDispatchState(env, {
     id: command.id,
@@ -332,8 +343,10 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     actualExecutor: "cloud-via-slack",
     slackReplyReceived: true,
     slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
-    replyMatched: true,
-    replyMatchedBy: options.replyMatchedBy || (progressStage === "slack-reply-received-unthreaded" ? "manual-sync" : "thread"),
+    replyMatched: isTerminalReply,
+    replyMatchedBy: isTerminalReply
+      ? (options.replyMatchedBy || (progressStage === "slack-reply-received-unthreaded" ? "manual-sync" : "thread"))
+      : "",
     firstAckAt: command.firstAckAt || new Date().toISOString(),
     timeoutPhase: "",
     lastDiagnosticCode: progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : "",
@@ -352,16 +365,18 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""
   });
 
-  await upsertMessages(env, [latestReply].map((reply) => ({
-    id: `slack:${channelId}:${reply.ts}`,
-    clientId: command.clientId,
-    threadId: command.threadId,
-    threadLabel: command.threadLabel,
-    commandId: command.id,
-    role: "assistant",
-    text: reply.text,
-    createdAt: new Date(Number(reply.ts) * 1000 || Date.now()).toISOString()
-  })));
+  if (isTerminalReply) {
+    await upsertMessages(env, [latestReply].map((reply) => ({
+      id: `slack:${channelId}:${reply.ts}`,
+      clientId: command.clientId,
+      threadId: command.threadId,
+      threadLabel: command.threadLabel,
+      commandId: command.id,
+      role: "assistant",
+      text: reply.text,
+      createdAt: slackTsToIso(reply.ts)
+    })));
+  }
 
   await refreshBridgeStatusFromCommands(env, {
     dispatchMode: DISPATCH_MODE_SLACK,
@@ -1207,6 +1222,7 @@ export async function onRequest(context) {
       id: payload?.id,
       progressStage: payload?.progressStage,
       completedAt: payload?.completedAt,
+      expectedProcessorId: payload?.processorId,
       actualExecutor: payload?.actualExecutor || payload?.actualDispatchMode,
       firstAckAt: payload?.firstAckAt,
       firstExecutorAckSeenAt: payload?.firstExecutorAckSeenAt,
@@ -1233,6 +1249,7 @@ export async function onRequest(context) {
       id: payload?.id,
       progressStage: payload?.progressStage,
       completedAt: payload?.completedAt,
+      expectedProcessorId: payload?.processorId,
       actualExecutor: payload?.actualExecutor || payload?.actualDispatchMode,
       errorMessage: payload?.errorMessage,
       fallbackApplied: payload?.fallbackApplied,
@@ -1309,6 +1326,7 @@ export async function onRequest(context) {
       id: payload?.id,
       progressStage: payload?.progressStage,
       progressUpdatedAt: payload?.progressUpdatedAt,
+      expectedProcessorId: payload?.processorId,
       processingLeaseUntil: payload?.processingLeaseUntil,
       photoAttached: payload?.photoAttached,
       photoBytesPresent: payload?.photoBytesPresent,

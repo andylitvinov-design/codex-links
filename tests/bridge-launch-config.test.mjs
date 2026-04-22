@@ -24,3 +24,11 @@ test("bridge watchdog allows long-lived runs before forcing a restart", async ()
 
   assert.match(source, /const BRIDGE_RUN_TIMEOUT_MS = 6 \* 60 \* 60 \* 1000;/);
 });
+
+test("bridge loop runs delivery maintenance automatically on startup and interval", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /await runDeliveryMaintenance\(\)\.catch/);
+  assert.match(source, /setInterval\(\(\) => \{\s*void runDeliveryMaintenance\(\)\.catch/);
+  assert.match(source, /const MAINTENANCE_INTERVAL_MS = 60 \* 1000;/);
+});

@@ -32,7 +32,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260422-0235";
+const BUILD_VERSION = "20260422-0320";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1144,6 +1144,14 @@ function getCommandDiagnosticMessage(command) {
     return "Bridge не забрал сообщение из очереди вовремя.";
   }
 
+  if (diagnosticCode === "slack_first_ack_timeout") {
+    return "Cloud via Slack не подтвердил задачу вовремя.";
+  }
+
+  if (diagnosticCode === "slack_result_timeout") {
+    return "Cloud via Slack не прислал ответ вовремя.";
+  }
+
   if (diagnosticCode === "bridge_temporarily_unavailable") {
     return "Bridge временно недоступен, команда остаётся в retry-очереди.";
   }
@@ -1156,8 +1164,20 @@ function getCommandDiagnosticMessage(command) {
     return "Фото не удалось обработать через bridge в допустимое время.";
   }
 
+  if (diagnosticCode === "bridge_photo_unreadable") {
+    return "Bridge не смог корректно прочитать фото после повторной попытки.";
+  }
+
   if (status === "failed" && fallbackReason === "local bridge stopped heartbeating") {
     return "Bridge перестал heartbeat'ить во время обработки.";
+  }
+
+  if (fallbackReason === "cloud via slack did not acknowledge in time" || timeoutPhase === "first-ack-timeout") {
+    return "Cloud via Slack не подтвердил задачу вовремя.";
+  }
+
+  if (fallbackReason === "cloud via slack did not produce a reply in time") {
+    return "Cloud via Slack не прислал ответ вовремя.";
   }
 
   if (fallbackReason === "direct cloud execution timed out" || timeoutPhase === "result-timeout") {
@@ -1478,10 +1498,31 @@ function getFallbackMessageDeliveryStatus(commandId) {
     return null;
   }
 
-  return {
-    tone: "delivery",
-    text: "Обрабатываю · статус синхронизируется"
-  };
+  const linkedCommand = state.commands.find((entry) => String(entry?.id || "").trim() === normalizedId);
+
+  if (linkedCommand) {
+    const commandStatus = getCommandDeliveryStatus(linkedCommand);
+    if (commandStatus) {
+      return commandStatus;
+    }
+
+    const status = String(linkedCommand.status || "").trim().toLowerCase();
+    if (status === "answered" || status === "acked") {
+      return {
+        tone: "delivery",
+        text: "Ответ получен, синхронизирую ленту"
+      };
+    }
+
+    if (status === "failed") {
+      return {
+        tone: "error",
+        text: getCommandDiagnosticMessage(linkedCommand) || getCommandFailureMessage(linkedCommand)
+      };
+    }
+  }
+
+  return null;
 }
 
 function getVisibleTimelineCommands() {
