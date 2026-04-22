@@ -3,6 +3,7 @@ import { createCommandError } from "./command-debug.js";
 import { readThreads } from "./threads.js";
 
 const encoder = new TextEncoder();
+const DEFAULT_SLACK_API_TIMEOUT_MS = 5_000;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -68,7 +69,39 @@ function withCommandError(error, input) {
   return wrapped
 }
 
-async function callSlackApi(token, method, body = null, query = null) {
+export function getSlackApiTimeoutMs(env, fallback = DEFAULT_SLACK_API_TIMEOUT_MS) {
+  const configured = Number(env?.SLACK_API_TIMEOUT_MS);
+
+  if (!Number.isFinite(configured) || configured < 100) {
+    return fallback;
+  }
+
+  return configured;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_SLACK_API_TIMEOUT_MS, label = "Slack request") {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "");
+
+    if (controller.signal.aborted || /abort/i.test(message)) {
+      throw new Error(`${label} timed out after ${timeoutMs}ms.`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function callSlackApi(token, method, body = null, query = null, options = {}) {
   const url = new URL(`https://slack.com/api/${method}`);
 
   if (query && typeof query === "object") {
@@ -79,11 +112,11 @@ async function callSlackApi(token, method, body = null, query = null) {
     });
   }
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithTimeout(url.toString(), {
     method: body ? "POST" : "GET",
     headers: buildSlackHeaders(token),
     body: body ? JSON.stringify(body) : undefined
-  });
+  }, getSlackApiTimeoutMs(options.env || {}, options.timeoutMs), `Slack API ${method}`);
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
@@ -93,7 +126,7 @@ async function callSlackApi(token, method, body = null, query = null) {
   return data;
 }
 
-async function callSlackApiForm(token, method, body = null, query = null) {
+async function callSlackApiForm(token, method, body = null, query = null, options = {}) {
   const url = new URL(`https://slack.com/api/${method}`);
 
   if (query && typeof query === "object") {
@@ -116,11 +149,11 @@ async function callSlackApiForm(token, method, body = null, query = null) {
     });
   }
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithTimeout(url.toString(), {
     method: "POST",
     headers: buildSlackFormHeaders(token),
     body: form
-  });
+  }, getSlackApiTimeoutMs(options.env || {}, options.timeoutMs), `Slack API ${method}`);
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
@@ -152,7 +185,7 @@ function decodeSlackDataUrl(dataUrl) {
   };
 }
 
-async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
+async function uploadSlackPhotoToThread(token, channel, threadTs, photo, options = {}) {
   if (!photo || typeof photo !== "object") {
     return null;
   }
@@ -161,19 +194,20 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   const decoded = decodeSlackDataUrl(photo.dataUrl);
   const contentType = normalizeText(photo.contentType) || decoded.contentType;
   const length = Number(photo.size || decoded.bytes.byteLength || 0) || decoded.bytes.byteLength;
+  const timeoutMs = getSlackApiTimeoutMs(options.env || {}, options.timeoutMs);
   const upload = await callSlackApiForm(token, "files.getUploadURLExternal", {
     filename: fileName,
     length
-  });
+  }, null, { env: options.env, timeoutMs });
 
-  const uploadResponse = await fetch(String(upload.upload_url || ""), {
+  const uploadResponse = await fetchWithTimeout(String(upload.upload_url || ""), {
     method: "POST",
     headers: buildSlackAuthHeaders(token, {
       "content-type": contentType,
       "content-length": String(length)
     }),
     body: decoded.bytes
-  });
+  }, timeoutMs, "Slack file upload");
 
   if (!uploadResponse.ok) {
     throw new Error(`Slack file upload failed with ${uploadResponse.status}.`);
@@ -188,7 +222,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
     ],
     channel_id: channel,
     initial_comment: "Attached image from Codex Links request."
-  });
+  }, null, { env: options.env, timeoutMs });
 
   const completedFile = Array.isArray(completed?.files) ? completed.files[0] : null;
   let permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
@@ -197,7 +231,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
     try {
       const info = await callSlackApi(token, "files.info", null, {
         file: normalizeText(upload.file_id)
-      });
+      }, { env: options.env, timeoutMs });
       permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
     } catch (error) {
       console.error("[codex-links][slack] files.info fallback failed", {
@@ -214,7 +248,7 @@ async function uploadSlackPhotoToThread(token, channel, threadTs, photo) {
   };
 }
 
-async function postSlackThreadNudge(token, channel, threadTs, text) {
+async function postSlackThreadNudge(token, channel, threadTs, text, options = {}) {
   const value = normalizeText(text);
 
   if (!value) {
@@ -228,10 +262,13 @@ async function postSlackThreadNudge(token, channel, threadTs, text) {
     mrkdwn: true,
     unfurl_links: false,
     unfurl_media: false
+  }, null, {
+    env: options.env,
+    timeoutMs: options.timeoutMs
   });
 }
 
-export async function fetchSlackThreadReplies(env, channel, threadTs) {
+export async function fetchSlackThreadReplies(env, channel, threadTs, options = {}) {
   const token = normalizeText(env?.SLACK_BOT_TOKEN);
   const normalizedChannel = normalizeText(channel);
   const normalizedThreadTs = normalizeText(threadTs);
@@ -245,6 +282,9 @@ export async function fetchSlackThreadReplies(env, channel, threadTs) {
     ts: normalizedThreadTs,
     inclusive: true,
     limit: 100
+  }, {
+    env,
+    timeoutMs: options.timeoutMs
   });
 
   return (Array.isArray(data?.messages) ? data.messages : [])
@@ -273,6 +313,9 @@ export async function fetchSlackChannelMessages(env, channel, options = {}) {
     inclusive: true,
     limit: 100,
     oldest
+  }, {
+    env,
+    timeoutMs: options.timeoutMs
   });
 
   return (Array.isArray(data?.messages) ? data.messages : []).map((message) => ({
@@ -292,7 +335,7 @@ async function validateSlackTarget(token, channel, targetUserId) {
     return;
   }
 
-  const auth = await callSlackApi(token, "auth.test");
+  const auth = await callSlackApi(token, "auth.test", null, null, { env: { SLACK_API_TIMEOUT_MS: DEFAULT_SLACK_API_TIMEOUT_MS } });
   const botUserId = normalizeText(auth.user_id);
 
   if (botUserId && normalizedTarget === botUserId) {
@@ -308,7 +351,7 @@ async function validateSlackTarget(token, channel, targetUserId) {
     );
   }
 
-  const members = await callSlackApi(token, "conversations.members", null, { channel });
+  const members = await callSlackApi(token, "conversations.members", null, { channel }, { env: { SLACK_API_TIMEOUT_MS: DEFAULT_SLACK_API_TIMEOUT_MS } });
   const memberIds = Array.isArray(members.members) ? members.members.map((value) => normalizeText(value)) : [];
 
   if (!memberIds.includes(normalizedTarget)) {
@@ -450,7 +493,7 @@ export async function postSlackCommand(env, command, mention) {
     ...env,
     SLACK_CODEX_MENTION: mention
   }, resolvedCodexThreadId);
-  const response = await fetch("https://slack.com/api/chat.postMessage", {
+  const response = await fetchWithTimeout("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: buildSlackHeaders(token),
     body: JSON.stringify({
@@ -460,7 +503,7 @@ export async function postSlackCommand(env, command, mention) {
       unfurl_media: false,
       mrkdwn: true
     })
-  });
+  }, getSlackApiTimeoutMs(env), "Slack API chat.postMessage");
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
@@ -481,7 +524,7 @@ export async function postSlackCommand(env, command, mention) {
 
   if (command?.photo) {
     try {
-      const uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo);
+      const uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo, { env });
       await postSlackThreadNudge(
         token,
         resolvedChannel,
@@ -490,7 +533,8 @@ export async function postSlackCommand(env, command, mention) {
           mention ? `${mention} image uploaded in this thread.` : "Image uploaded in this thread.",
           uploaded?.permalink ? `File: <${uploaded.permalink}|${uploaded.fileName || "uploaded image"}>.` : "",
           "Acknowledge in this same thread before starting the work."
-        ].filter(Boolean).join(" ")
+        ].filter(Boolean).join(" "),
+        { env }
       );
     } catch (error) {
       throw withCommandError(
