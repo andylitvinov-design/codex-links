@@ -57,6 +57,8 @@ const SLACK_DISPATCH_GRACE_MS = 15_000;
 const SLACK_FIRST_ACK_TIMEOUT_MS = 30_000;
 const SLACK_RESULT_WAIT_MS = 120_000;
 const SLACK_SYNC_POLL_MS = 2_000;
+const READ_SLACK_SYNC_BUDGET_MS = 2_500;
+const READ_SLACK_API_TIMEOUT_MS = 1_500;
 
 function logCommandError(context, error, extra = {}) {
   const message = error instanceof Error ? error.message : String(error || "Unknown error");
@@ -299,7 +301,9 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     return false;
   }
 
-  const replies = await fetchSlackThreadReplies(env, channelId, threadTs);
+  const replies = await fetchSlackThreadReplies(env, channelId, threadTs, {
+    timeoutMs: options.timeoutMs
+  });
   const rootTs = String(command?.slackMessageTs || "").trim();
   const threadReplies = replies.filter((reply) => (
     reply.ts
@@ -313,7 +317,8 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
 
   if (!latestReply) {
     const channelMessages = await fetchSlackChannelMessages(env, channelId, {
-      oldest: command.dispatchedAt || command.createdAt
+      oldest: command.dispatchedAt || command.createdAt,
+      timeoutMs: options.timeoutMs
     });
     const unthreadedReplies = channelMessages.filter((reply) =>
       reply.ts
@@ -392,10 +397,14 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
   return classification.status === "answered" || classification.status === "failed";
 }
 
-export async function syncRecentSlackReplies(env, runtimeConfig) {
+export async function syncRecentSlackReplies(env, runtimeConfig, options = {}) {
   if (!isSlackDispatchConfigured(runtimeConfig)) {
     return;
   }
+
+  const deadline = Number.isFinite(Number(options.budgetMs)) && Number(options.budgetMs) > 0
+    ? Date.now() + Number(options.budgetMs)
+    : 0;
 
   const commands = await readCommands(env);
   const candidates = commands
@@ -409,18 +418,28 @@ export async function syncRecentSlackReplies(env, runtimeConfig) {
     .slice(0, MAX_RECENT_SLACK_SYNC_COMMANDS);
 
   for (const command of candidates) {
+    if (deadline && Date.now() >= deadline) {
+      break;
+    }
+
     try {
-      await syncSlackCommandReplies(env, command, runtimeConfig);
+      await syncSlackCommandReplies(env, command, runtimeConfig, {
+        timeoutMs: options.timeoutMs
+      });
     } catch (error) {
       logCommandError("syncRecentSlackReplies", error, { commandId: command?.id || "" });
     }
   }
 }
 
-export async function syncSpecificSlackReplies(env, runtimeConfig, commands) {
+export async function syncSpecificSlackReplies(env, runtimeConfig, commands, options = {}) {
   if (!isSlackDispatchConfigured(runtimeConfig)) {
     return;
   }
+
+  const deadline = Number.isFinite(Number(options.budgetMs)) && Number(options.budgetMs) > 0
+    ? Date.now() + Number(options.budgetMs)
+    : 0;
 
   const candidates = (Array.isArray(commands) ? commands : [])
     .filter((command) => command?.dispatchMode === DISPATCH_MODE_SLACK)
@@ -433,12 +452,32 @@ export async function syncSpecificSlackReplies(env, runtimeConfig, commands) {
     .slice(0, MAX_RECENT_SLACK_SYNC_COMMANDS);
 
   for (const command of candidates) {
+    if (deadline && Date.now() >= deadline) {
+      break;
+    }
+
     try {
-      await syncSlackCommandReplies(env, command, runtimeConfig);
+      await syncSlackCommandReplies(env, command, runtimeConfig, {
+        timeoutMs: options.timeoutMs
+      });
     } catch (error) {
       logCommandError("syncSpecificSlackReplies", error, { commandId: command?.id || "" });
     }
   }
+}
+
+export async function runSlackSyncWithinBudget(operation, budgetMs = READ_SLACK_SYNC_BUDGET_MS) {
+  const normalizedBudgetMs = Number(budgetMs);
+
+  if (!Number.isFinite(normalizedBudgetMs) || normalizedBudgetMs <= 0) {
+    await operation();
+    return true;
+  }
+
+  return Promise.race([
+    Promise.resolve().then(operation).then(() => true).catch(() => false),
+    sleep(normalizedBudgetMs).then(() => false)
+  ]);
 }
 
 async function fallbackToLocalBridge(env, command, errorMessage) {
@@ -862,7 +901,10 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
         dispatchObservedAt = dispatchObservedAt || Date.now();
 
         try {
-          await syncSpecificSlackReplies(env, runtimeConfig, [command]);
+          await syncSpecificSlackReplies(env, runtimeConfig, [command], {
+            budgetMs: READ_SLACK_API_TIMEOUT_MS,
+            timeoutMs: READ_SLACK_API_TIMEOUT_MS
+          });
         } catch (error) {
           logCommandError("monitorFirstAckAndFallback.syncSpecificSlackReplies", error, { commandId });
         }
@@ -1077,7 +1119,10 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
 
 async function reconcileCommandsForRead(env, runtimeConfig) {
   try {
-    await syncRecentSlackReplies(env, runtimeConfig);
+    await runSlackSyncWithinBudget(() => syncRecentSlackReplies(env, runtimeConfig, {
+      budgetMs: READ_SLACK_SYNC_BUDGET_MS,
+      timeoutMs: READ_SLACK_API_TIMEOUT_MS
+    }), READ_SLACK_SYNC_BUDGET_MS);
   } catch (error) {
     logCommandError("reconcileCommandsForRead.syncRecentSlackReplies", error);
   }
