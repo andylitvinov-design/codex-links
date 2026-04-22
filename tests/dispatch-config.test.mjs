@@ -3,10 +3,18 @@ import assert from "node:assert/strict";
 
 import {
   DISPATCH_MODE_CLOUD,
+  DISPATCH_MODE_CLAUDE,
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
+  EXECUTOR_ROUTE_BRIDGE,
+  EXECUTOR_ROUTE_CLAUDE,
+  EXECUTOR_ROUTE_CLOUD_SLACK,
+  EXECUTOR_ROUTE_DIRECT_OPENAI,
+  dispatchModeToExecutorRoute,
+  executorRouteToDispatchMode,
   getConfiguredDispatchMode,
-  normalizeDispatchMode
+  normalizeDispatchMode,
+  normalizeExecutorRoute
 } from "../functions/_lib/dispatch.js";
 
 test("normalizeDispatchMode accepts slack and direct aliases", () => {
@@ -14,6 +22,18 @@ test("normalizeDispatchMode accepts slack and direct aliases", () => {
   assert.equal(normalizeDispatchMode("slack-codex-cloud"), DISPATCH_MODE_SLACK);
   assert.equal(normalizeDispatchMode("direct-openai"), DISPATCH_MODE_CLOUD);
   assert.equal(normalizeDispatchMode("cloud"), DISPATCH_MODE_CLOUD);
+  assert.equal(normalizeDispatchMode("claude"), DISPATCH_MODE_CLAUDE);
+});
+
+test("executor route helpers preserve explicit route choices", () => {
+  assert.equal(normalizeExecutorRoute("bridge"), EXECUTOR_ROUTE_BRIDGE);
+  assert.equal(normalizeExecutorRoute("cloud"), EXECUTOR_ROUTE_DIRECT_OPENAI);
+  assert.equal(normalizeExecutorRoute("cloud-via-slack"), EXECUTOR_ROUTE_CLOUD_SLACK);
+  assert.equal(normalizeExecutorRoute("claude"), EXECUTOR_ROUTE_CLAUDE);
+  assert.equal(executorRouteToDispatchMode(EXECUTOR_ROUTE_DIRECT_OPENAI), DISPATCH_MODE_CLOUD);
+  assert.equal(executorRouteToDispatchMode(EXECUTOR_ROUTE_CLOUD_SLACK), DISPATCH_MODE_SLACK);
+  assert.equal(executorRouteToDispatchMode(EXECUTOR_ROUTE_CLAUDE), DISPATCH_MODE_CLAUDE);
+  assert.equal(dispatchModeToExecutorRoute(DISPATCH_MODE_CLAUDE), EXECUTOR_ROUTE_CLAUDE);
 });
 
 test("getConfiguredDispatchMode prefers Slack by default when configured", () => {

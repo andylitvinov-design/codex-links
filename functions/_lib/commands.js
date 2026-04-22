@@ -1,6 +1,8 @@
 import {
   COMMAND_PROCESSING_LEASE_MS,
   COMMAND_ACTIVE_STORAGE_KEY,
+  COMMAND_CLAUDE_PROCESSING_STORAGE_KEY,
+  COMMAND_CLAUDE_QUEUE_STORAGE_KEY,
   COMMAND_CLIENT_INDEX_PREFIX,
   COMMAND_ITEM_PREFIX,
   COMMAND_LOCAL_PROCESSING_STORAGE_KEY,
@@ -10,7 +12,20 @@ import {
   HISTORY_RETENTION_MS,
   MAX_COMMANDS
 } from "./constants.js";
-import { DISPATCH_MODE_CLOUD, DISPATCH_MODE_LOCAL, DISPATCH_MODE_SLACK, normalizeDispatchMode } from "./dispatch.js";
+import {
+  DISPATCH_MODE_CLAUDE,
+  DISPATCH_MODE_CLOUD,
+  DISPATCH_MODE_LOCAL,
+  DISPATCH_MODE_SLACK,
+  EXECUTOR_ROUTE_BRIDGE,
+  EXECUTOR_ROUTE_CLAUDE,
+  EXECUTOR_ROUTE_CLOUD_SLACK,
+  EXECUTOR_ROUTE_DIRECT_OPENAI,
+  dispatchModeToExecutorRoute,
+  executorRouteToDispatchMode,
+  normalizeDispatchMode,
+  normalizeExecutorRoute
+} from "./dispatch.js";
 import { parseCommandError, stringifyCommandError } from "./command-debug.js";
 import { normalizeLatencyFields } from "./delivery.js";
 
@@ -126,6 +141,14 @@ function isLocalProcessingCommand(command) {
   return command?.dispatchMode === DISPATCH_MODE_LOCAL && normalizeCommandStatus(command?.status) === "processing";
 }
 
+function isClaudeQueueCommand(command) {
+  return command?.dispatchMode === DISPATCH_MODE_CLAUDE && normalizeCommandStatus(command?.status) === "queued";
+}
+
+function isClaudeProcessingCommand(command) {
+  return command?.dispatchMode === DISPATCH_MODE_CLAUDE && normalizeCommandStatus(command?.status) === "processing";
+}
+
 async function appendIndexedCommandId(env, key, id) {
   const normalizedId = String(id || "").trim();
 
@@ -147,6 +170,8 @@ async function rebuildCommandIndexes(env, commands) {
   const activeIds = [];
   const localQueueIds = [];
   const localProcessingIds = [];
+  const claudeQueueIds = [];
+  const claudeProcessingIds = [];
   const clientIds = new Map();
 
   for (const command of normalized) {
@@ -175,6 +200,14 @@ async function rebuildCommandIndexes(env, commands) {
     if (isLocalProcessingCommand(command)) {
       localProcessingIds.push(command.id);
     }
+
+    if (isClaudeQueueCommand(command)) {
+      claudeQueueIds.push(command.id);
+    }
+
+    if (isClaudeProcessingCommand(command)) {
+      claudeProcessingIds.push(command.id);
+    }
   }
 
   await Promise.all([
@@ -182,6 +215,8 @@ async function rebuildCommandIndexes(env, commands) {
     writeIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY, activeIds),
     writeIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, localQueueIds),
     writeIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, localProcessingIds),
+    writeIdIndex(env, COMMAND_CLAUDE_QUEUE_STORAGE_KEY, claudeQueueIds),
+    writeIdIndex(env, COMMAND_CLAUDE_PROCESSING_STORAGE_KEY, claudeProcessingIds),
     ...[...clientIds.entries()].map(([clientId, ids]) => writeIdIndex(env, commandClientIndexKey(clientId), ids))
   ]);
 }
@@ -196,10 +231,12 @@ async function persistCommand(env, command) {
   await appendIndexedCommandId(env, COMMANDS_RECENT_STORAGE_KEY, normalized.id);
   await appendIndexedCommandId(env, commandClientIndexKey(normalized.clientId), normalized.id);
 
-  const [activeIds, queueIds, processingIds] = await Promise.all([
+  const [activeIds, queueIds, processingIds, claudeQueueIds, claudeProcessingIds] = await Promise.all([
     readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY).catch(() => []),
     readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
-    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => [])
+    readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_CLAUDE_QUEUE_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_CLAUDE_PROCESSING_STORAGE_KEY).catch(() => [])
   ]);
 
   await Promise.all([
@@ -223,6 +260,20 @@ async function persistCommand(env, command) {
       isLocalProcessingCommand(normalized)
         ? [...processingIds, normalized.id]
         : processingIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_CLAUDE_QUEUE_STORAGE_KEY,
+      isClaudeQueueCommand(normalized)
+        ? [...claudeQueueIds, normalized.id]
+        : claudeQueueIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_CLAUDE_PROCESSING_STORAGE_KEY,
+      isClaudeProcessingCommand(normalized)
+        ? [...claudeProcessingIds, normalized.id]
+        : claudeProcessingIds.filter((id) => id !== normalized.id)
     )
   ]);
 
@@ -368,13 +419,30 @@ function normalizeDateValue(rawValue) {
   return String(rawValue || "").trim().slice(0, 80);
 }
 
-function normalizeExecutionMode(rawValue) {
-  return String(rawValue || "").trim().toLowerCase() === "cloud" ? "cloud" : "bridge";
+function normalizeExecutionMode(rawValue, fallback = EXECUTOR_ROUTE_BRIDGE) {
+  return normalizeExecutorRoute(rawValue, fallback);
 }
 
-function normalizeActualExecutionMode(rawValue) {
+function normalizeActualExecutionMode(rawValue, fallback = "") {
   const value = String(rawValue || "").trim().toLowerCase();
-  return value === "cloud" || value === "bridge" ? value : "";
+
+  if (!value) {
+    return "";
+  }
+
+  if (value === "bridge") {
+    return EXECUTOR_ROUTE_BRIDGE;
+  }
+
+  if (value === "cloud") {
+    return normalizeExecutorRoute(fallback || EXECUTOR_ROUTE_DIRECT_OPENAI, EXECUTOR_ROUTE_DIRECT_OPENAI);
+  }
+
+  if (value === "claude") {
+    return EXECUTOR_ROUTE_CLAUDE;
+  }
+
+  return normalizeExecutorRoute(value, fallback || "");
 }
 
 function normalizeReplyMatchedBy(rawValue) {
@@ -388,7 +456,7 @@ function normalizeReplyMatchedBy(rawValue) {
 }
 
 function dispatchModeToExecutionMode(rawValue) {
-  return normalizeDispatchValue(rawValue) === DISPATCH_MODE_SLACK ? "cloud" : "bridge";
+  return dispatchModeToExecutorRoute(normalizeDispatchValue(rawValue));
 }
 
 function normalizeBooleanValue(rawValue, fallback = false) {
@@ -441,14 +509,16 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
       || input.requestedMode
       || command?.requestedExecutor
       || command?.requestedMode
-      || command?.targetExecutionMode
+      || command?.targetExecutionMode,
+    dispatchModeToExecutorRoute(dispatchMode)
   );
   const normalizedActualExecutor = normalizeActualExecutionMode(
     Object.prototype.hasOwnProperty.call(input, "actualExecutor")
       ? input.actualExecutor
       : (Object.prototype.hasOwnProperty.call(input, "actualDispatchMode")
           ? input.actualDispatchMode
-          : (command?.actualExecutor || command?.actualDispatchMode))
+          : (command?.actualExecutor || command?.actualDispatchMode)),
+    dispatchModeToExecutorRoute(dispatchMode)
   );
   const replyMatched = normalizeBooleanValue(
     Object.prototype.hasOwnProperty.call(input, "replyMatched") ? input.replyMatched : input.slackReplyMatched,
@@ -629,11 +699,23 @@ function normalizeStoredCommandEntry(entry) {
     targetRepoUrl: normalizeUrlValue(entry.targetRepoUrl),
     targetContextFiles: normalizeStringArray(entry.targetContextFiles),
     targetWorkspacePath: normalizeWorkspacePathValue(entry.targetWorkspacePath),
-    targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode),
-    requestedExecutor: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
-    requestedMode: normalizeExecutionMode(entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode),
-    actualExecutor: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
-    actualDispatchMode: normalizeActualExecutionMode(entry.actualExecutor || entry.actualDispatchMode),
+      targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode, dispatchModeToExecutorRoute(entry.dispatchMode)),
+      requestedExecutor: normalizeExecutionMode(
+        entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode,
+        dispatchModeToExecutorRoute(entry.dispatchMode)
+      ),
+      requestedMode: normalizeExecutionMode(
+        entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode,
+        dispatchModeToExecutorRoute(entry.dispatchMode)
+      ),
+      actualExecutor: normalizeActualExecutionMode(
+        entry.actualExecutor || entry.actualDispatchMode,
+        dispatchModeToExecutorRoute(entry.dispatchMode)
+      ),
+      actualDispatchMode: normalizeActualExecutionMode(
+        entry.actualExecutor || entry.actualDispatchMode,
+        dispatchModeToExecutorRoute(entry.dispatchMode)
+      ),
     slackDispatchAttempted: normalizeBooleanValue(entry.slackDispatchAttempted),
     slackDispatchSucceeded: normalizeBooleanValue(entry.slackDispatchSucceeded),
     slackReplyReceived: normalizeBooleanValue(entry.slackReplyReceived),
@@ -861,9 +943,18 @@ export function createCommandRecord(input) {
       targetRepoUrl: normalizeUrlValue(input.targetRepoUrl),
       targetContextFiles: normalizeStringArray(input.targetContextFiles),
       targetWorkspacePath: normalizeWorkspacePathValue(input.targetWorkspacePath),
-      targetExecutionMode: normalizeExecutionMode(input.targetExecutionMode),
-      requestedExecutor: normalizeExecutionMode(input.targetExecutionMode || input.dispatchMode),
-      requestedMode: normalizeExecutionMode(input.targetExecutionMode || input.dispatchMode),
+      targetExecutionMode: normalizeExecutionMode(
+        input.targetExecutionMode,
+        dispatchModeToExecutorRoute(normalizeDispatchValue(input.dispatchMode))
+      ),
+      requestedExecutor: normalizeExecutionMode(
+        input.targetExecutionMode || dispatchModeToExecutorRoute(input.dispatchMode),
+        dispatchModeToExecutorRoute(normalizeDispatchValue(input.dispatchMode))
+      ),
+      requestedMode: normalizeExecutionMode(
+        input.targetExecutionMode || dispatchModeToExecutorRoute(input.dispatchMode),
+        dispatchModeToExecutorRoute(normalizeDispatchValue(input.dispatchMode))
+      ),
       actualExecutor: "",
       actualDispatchMode: "",
       slackDispatchAttempted: false,
@@ -936,7 +1027,10 @@ export async function insertCommand(env, input) {
     return normalized;
   }
 
-  if (normalized.value.dispatchMode === DISPATCH_MODE_SLACK && !normalized.value.targetRepo) {
+  if (
+    (normalized.value.dispatchMode === DISPATCH_MODE_SLACK || normalized.value.dispatchMode === DISPATCH_MODE_CLOUD)
+    && !normalized.value.targetRepo
+  ) {
     return {
       ok: false,
       error: "Cloud dispatch requires a target repository."
@@ -999,15 +1093,25 @@ export async function acknowledgeCommands(env, ids) {
 }
 
 export async function claimNextCommand(env, input = {}) {
-  const processorId = String(input.processorId || "").trim().slice(0, 120) || "bridge";
+  const requestedDispatchMode = normalizeDispatchValue(input.dispatchMode || DISPATCH_MODE_LOCAL);
+  const isClaudeProcessor = requestedDispatchMode === DISPATCH_MODE_CLAUDE;
+  const processorId = String(input.processorId || "").trim().slice(0, 120) || (isClaudeProcessor ? "claude-bridge" : "bridge");
   const leaseMs = Math.max(5_000, Number(input.leaseMs) || COMMAND_PROCESSING_LEASE_MS);
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
   const leaseUntil = new Date(now + leaseMs).toISOString();
 
   const [queuedCommands, processingCommands] = await Promise.all([
-    readNormalizedIndexedCommands(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY, isLocalQueueCommand),
-    readNormalizedIndexedCommands(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, isLocalProcessingCommand)
+    readNormalizedIndexedCommands(
+      env,
+      isClaudeProcessor ? COMMAND_CLAUDE_QUEUE_STORAGE_KEY : COMMAND_LOCAL_QUEUE_STORAGE_KEY,
+      isClaudeProcessor ? isClaudeQueueCommand : isLocalQueueCommand
+    ),
+    readNormalizedIndexedCommands(
+      env,
+      isClaudeProcessor ? COMMAND_CLAUDE_PROCESSING_STORAGE_KEY : COMMAND_LOCAL_PROCESSING_STORAGE_KEY,
+      isClaudeProcessor ? isClaudeProcessingCommand : isLocalProcessingCommand
+    )
   ]);
   const activeThreadKeys = new Set();
 
@@ -1034,7 +1138,7 @@ export async function claimNextCommand(env, input = {}) {
   }
 
   const isClaimableLocalQueued = (command) => {
-    if (!command || command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "queued") {
+    if (!command || command.dispatchMode !== requestedDispatchMode || command.status !== "queued") {
       return false;
     }
 
@@ -1061,8 +1165,8 @@ export async function claimNextCommand(env, input = {}) {
     progressStage: "accepted",
     progressUpdatedAt: nowIso,
     firstAckAt: candidate.firstAckAt || nowIso,
-    actualExecutor: "bridge",
-    actualDispatchMode: "bridge",
+    actualExecutor: isClaudeProcessor ? EXECUTOR_ROUTE_CLAUDE : EXECUTOR_ROUTE_BRIDGE,
+    actualDispatchMode: isClaudeProcessor ? EXECUTOR_ROUTE_CLAUDE : EXECUTOR_ROUTE_BRIDGE,
     dispatchStartedAt: candidate.dispatchStartedAt || nowIso,
     bridgeClaimedAt: candidate.bridgeClaimedAt || nowIso,
     firstExecutorAckSeenAt: candidate.firstExecutorAckSeenAt || nowIso,
@@ -1202,7 +1306,7 @@ export async function rerouteCommandToSlack(env, input = {}) {
   return updateCommand(env, input.id, (command, nowIso) => ({
     ...command,
     ...mergeCommandDebugState(command, {
-      actualExecutor: "cloud",
+      actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
       timeoutPhase: "",
       fallbackApplied: true,
       fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
@@ -1672,7 +1776,7 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
       timeoutPhase: "first-ack-timeout",
       lastDiagnosticCode: "slack_first_ack_timeout",
       lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
-      actualExecutor: "cloud",
+      actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
       errorMessage: stringifyCommandError({
         code: "slack_first_ack_timeout",
         stage: "slack-first-ack-timeout",
@@ -1707,7 +1811,7 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
     timeoutPhase: "result-timeout",
     lastDiagnosticCode: "slack_result_timeout",
     lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window.",
-    actualExecutor: "cloud",
+    actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
     errorMessage: stringifyCommandError({
       code: "slack_result_timeout",
       stage: "slack-result-timeout",
@@ -1878,6 +1982,57 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   });
 }
 
+function evaluateClaudeMaintenance(command, nowIso) {
+  if (command.dispatchMode !== DISPATCH_MODE_CLAUDE) {
+    return command;
+  }
+
+  if (command.status === "queued") {
+    if (!isOlderThan(command.progressUpdatedAt || command.createdAt, BRIDGE_CLAIM_TIMEOUT_MS)) {
+      return command;
+    }
+
+    return createFailedMaintenanceState(command, nowIso, {
+      timeoutPhase: "claim-timeout",
+      lastDiagnosticCode: "claude_claim_timeout",
+      lastDiagnosticDetail: "The Claude bridge did not claim the command before the claim timeout.",
+      actualExecutor: EXECUTOR_ROUTE_CLAUDE,
+      errorMessage: stringifyCommandError({
+        code: "claude_claim_timeout",
+        stage: "claude-claim-timeout",
+        message: "Claude bridge did not claim the command in time.",
+        detail: "The Claude bridge did not claim the command before the claim timeout."
+      })
+    });
+  }
+
+  if (command.status !== "processing") {
+    return command;
+  }
+
+  const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
+  const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
+  const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
+  const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
+
+  if (!isLeaseExpired && !isResultStale) {
+    return command;
+  }
+
+  return createFailedMaintenanceState(command, nowIso, {
+    timeoutPhase: "result-timeout",
+    lastDiagnosticCode: "claude_result_timeout",
+    lastDiagnosticDetail: "The Claude bridge did not finish the command in time.",
+    actualExecutor: EXECUTOR_ROUTE_CLAUDE,
+    errorMessage: stringifyCommandError({
+      code: "claude_result_timeout",
+      stage: "claude-result-timeout",
+      message: "Claude bridge did not finish the command in time.",
+      detail: "The Claude bridge did not finish the command in time."
+    })
+  });
+}
+
 export async function runCommandMaintenance(env, options = {}) {
   const current = await readCommands(env);
   const nowIso = new Date().toISOString();
@@ -1914,6 +2069,8 @@ export async function runCommandMaintenance(env, options = {}) {
         ...options,
         freshProcessingThreadKeys
       });
+    } else if (command.dispatchMode === DISPATCH_MODE_CLAUDE) {
+      updated = evaluateClaudeMaintenance(command, nowIso);
     }
 
     if (updated !== previous) {

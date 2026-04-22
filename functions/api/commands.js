@@ -20,14 +20,21 @@ import {
 } from "../_lib/commands.js";
 import { handleOptions, json, jsonStorageError } from "../_lib/http.js";
 import {
+  DISPATCH_MODE_CLAUDE,
   DISPATCH_MODE_CLOUD,
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
+  EXECUTOR_ROUTE_BRIDGE,
+  EXECUTOR_ROUTE_CLAUDE,
+  EXECUTOR_ROUTE_CLOUD_SLACK,
+  EXECUTOR_ROUTE_DIRECT_OPENAI,
+  executorRouteToDispatchMode,
   getConfiguredDispatchMode,
   getDispatchModeLabel,
   isCloudDispatchConfigured,
   isSlackDispatchConfigured,
-  getSlackCodexMention
+  getSlackCodexMention,
+  normalizeExecutorRoute
 } from "../_lib/dispatch.js";
 import { isAuthorized } from "../_lib/security.js";
 import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isIgnorableSlackReplyText, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
@@ -61,24 +68,42 @@ function logCommandError(context, error, extra = {}) {
 
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
   const hasPhoto = Boolean(payload?.photo && typeof payload.photo === "object");
-  const requestedExecutor = String(
+  const requestedExecutor = normalizeExecutorRoute(
     payload?.targetExecutionMode
     || payload?.requestedExecutor
     || payload?.requestedMode
-    || ""
-  ).trim().toLowerCase();
+    || payload?.dispatchMode
+    || "",
+    EXECUTOR_ROUTE_BRIDGE
+  );
   const requestedDispatchMode = String(payload?.dispatchMode || "").trim().toLowerCase();
   const configuredDispatchMode = getConfiguredDispatchMode(runtimeConfig);
 
-  if (requestedDispatchMode === DISPATCH_MODE_LOCAL || requestedExecutor === "bridge") {
+  if (requestedDispatchMode === DISPATCH_MODE_LOCAL || requestedExecutor === EXECUTOR_ROUTE_BRIDGE) {
     return DISPATCH_MODE_LOCAL;
+  }
+
+  if (requestedDispatchMode === DISPATCH_MODE_CLAUDE || requestedExecutor === EXECUTOR_ROUTE_CLAUDE) {
+    return DISPATCH_MODE_CLAUDE;
   }
 
   if (requestedDispatchMode === DISPATCH_MODE_SLACK) {
     return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
   }
 
-  if (requestedDispatchMode === "direct-openai") {
+  if (requestedExecutor === EXECUTOR_ROUTE_CLOUD_SLACK) {
+    if (isSlackDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_SLACK;
+    }
+
+    if (isCloudDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_CLOUD;
+    }
+
+    return DISPATCH_MODE_LOCAL;
+  }
+
+  if (requestedDispatchMode === EXECUTOR_ROUTE_DIRECT_OPENAI || requestedExecutor === EXECUTOR_ROUTE_DIRECT_OPENAI) {
     if (isCloudDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_CLOUD;
     }
@@ -90,7 +115,7 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
     return DISPATCH_MODE_LOCAL;
   }
 
-  if (requestedExecutor === "cloud" || requestedDispatchMode === DISPATCH_MODE_CLOUD) {
+  if (requestedDispatchMode === DISPATCH_MODE_CLOUD) {
     if (hasPhoto && isCloudDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_CLOUD;
     }
@@ -126,31 +151,11 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
 }
 
 async function getInitialBridgeQueueState(env, payload, dispatchMode) {
-  if (dispatchMode !== DISPATCH_MODE_LOCAL) {
+  if (dispatchMode !== DISPATCH_MODE_LOCAL && dispatchMode !== DISPATCH_MODE_CLAUDE) {
     return {};
   }
 
-  const hasPhoto = Boolean(payload?.photo && typeof payload.photo === "object");
-  const status = await readBridgeStatus(env).catch(() => null);
-  const bridgeReady = Boolean(status?.bridgeOnline) && isBridgeHeartbeatFresh(status);
-
-  if (bridgeReady) {
-    return {};
-  }
-
-  if (hasPhoto) {
-    return {
-      progressStage: "waiting-photo-bridge",
-      lastDiagnosticCode: "bridge_temporarily_unavailable",
-      lastDiagnosticDetail: "Bridge is temporarily unavailable. The photo command will stay queued and retry through bridge."
-    };
-  }
-
-  return {
-    progressStage: "retrying-bridge",
-    lastDiagnosticCode: "bridge_temporarily_unavailable",
-    lastDiagnosticDetail: "Bridge is temporarily unavailable. The command will retry through bridge or fallback recovery."
-  };
+  return {};
 }
 
 function normalizeEntryText(entry) {
@@ -324,7 +329,7 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     dispatchMode: DISPATCH_MODE_SLACK,
     status: classification.status,
     progressStage,
-    actualExecutor: "cloud",
+    actualExecutor: "cloud-via-slack",
     slackReplyReceived: true,
     slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
     replyMatched: true,
@@ -499,7 +504,7 @@ async function markCloudCommandFailed(env, command, commandError) {
     id: command.id,
     dispatchMode: DISPATCH_MODE_CLOUD,
     progressStage: "failed",
-    actualExecutor: "cloud",
+    actualExecutor: "direct-openai",
     timeoutPhase: String(commandError?.stage || "").trim().includes("timeout") ? "result-timeout" : "",
     lastDiagnosticCode: commandError?.code || "cloud_execution_failed",
     lastDiagnosticDetail: commandError?.detail || commandError?.message || "Direct cloud execution failed.",
@@ -524,7 +529,7 @@ async function markSlackCloudCommandFailed(env, command, commandError) {
     id: command.id,
     dispatchMode: DISPATCH_MODE_SLACK,
     progressStage: "failed",
-    actualExecutor: "cloud",
+    actualExecutor: "cloud-via-slack",
     timeoutPhase: String(commandError?.stage || "").trim().includes("timeout") ? "result-timeout" : "",
     lastDiagnosticCode: commandError?.code || "slack_cloud_dispatch_failed",
     lastDiagnosticDetail: commandError?.detail || commandError?.message || "Cloud via Slack failed.",
@@ -561,7 +566,7 @@ async function answerCloudCommand(env, command, result) {
     id: command.id,
     dispatchMode: DISPATCH_MODE_CLOUD,
     progressStage: "answered",
-    actualExecutor: "cloud",
+    actualExecutor: "direct-openai",
     firstAckAt: command.firstAckAt || command.dispatchedAt || nowIso,
     firstExecutorAckSeenAt: command.firstExecutorAckSeenAt || nowIso,
     firstReplySeenAt: nowIso,
@@ -602,7 +607,7 @@ async function executeDirectCloudCommand(env, command) {
     dispatchMode: DISPATCH_MODE_CLOUD,
     status: "processing",
     progressStage: "processing",
-    actualExecutor: "cloud",
+    actualExecutor: "direct-openai",
     firstAckAt: dispatchStartedAt,
     firstExecutorAckSeenAt: dispatchStartedAt,
     processingStartedAt: dispatchStartedAt
@@ -702,8 +707,21 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     await refreshBridgeStatusFromCommands(env, {
       dispatchMode,
       executorLabel: getDispatchModeLabel(dispatchMode),
-      bridgeOnline: true,
-      lastRunAt: new Date().toISOString()
+      ...(dispatchMode === DISPATCH_MODE_CLAUDE
+        ? {
+            claudeBridge: {
+              online: true,
+              state: "idle"
+            }
+          }
+        : {
+            bridgeOnline: true,
+            localBridge: {
+              online: true,
+              state: "idle",
+              lastRunAt: new Date().toISOString()
+            }
+          })
     });
     return {
       ok: true,
@@ -983,6 +1001,25 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     return command;
   }
 
+  if (command.dispatchMode === DISPATCH_MODE_CLAUDE) {
+    const failed = await markCommandFailed(env, {
+      id: command.id,
+      progressStage: "failed",
+      actualExecutor: "claude",
+      timeoutPhase: "claim-timeout",
+      lastDiagnosticCode: "claude_claim_timeout",
+      lastDiagnosticDetail: "The Claude bridge did not claim the command before the claim timeout.",
+      errorMessage: stringifyCommandError({
+        code: "claude_claim_timeout",
+        stage: "claude-claim-timeout",
+        message: "Claude bridge did not claim the command in time.",
+        detail: "The Claude bridge did not claim the command before the claim timeout."
+      })
+    });
+
+    return failed.value || command;
+  }
+
   if (canFallbackToCloud(command, runtimeConfig)) {
     const rerouted = await rerouteCommandToSlack(env, {
       id: command.id,
@@ -1225,7 +1262,8 @@ export async function onRequest(context) {
 
     const claimed = await claimNextCommand(env, {
       processorId: payload?.processorId,
-      leaseMs: payload?.leaseMs
+      leaseMs: payload?.leaseMs,
+      dispatchMode: payload?.dispatchMode
     });
 
     if (!claimed.ok) {

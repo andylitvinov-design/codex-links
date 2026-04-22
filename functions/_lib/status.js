@@ -1,5 +1,6 @@
 import { BRIDGE_STATUS_STORAGE_KEY } from "./constants.js";
 import {
+  DISPATCH_MODE_CLAUDE,
   DISPATCH_MODE_CLOUD,
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
@@ -12,6 +13,34 @@ import { readActiveCommands } from "./commands.js";
 import { readRuntimeConfig } from "./config.js";
 
 export const BRIDGE_HEARTBEAT_STALE_MS = 75 * 1000;
+
+function normalizeRunnerStatus(input) {
+  if (!input || typeof input !== "object") {
+    return {
+      online: false,
+      state: "unknown",
+      lastRunAt: "",
+      lastDispatchAt: "",
+      lastSuccessAt: "",
+      pendingCount: 0,
+      oldestPendingAt: "",
+      lastDeliveredCount: 0,
+      lastError: ""
+    };
+  }
+
+  return {
+    online: Boolean(input.online ?? input.bridgeOnline),
+    state: String(input.state || "unknown").trim() || "unknown",
+    lastRunAt: normalizeDate(input.lastRunAt),
+    lastDispatchAt: normalizeDate(input.lastDispatchAt),
+    lastSuccessAt: normalizeDate(input.lastSuccessAt),
+    pendingCount: Number.isFinite(Number(input.pendingCount)) ? Number(input.pendingCount) : 0,
+    oldestPendingAt: normalizeDate(input.oldestPendingAt),
+    lastDeliveredCount: Number.isFinite(Number(input.lastDeliveredCount)) ? Number(input.lastDeliveredCount) : 0,
+    lastError: String(input.lastError || "").trim()
+  };
+}
 
 function normalizeDate(value) {
   const raw = String(value || "").trim();
@@ -41,12 +70,27 @@ function normalizeStatus(input) {
       pendingCount: 0,
       oldestPendingAt: "",
       lastDeliveredCount: 0,
-      lastError: ""
+      lastError: "",
+      localBridge: normalizeRunnerStatus(),
+      claudeBridge: normalizeRunnerStatus()
     };
   }
 
+  const localBridge = normalizeRunnerStatus(input.localBridge || input.codexBridge || {
+    online: input.bridgeOnline,
+    state: input.state,
+    lastRunAt: input.lastRunAt,
+    lastDispatchAt: input.lastDispatchAt,
+    lastSuccessAt: input.lastSuccessAt,
+    pendingCount: input.pendingCount,
+    oldestPendingAt: input.oldestPendingAt,
+    lastDeliveredCount: input.lastDeliveredCount,
+    lastError: input.lastError
+  });
+  const claudeBridge = normalizeRunnerStatus(input.claudeBridge);
+
   return {
-    bridgeOnline: Boolean(input.bridgeOnline),
+    bridgeOnline: localBridge.online,
     state: String(input.state || "unknown").trim() || "unknown",
     dispatchMode: String(input.dispatchMode || "").trim(),
     executorLabel: String(input.executorLabel || "").trim(),
@@ -56,12 +100,14 @@ function normalizeStatus(input) {
     pendingCount: Number.isFinite(Number(input.pendingCount)) ? Number(input.pendingCount) : 0,
     oldestPendingAt: normalizeDate(input.oldestPendingAt),
     lastDeliveredCount: Number.isFinite(Number(input.lastDeliveredCount)) ? Number(input.lastDeliveredCount) : 0,
-    lastError: String(input.lastError || "").trim()
+    lastError: String(input.lastError || "").trim(),
+    localBridge,
+    claudeBridge
   };
 }
 
 export function isBridgeHeartbeatFresh(status, maxAgeMs = BRIDGE_HEARTBEAT_STALE_MS) {
-  return isRecentTimestamp(status?.lastRunAt, maxAgeMs);
+  return isRecentTimestamp(status?.lastRunAt || status?.localBridge?.lastRunAt, maxAgeMs);
 }
 
 export function isLocalBridgeHealthy(status, maxAgeMs = BRIDGE_HEARTBEAT_STALE_MS) {
@@ -93,15 +139,19 @@ export async function readBridgeStatus(env) {
     status.executorLabel = getDispatchModeLabel(status.dispatchMode);
   }
 
-  if (!raw && (status.dispatchMode === DISPATCH_MODE_CLOUD || status.dispatchMode === DISPATCH_MODE_SLACK)) {
-    status.bridgeOnline = true;
-    status.state = "idle";
-  }
-
   if (status.dispatchMode === DISPATCH_MODE_LOCAL && !isCloudDispatchConfigured(runtimeConfig)) {
     status.executorLabel = "Cloud not configured; local bridge fallback";
     status.lastError = status.lastError || "Missing OPENAI_API_KEY in Pages project.";
   }
+
+  status.bridgeOnline = Boolean(status.localBridge.online);
+  status.lastRunAt = status.localBridge.lastRunAt || status.lastRunAt;
+  status.lastDispatchAt = status.localBridge.lastDispatchAt || status.lastDispatchAt;
+  status.lastSuccessAt = status.localBridge.lastSuccessAt || status.lastSuccessAt;
+  status.pendingCount = Math.max(Number(status.pendingCount || 0), Number(status.localBridge.pendingCount || 0));
+  status.oldestPendingAt = status.oldestPendingAt || status.localBridge.oldestPendingAt;
+  status.lastDeliveredCount = Math.max(Number(status.lastDeliveredCount || 0), Number(status.localBridge.lastDeliveredCount || 0));
+  status.lastError = status.lastError || status.localBridge.lastError;
 
   return status;
 }
@@ -130,22 +180,40 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
     .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
   const nextDispatchMode = patch.dispatchMode || configuredDispatchMode || current.dispatchMode;
   const localActive = active.filter((command) => command.dispatchMode === DISPATCH_MODE_LOCAL);
+  const claudeActive = active.filter((command) => command.dispatchMode === DISPATCH_MODE_CLAUDE);
   const hasActive = active.length > 0;
-  const freshHeartbeat = isBridgeHeartbeatFresh({
-    ...current,
-    ...patch,
-    lastRunAt: patch.lastRunAt || current.lastRunAt
+  const nextLocalBridge = normalizeRunnerStatus({
+    ...current.localBridge,
+    ...(patch.localBridge || {}),
+    online: typeof patch.bridgeOnline === "boolean"
+      ? patch.bridgeOnline
+      : (patch.localBridge && typeof patch.localBridge.online === "boolean"
+          ? patch.localBridge.online
+          : current.localBridge.online),
+    lastRunAt: patch.localBridge?.lastRunAt || patch.lastRunAt || current.localBridge.lastRunAt || current.lastRunAt,
+    lastDispatchAt: patch.localBridge?.lastDispatchAt || current.localBridge.lastDispatchAt,
+    lastSuccessAt: patch.localBridge?.lastSuccessAt || current.localBridge.lastSuccessAt,
+    lastDeliveredCount: Number.isFinite(Number(patch.localBridge?.lastDeliveredCount))
+      ? Number(patch.localBridge.lastDeliveredCount)
+      : current.localBridge.lastDeliveredCount,
+    lastError: typeof patch.localBridge?.lastError === "string" ? patch.localBridge.lastError : current.localBridge.lastError,
+    pendingCount: localActive.length,
+    oldestPendingAt: localActive[0]?.createdAt || ""
   });
-  const bridgeOnline = typeof patch.bridgeOnline === "boolean"
-    ? patch.bridgeOnline
-    : nextDispatchMode === DISPATCH_MODE_CLOUD
-      ? true
-      : (current.bridgeOnline && freshHeartbeat);
-  const derivedState = nextDispatchMode === DISPATCH_MODE_LOCAL && localActive.length > 0 && !bridgeOnline
-    ? "stale"
-    : hasActive
-      ? "running"
-      : "idle";
+  const nextClaudeBridge = normalizeRunnerStatus({
+    ...current.claudeBridge,
+    ...(patch.claudeBridge || {}),
+    lastRunAt: patch.claudeBridge?.lastRunAt || current.claudeBridge.lastRunAt,
+    pendingCount: claudeActive.length,
+    oldestPendingAt: claudeActive[0]?.createdAt || ""
+  });
+  const freshLocalHeartbeat = isRecentTimestamp(nextLocalBridge.lastRunAt);
+  const freshClaudeHeartbeat = isRecentTimestamp(nextClaudeBridge.lastRunAt);
+
+  nextLocalBridge.online = Boolean(nextLocalBridge.online) && freshLocalHeartbeat;
+  nextClaudeBridge.online = Boolean(nextClaudeBridge.online) && freshClaudeHeartbeat;
+
+  const derivedState = hasActive ? "running" : "idle";
 
   return normalizeStatus({
     ...current,
@@ -154,17 +222,19 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
     executorLabel: patch.executorLabel || getDispatchModeLabel(nextDispatchMode),
     pendingCount: active.length,
     oldestPendingAt: active[0]?.createdAt || "",
-    lastRunAt: patch.lastRunAt || current.lastRunAt,
+    lastRunAt: nextLocalBridge.lastRunAt || current.lastRunAt,
     lastDispatchAt: patch.lastDispatchAt || current.lastDispatchAt,
     lastSuccessAt: patch.lastSuccessAt || current.lastSuccessAt,
     lastDeliveredCount: Number.isFinite(Number(patch.lastDeliveredCount))
       ? Number(patch.lastDeliveredCount)
       : current.lastDeliveredCount,
-    bridgeOnline,
+    bridgeOnline: nextLocalBridge.online,
     state: typeof patch.state === "string" && patch.state.trim()
       ? String(patch.state).trim()
       : derivedState,
-    lastError: typeof patch.lastError === "string" ? patch.lastError : current.lastError
+    lastError: typeof patch.lastError === "string" ? patch.lastError : current.lastError,
+    localBridge: nextLocalBridge,
+    claudeBridge: nextClaudeBridge
   });
 }
 

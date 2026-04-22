@@ -123,6 +123,40 @@ test("claimNextCommand ignores orphaned local processing entries outside retenti
   assert.equal(claimed.value.status, "processing");
 });
 
+test("claimNextCommand can claim claude-bridge commands from the dedicated queue", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-claude-queued",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "summarize this repo state",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "claude-bridge",
+    targetExecutionMode: "claude",
+    requestedExecutor: "claude",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued"
+  }]);
+
+  const claimed = await claimNextCommand(env, {
+    processorId: "claude-worker",
+    dispatchMode: "claude-bridge",
+    leaseMs: 30_000
+  });
+
+  assert.equal(claimed.ok, true);
+  assert.ok(claimed.value);
+  assert.equal(claimed.value.id, "cmd-claude-queued");
+  assert.equal(claimed.value.dispatchMode, "claude-bridge");
+  assert.equal(claimed.value.actualExecutor, "claude");
+  assert.equal(claimed.value.status, "processing");
+});
+
 test("runCommandMaintenance schedules queued cloud fallback commands for dispatch", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();

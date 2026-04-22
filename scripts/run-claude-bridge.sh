@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="/Users/andriilitvinov/projects/MYPROJECTS/links"
 AUTOMATION_TOML="${HOME}/.codex/automations/links-inbox/automation.toml"
-LOCK_DIR="${TMPDIR:-/tmp}/codex-links-bridge.lock"
+LOCK_DIR="${TMPDIR:-/tmp}/codex-links-claude-bridge.lock"
 LOCK_PID_FILE="${LOCK_DIR}/pid"
 NODE_BIN="/usr/local/bin/node"
 PATH="/usr/local/bin:/Users/andriilitvinov/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -47,15 +47,6 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-forward_signal() {
-  local signal="$1"
-  local bridge_pid="${2:-}"
-
-  if [[ -n "${bridge_pid}" ]] && kill -0 "${bridge_pid}" 2>/dev/null; then
-    kill "-${signal}" "${bridge_pid}" 2>/dev/null || true
-  fi
-}
-
 extract_from_automation() {
   local key="$1"
 
@@ -74,25 +65,15 @@ if [[ -z "${BASE_URL}" ]]; then
 fi
 
 if [[ -z "${WRITE_TOKEN}" ]]; then
-  echo "Missing LINKS_WRITE_TOKEN for codex-links bridge." >&2
+  echo "Missing LINKS_WRITE_TOKEN for Claude bridge." >&2
   exit 1
 fi
 
 cd "${ROOT}"
-env \
+exec env \
   PATH="${PATH}" \
   LINKS_BASE_URL="${BASE_URL}" \
   LINKS_WRITE_TOKEN="${WRITE_TOKEN}" \
-  "${NODE_BIN}" scripts/sync-codex-threads.mjs >/dev/null 2>&1 || true
-
-caffeinate -i env \
-  PATH="${PATH}" \
-  LINKS_BASE_URL="${BASE_URL}" \
-  LINKS_WRITE_TOKEN="${WRITE_TOKEN}" \
-  "${NODE_BIN}" scripts/bridge-codex-commands.mjs &
-BRIDGE_PID=$!
-
-trap 'forward_signal TERM "${BRIDGE_PID}"' TERM
-trap 'forward_signal INT "${BRIDGE_PID}"' INT
-
-wait "${BRIDGE_PID}"
+  BRIDGE_EXECUTOR="claude" \
+  BRIDGE_DISPATCH_MODE="claude-bridge" \
+  "${NODE_BIN}" scripts/bridge-codex-commands.mjs
