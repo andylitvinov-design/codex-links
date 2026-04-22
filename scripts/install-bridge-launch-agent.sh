@@ -40,6 +40,8 @@ cat > "${PLIST_PATH}" <<PLIST
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
   <key>StandardOutPath</key>
   <string>${HOME}/Library/Logs/codex-links-bridge.launchd.log</string>
   <key>StandardErrorPath</key>

@@ -47,6 +47,15 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+forward_signal() {
+  local signal="$1"
+  local bridge_pid="${2:-}"
+
+  if [[ -n "${bridge_pid}" ]] && kill -0 "${bridge_pid}" 2>/dev/null; then
+    kill "-${signal}" "${bridge_pid}" 2>/dev/null || true
+  fi
+}
+
 extract_from_automation() {
   local key="$1"
 
@@ -76,8 +85,14 @@ env \
   LINKS_WRITE_TOKEN="${WRITE_TOKEN}" \
   "${NODE_BIN}" scripts/sync-codex-threads.mjs >/dev/null 2>&1 || true
 
-exec env \
+caffeinate -i env \
   PATH="${PATH}" \
   LINKS_BASE_URL="${BASE_URL}" \
   LINKS_WRITE_TOKEN="${WRITE_TOKEN}" \
-  "${NODE_BIN}" scripts/bridge-codex-commands.mjs
+  "${NODE_BIN}" scripts/bridge-codex-commands.mjs &
+BRIDGE_PID=$!
+
+trap 'forward_signal TERM "${BRIDGE_PID}"' TERM
+trap 'forward_signal INT "${BRIDGE_PID}"' INT
+
+wait "${BRIDGE_PID}"
