@@ -32,7 +32,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260422-0320";
+const BUILD_VERSION = "20260422-0950";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;

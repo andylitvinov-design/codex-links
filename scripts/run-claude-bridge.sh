@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="/Users/andriilitvinov/projects/MYPROJECTS/links"
 AUTOMATION_TOML="${HOME}/.codex/automations/links-inbox/automation.toml"
+DEV_VARS_FILE="${ROOT}/.dev.vars"
 LOCK_DIR="${TMPDIR:-/tmp}/codex-links-claude-bridge.lock"
 LOCK_PID_FILE="${LOCK_DIR}/pid"
 NODE_BIN="/usr/local/bin/node"
@@ -47,6 +48,16 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+extract_from_dev_vars() {
+  local key="$1"
+
+  if [[ ! -f "${DEV_VARS_FILE}" ]]; then
+    return 0
+  fi
+
+  perl -ne "print qq{\$1\n} if /^${key}=(.*)$/" "${DEV_VARS_FILE}" | head -n 1
+}
+
 extract_from_automation() {
   local key="$1"
 
@@ -59,6 +70,14 @@ extract_from_automation() {
 
 BASE_URL="${LINKS_BASE_URL:-$(extract_from_automation LINKS_BASE_URL)}"
 WRITE_TOKEN="${LINKS_WRITE_TOKEN:-$(extract_from_automation LINKS_WRITE_TOKEN)}"
+
+if [[ -z "${BASE_URL}" ]]; then
+  BASE_URL="$(extract_from_dev_vars LINKS_BASE_URL)"
+fi
+
+if [[ -z "${WRITE_TOKEN}" ]]; then
+  WRITE_TOKEN="$(extract_from_dev_vars LINKS_WRITE_TOKEN)"
+fi
 
 if [[ -z "${BASE_URL}" ]]; then
   BASE_URL="https://codex-links.pages.dev"

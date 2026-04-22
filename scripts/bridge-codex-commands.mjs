@@ -1154,6 +1154,7 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
       "bypassPermissions",
       "--add-dir",
       cwd || process.cwd(),
+      "--",
       instructions
     ], {
       cwd: cwd || process.cwd(),
