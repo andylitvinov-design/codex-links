@@ -161,7 +161,9 @@ async function pollCommand(id) {
         `status=${status || "unknown"}`,
         `stage=${String(command.progressStage || "").trim() || "unknown"}`,
         `dispatchMode=${String(command.dispatchMode || "").trim() || "unknown"}`,
+        `threadCreated=${String(command.slackThreadCreatedAt || command.slackThreadTs || command.slackMessageTs || "").trim() ? "yes" : "no"}`,
         `photoUploaded=${String(command.slackPhotoUploadCompletedAt || "").trim() ? "yes" : "no"}`,
+        `uploadError=${String(command.slackPhotoUploadError || "").trim() || "none"}`,
         `ackSeen=${String(command.slackAckObservedAt || command.firstExecutorAckSeenAt || "").trim() ? "yes" : "no"}`,
         `actualExecutor=${String(command.actualExecutor || "").trim() || "unknown"}`
       ].join(" "));

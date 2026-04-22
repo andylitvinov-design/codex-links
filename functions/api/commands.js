@@ -281,6 +281,7 @@ function serializeCommand(command, options = {}) {
     slackPhotoUploadThreaded: Boolean(command.slackPhotoUploadThreaded),
     slackPhotoUploadCompletedAt: String(command.slackPhotoUploadCompletedAt || "").trim(),
     slackPhotoUploadError: String(command.slackPhotoUploadError || "").trim(),
+    slackThreadCreatedAt: String(command.slackPostedAt || "").trim(),
     slackAckObservedAt: String(command.slackAckObservedAt || "").trim(),
     projectId: String(command.projectId || "").trim(),
     projectLabel: String(command.projectLabel || "").trim(),
@@ -626,6 +627,10 @@ async function markSlackCloudCommandFailed(env, command, commandError) {
   return failed.value || command;
 }
 
+function isPhotoSlackDispatchFailure(command, published) {
+  return Boolean(command?.photo) && Boolean(String(published?.photoUploadError || "").trim());
+}
+
 async function answerCloudCommand(env, command, result) {
   const nowIso = new Date().toISOString();
 
@@ -817,6 +822,31 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     });
 
     const published = await postSlackCommand(config, command, getSlackCodexMention(config));
+    if (isPhotoSlackDispatchFailure(command, published)) {
+      const stagedFailure = await markCommandDispatched(env, {
+        id: command.id,
+        dispatchMode,
+        progressStage: "dispatched",
+        dispatchStartedAt,
+        slackPostedAt: new Date().toISOString(),
+        slackChannelId: published.channel,
+        slackMessageTs: published.ts,
+        slackThreadTs: published.threadTs,
+        slackPhotoUploadError: String(published.photoUploadError || "").trim(),
+        dispatchedAt: new Date().toISOString()
+      });
+
+      return {
+        ok: true,
+        command: await markSlackCloudCommandFailed(env, stagedFailure.value || command, {
+          code: "slack_photo_upload_failed",
+          stage: "slack-photo-upload-failed",
+          message: "Cloud via Slack photo upload failed.",
+          detail: String(published.photoUploadError || "").trim() || "Slack photo upload failed before the command could continue."
+        })
+      };
+    }
+
     const dispatched = await markCommandDispatched(env, {
       id: command.id,
       dispatchMode,
@@ -1106,28 +1136,6 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     });
 
     return failed.value || command;
-  }
-
-  if (canFallbackToCloud(command, runtimeConfig)) {
-    const rerouted = await rerouteCommandToSlack(env, {
-      id: command.id,
-      progressStage: "switched-to-cloud",
-      timeoutPhase: "claim-timeout",
-      fallbackReason: "local bridge did not claim the command in time",
-      lastDiagnosticCode: "bridge_claim_timeout",
-      lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
-      errorMessage: stringifyCommandError({
-        code: "fallback_to_slack",
-        stage: "switched-to-cloud",
-        message: "Local bridge did not claim the command in time. Switched to cloud via Slack.",
-        detail: "The local bridge did not claim the command before the claim timeout.",
-        fallback: "slack-codex-cloud"
-      })
-    });
-
-    if (rerouted.ok && rerouted.value) {
-      return dispatchCreatedCommand(env, rerouted.value.id, runtimeConfig);
-    }
   }
 
   const failed = await markCommandFailed(env, {

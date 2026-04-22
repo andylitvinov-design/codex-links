@@ -83,12 +83,14 @@ env \
   PATH="${PATH}" \
   LINKS_BASE_URL="${BASE_URL}" \
   LINKS_WRITE_TOKEN="${WRITE_TOKEN}" \
-  "${NODE_BIN}" scripts/sync-codex-threads.mjs >/dev/null 2>&1 || true
+  "${NODE_BIN}" scripts/sync-codex-threads.mjs >/dev/null 2>&1 &
 
 caffeinate -i env \
   PATH="${PATH}" \
   LINKS_BASE_URL="${BASE_URL}" \
   LINKS_WRITE_TOKEN="${WRITE_TOKEN}" \
+  BRIDGE_EXECUTOR="codex" \
+  BRIDGE_DISPATCH_MODE="local-bridge" \
   "${NODE_BIN}" scripts/bridge-codex-commands.mjs &
 BRIDGE_PID=$!
 

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
 import { resolveClaudeBin, validateClaudeCli } from "./_lib/claude-cli.mjs";
 import {
@@ -1189,6 +1189,7 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
       ? `Attached local image path: ${photoPath}\nRead that local image file before answering. Base the answer on visible evidence from the image.`
       : ""
   ].filter(Boolean).join("\n\n");
+  const photoDir = photoPath ? dirname(photoPath) : null;
 
   return new Promise((resolve, reject) => {
     execFile(claudeBin, [
@@ -1199,6 +1200,7 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
       "bypassPermissions",
       "--add-dir",
       cwd || process.cwd(),
+      ...(photoDir ? ["--add-dir", photoDir] : []),
       "--",
       instructions
     ], {

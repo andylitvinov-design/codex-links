@@ -44,10 +44,10 @@ async function ensureClaudeBridgeHealthy() {
     headers: { accept: "application/json" }
   });
   const data = await response.json().catch(() => ({}));
-  const claude = data?.status?.claudeBridge || {};
+  const claude = data?.bridges?.claudeBridge || data?.status?.claudeBridge || {};
 
   if (!claude.online) {
-    throw new Error(`Claude bridge is not healthy. lastRunAt=${String(claude.lastRunAt || "").trim() || "empty"} lastError=${String(claude.lastError || "").trim() || "none"}`);
+    throw new Error(`Claude bridge is not healthy. state=${String(claude.state || "").trim() || "unknown"} lastRunAt=${String(claude.lastRunAt || "").trim() || "empty"} lastError=${String(claude.lastError || "").trim() || "none"}`);
   }
 }
 
