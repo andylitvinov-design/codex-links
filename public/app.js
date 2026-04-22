@@ -3,6 +3,7 @@ import { sanitizeCodexErrorMessage } from "./_lib/command-error-utils.js";
 const state = {
   commands: [],
   messages: [],
+  reports: [],
   menuRepos: [],
   activeThreadCategories: [],
   activeTimelineTab: "dialog",
@@ -28,7 +29,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260421-0135";
+const BUILD_VERSION = "20260421-0145";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -186,11 +187,11 @@ const storage = {
 
   get activeTimelineTab() {
     const raw = safeLocalStorageGet("codex-links-active-timeline-tab") ?? readCookie("codex-links-active-timeline-tab");
-    return raw === "notifications" ? "notifications" : "dialog";
+    return raw === "notifications" || raw === "reports" ? raw : "dialog";
   },
 
   set activeTimelineTab(value) {
-    const normalized = value === "notifications" ? "notifications" : "dialog";
+    const normalized = value === "notifications" || value === "reports" ? value : "dialog";
     safeLocalStorageSet("codex-links-active-timeline-tab", normalized);
     writeCookie("codex-links-active-timeline-tab", normalized);
   },
@@ -275,6 +276,7 @@ const threadSettingsSelectAll = document.querySelector("#thread-settings-select-
 const threadSettingsClear = document.querySelector("#thread-settings-clear");
 const timelineTabDialog = document.querySelector("#timeline-tab-dialog");
 const timelineTabNotifications = document.querySelector("#timeline-tab-notifications");
+const timelineTabReports = document.querySelector("#timeline-tab-reports");
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 function estimateDataUrlBytes(dataUrl) {
@@ -1014,6 +1016,9 @@ function formatProgressStage(progressStage, status) {
     processing: "Исполнитель работает",
     "waiting-for-codex": "Codex обрабатывает сообщение",
     "saving-reply": "Сохраняю ответ",
+    "retrying-bridge": "Bridge временно недоступен, повторяю",
+    "waiting-photo-bridge": "Фото ожидает bridge",
+    "retrying-photo-bridge": "Bridge завис, перезапускаю фото",
     "retrying-photo-read": "Повторно читаю фото",
     "switched-to-bridge": "Переведено на bridge",
     "switched-to-cloud": "Переведено в cloud",
@@ -1101,6 +1106,18 @@ function getCommandDiagnosticMessage(command) {
     return "Bridge не забрал сообщение из очереди вовремя.";
   }
 
+  if (diagnosticCode === "bridge_temporarily_unavailable") {
+    return "Bridge временно недоступен, команда остаётся в retry-очереди.";
+  }
+
+  if (diagnosticCode === "bridge_waiting_photo") {
+    return "Фото ожидает bridge и будет обработано после восстановления bridge.";
+  }
+
+  if (diagnosticCode === "bridge_photo_claim_timeout" || diagnosticCode === "bridge_photo_result_timeout") {
+    return "Фото не удалось обработать через bridge в допустимое время.";
+  }
+
   if (status === "failed" && fallbackReason === "local bridge stopped heartbeating") {
     return "Bridge перестал heartbeat'ить во время обработки.";
   }
@@ -1130,6 +1147,159 @@ function formatCommandStage(command) {
   const label = formatProgressStage(command?.progressStage, status);
   const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
   return relative ? `${label} · ${relative}` : label;
+}
+
+function formatElapsedSince(value) {
+  const timestamp = Date.parse(String(value || "").trim());
+
+  if (!Number.isFinite(timestamp)) {
+    return "";
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - timestamp);
+  const elapsedSec = Math.round(elapsedMs / 1000);
+
+  if (elapsedSec < 60) {
+    return `${elapsedSec}s`;
+  }
+
+  const elapsedMin = Math.floor(elapsedSec / 60);
+  const restSec = elapsedSec % 60;
+  return restSec ? `${elapsedMin}m ${restSec}s` : `${elapsedMin}m`;
+}
+
+function buildPreciseCommandPhase(command) {
+  const requestedExecutor = getCommandRequestedExecutor(command);
+  const actualExecutor = getCommandActualExecutor(command);
+  const executor = actualExecutor === "pending" ? requestedExecutor : actualExecutor;
+  const status = String(command?.status || "").trim().toLowerCase();
+  const stage = String(command?.progressStage || "").trim().toLowerCase();
+  const dispatchStartedAt = String(command?.dispatchStartedAt || "").trim();
+  const bridgeClaimedAt = String(command?.bridgeClaimedAt || "").trim();
+  const firstReplySeenAt = String(command?.firstReplySeenAt || "").trim();
+  const replyIngestedAt = String(command?.replyIngestedAt || "").trim();
+  const firstAckAt = String(command?.firstExecutorAckSeenAt || command?.firstAckAt || "").trim();
+
+  if (status === "failed") {
+    return null;
+  }
+
+  if (status === "answered" || status === "acked" || hasAssistantReply(command?.id, command)) {
+    return {
+      tone: "delivery",
+      text: "Ответ получен"
+    };
+  }
+
+  if (stage === "switched-to-bridge") {
+    return {
+      tone: "queued",
+      text: "Переведено на bridge после задержки cloud"
+    };
+  }
+
+  if (stage === "switched-to-cloud") {
+    return {
+      tone: "queued",
+      text: "Переведено в cloud после задержки bridge"
+    };
+  }
+
+  if (stage === "retrying-bridge") {
+    return {
+      tone: "queued",
+      text: "Bridge временно недоступен, повторяю отправку"
+    };
+  }
+
+  if (stage === "waiting-photo-bridge") {
+    return {
+      tone: "queued",
+      text: "Фото ожидает bridge"
+    };
+  }
+
+  if (stage === "retrying-photo-bridge") {
+    return {
+      tone: "queued",
+      text: "Bridge завис на фото, перезапускаю обработку"
+    };
+  }
+
+  if (executor === "bridge") {
+    if (!dispatchStartedAt) {
+      return {
+        tone: "queued",
+        text: "В очереди перед bridge"
+      };
+    }
+
+    if (!bridgeClaimedAt) {
+      return {
+        tone: "delivery",
+        text: `Жду, пока bridge заберет сообщение · ${formatElapsedSince(dispatchStartedAt)}`
+      };
+    }
+
+    if (!firstAckAt || stage === "accepted") {
+      return {
+        tone: "delivery",
+        text: `Bridge забрал сообщение, запускает Codex · ${formatElapsedSince(bridgeClaimedAt)}`
+      };
+    }
+
+    if (!firstReplySeenAt) {
+      return {
+        tone: "delivery",
+        text: `Bridge передал задачу Codex, жду первый ответ · ${formatElapsedSince(firstAckAt || bridgeClaimedAt)}`
+      };
+    }
+
+    if (!replyIngestedAt || stage === "saving-reply") {
+      return {
+        tone: "delivery",
+        text: `Ответ от bridge получен, сохраняю в ленту · ${formatElapsedSince(firstReplySeenAt)}`
+      };
+    }
+
+    return {
+      tone: "delivery",
+      text: `Ответ сохранен, жду синхронизацию UI · ${formatElapsedSince(replyIngestedAt)}`
+    };
+  }
+
+  if (!dispatchStartedAt) {
+    return {
+      tone: "queued",
+      text: "В очереди перед cloud"
+    };
+  }
+
+  if (!firstAckAt) {
+    return {
+      tone: "delivery",
+      text: `Отправлено в cloud, жду подтверждение исполнителя · ${formatElapsedSince(dispatchStartedAt)}`
+    };
+  }
+
+  if (!firstReplySeenAt) {
+    return {
+      tone: "delivery",
+      text: `Cloud подтвердил задачу, жду первый ответ · ${formatElapsedSince(firstAckAt)}`
+    };
+  }
+
+  if (!replyIngestedAt || stage === "saving-reply") {
+    return {
+      tone: "delivery",
+      text: `Ответ от cloud получен, сохраняю в ленту · ${formatElapsedSince(firstReplySeenAt)}`
+    };
+  }
+
+  return {
+    tone: "delivery",
+    text: `Ответ сохранен, жду синхронизацию UI · ${formatElapsedSince(replyIngestedAt)}`
+  };
 }
 
 function getCommandRequestedExecutor(command) {
@@ -1165,6 +1335,10 @@ function getCommandLifecycleState(command) {
 
   if (stage === "switched-to-cloud") {
     return "switched-to-cloud";
+  }
+
+  if (stage === "retrying-bridge" || stage === "waiting-photo-bridge" || stage === "retrying-photo-bridge") {
+    return "processing";
   }
 
   if (stage === "dispatching" || status === "dispatched") {
@@ -1231,6 +1405,15 @@ function getCommandDeliveryStatus(command) {
     };
   }
 
+  const precisePhase = buildPreciseCommandPhase(command);
+
+  if (precisePhase?.text) {
+    return {
+      tone: precisePhase.tone || (errorDetails ? "error" : "delivery"),
+      text: withDeliveryLabel(precisePhase.text)
+    };
+  }
+
   return {
     tone: errorDetails ? "error" : "delivery",
     text: withDeliveryLabel(
@@ -1289,21 +1472,26 @@ function syncCommandStatusFromState() {
 
   const lifecycleState = getCommandLifecycleState(activeCommand);
   const isProcessing = ["dispatching", "accepted", "processing", "switched-to-bridge", "switched-to-cloud"].includes(lifecycleState);
-  const tone = isProcessing ? "processing" : "queued";
   const deliveryLabel = getCommandActualExecutor(activeCommand);
-  const message = lifecycleState === "created"
-    ? `Команда создана для ${getCommandRequestedExecutor(activeCommand)}…`
-    : lifecycleState === "dispatching"
-      ? `Отправляю через ${getCommandRequestedExecutor(activeCommand)}…`
-    : lifecycleState === "accepted"
-      ? `Исполнитель ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel} подтвердил задачу…`
-    : lifecycleState === "switched-to-bridge"
-      ? "Перевёл задачу на bridge…"
-      : lifecycleState === "switched-to-cloud"
-        ? "Перевёл задачу в cloud…"
-        : isProcessing
-          ? `Обработка через ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel}…`
-          : `Сообщение в очереди (${getCommandRequestedExecutor(activeCommand)})…`;
+  const precisePhase = buildPreciseCommandPhase(activeCommand);
+  const tone = precisePhase?.tone === "queued"
+    ? "queued"
+    : (isProcessing ? "processing" : "queued");
+  const message = precisePhase?.text
+    ? precisePhase.text
+    : lifecycleState === "created"
+      ? `Команда создана для ${getCommandRequestedExecutor(activeCommand)}…`
+      : lifecycleState === "dispatching"
+        ? `Отправляю через ${getCommandRequestedExecutor(activeCommand)}…`
+      : lifecycleState === "accepted"
+        ? `Исполнитель ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel} подтвердил задачу…`
+      : lifecycleState === "switched-to-bridge"
+        ? "Перевёл задачу на bridge…"
+        : lifecycleState === "switched-to-cloud"
+          ? "Перевёл задачу в cloud…"
+          : isProcessing
+            ? `Обработка через ${deliveryLabel === "pending" ? getCommandRequestedExecutor(activeCommand) : deliveryLabel}…`
+            : `Сообщение в очереди (${getCommandRequestedExecutor(activeCommand)})…`;
 
   setCommandStatusMessage(message, { tone });
   setSubmitProgress(isProcessing ? "processing" : "queued", tone);
@@ -1385,6 +1573,17 @@ function renderCommandLatencyMarkup(command) {
   return `<div class="command-context command-context-latency">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`;
 }
 
+function getUserTimelineTitle(commandLike, fallbackThreadLabel = "") {
+  const project = String(
+    commandLike?.projectLabel
+    || commandLike?.threadLabel
+    || fallbackThreadLabel
+    || ""
+  ).trim();
+
+  return project ? `Вы - ${project}` : "Вы";
+}
+
 function getCommandFailureMessage(command) {
   if (String(command?.status || "").trim() !== "failed") {
     return "";
@@ -1424,11 +1623,13 @@ function buildTimelineSignature(items, context = {}) {
     activeTimelineTab: context.activeTimelineTab || "dialog",
     items: items.map((entry) => ({
       id: entry.id,
+      kind: entry.kind || "",
       role: entry.role,
       text: entry.text,
       createdAt: entry.createdAt,
       threadId: entry.threadId,
       threadLabel: entry.threadLabel,
+      title: entry.title || "",
       status: entry.status || entry.command?.status || entry.linkedCommand?.status || "",
       progressStage: entry.progressStage || entry.command?.progressStage || entry.linkedCommand?.progressStage || "",
       deliveryStage: entry.command?.deliveryStage || entry.linkedCommand?.deliveryStage || "",
@@ -1440,6 +1641,10 @@ function buildTimelineSignature(items, context = {}) {
       actualExecutor: entry.command?.actualExecutor || "",
       fallbackReason: entry.command?.fallbackReason || "",
       fallbackCount: entry.command?.fallbackCount || 0,
+      reportDate: entry.report_date || "",
+      reportWindowStart: entry.window_start || "",
+      reportWindowEnd: entry.window_end || "",
+      reportStatus: entry.statusLabel || entry.status || "",
       commandPrUrl: entry.command?.prUrl || "",
       commandBranch: entry.command?.branchName || "",
       linkedCommandId: entry.linkedCommand?.id || entry.message?.commandId || "",
@@ -1756,6 +1961,24 @@ function getInferredAssistantReplies(command, visibleMessages, visibleCommands) 
     }));
 }
 
+function getPreviousAssistantReplyContext(threadId) {
+  const normalizedThreadId = String(threadId || "").trim();
+
+  if (!normalizedThreadId) {
+    return "";
+  }
+
+  const assistantMessages = state.messages
+    .filter((message) => message?.role === "assistant")
+    .filter((message) => isSameThreadTarget(message?.threadId, normalizedThreadId))
+    .filter((message) => !isNotificationEntry(message))
+    .filter((message) => !isHiddenSystemEntry(message))
+    .sort((left, right) => toTimestamp(right?.createdAt) - toTimestamp(left?.createdAt));
+
+  const terminalReply = assistantMessages.find((message) => isTerminalAssistantReplyText(message?.text || ""));
+  return String(terminalReply?.text || assistantMessages[0]?.text || "").trim();
+}
+
 function normalizeEntryText(entry) {
   return String(entry?.text || "").trim().toLowerCase();
 }
@@ -1861,9 +2084,9 @@ function getReleaseNotificationEntry() {
 }
 
 function renderTimelineTabButtons() {
-  const isDialogActive = state.activeTimelineTab !== "notifications";
-  timelineTabDialog?.classList.toggle("is-active", isDialogActive);
-  timelineTabNotifications?.classList.toggle("is-active", !isDialogActive);
+  timelineTabDialog?.classList.toggle("is-active", state.activeTimelineTab === "dialog");
+  timelineTabNotifications?.classList.toggle("is-active", state.activeTimelineTab === "notifications");
+  timelineTabReports?.classList.toggle("is-active", state.activeTimelineTab === "reports");
 }
 
 function renderAssistantReplyMarkup(replyEntry) {
@@ -1909,6 +2132,93 @@ function bindAssistantReplyInteractions(container, replies) {
     });
   });
 
+}
+
+function formatReportWindow(report) {
+  const start = report?.window_start || "";
+  const end = report?.window_end || "";
+
+  if (start && end) {
+    return `${formatDate(start)} — ${formatDate(end)}`;
+  }
+
+  if (start) {
+    return `${formatDate(start)} — текущий`;
+  }
+
+  return formatDate(report?.generated_at || report?.generatedAt || "");
+}
+
+function formatReportStatusLabel(status) {
+  const normalized = String(status || "ok").trim().toLowerCase();
+
+  if (normalized === "stable") {
+    return "Стабильно";
+  }
+
+  if (normalized === "warning") {
+    return "Требует внимания";
+  }
+
+  if (normalized === "baseline") {
+    return "Базовый день";
+  }
+
+  return "Нормально";
+}
+
+function formatTrend(delta) {
+  if (delta === "up") {
+    return "↗";
+  }
+
+  if (delta === "down") {
+    return "↘";
+  }
+
+  return "→";
+}
+
+function formatReportMetricLine(change) {
+  const dashboard = String(change?.dashboard || "").trim();
+  const metric = String(change?.metric || "").trim();
+  const deltaAbs = Number(change?.delta_abs || 0);
+  const deltaPct = Number.isFinite(Number(change?.delta_pct)) ? Number(change.delta_pct) : null;
+  const trend = String(change?.trend || "flat").trim();
+  const value = `${deltaAbs >= 0 ? "+" : ""}${deltaAbs.toFixed(2)}`;
+  const percent = deltaPct === null ? "" : ` (${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(2)}%)`;
+
+  return `${formatTrend(trend)} ${dashboard}/${metric}: ${value}${percent}`;
+}
+
+function buildReportDetailsReport(report) {
+  const payload = {
+    report_id: report?.report_id || "",
+    report_date: report?.report_date || "",
+    status: report?.status || "",
+    window_start: report?.window_start || "",
+    window_end: report?.window_end || "",
+    source_dashboards: report?.source_dashboards || [],
+    highlights: report?.highlights || [],
+    metric_changes: report?.metric_changes || []
+  };
+
+  return JSON.stringify(payload, null, 2);
+}
+
+function getReportSummary(report) {
+  const sourceDashboards = Array.isArray(report?.source_dashboards) ? report.source_dashboards : [];
+  const sourceCount = sourceDashboards.length;
+  const metrics = Array.isArray(report?.metric_changes) ? report.metric_changes : [];
+  const changes = metrics.filter((change) => Number.isFinite(Number(change?.delta_abs || "")));
+  const stable = metrics.length === 0 && String((report?.status || "").trim().toLowerCase()) === "stable";
+  const material = changes.length ? `${Math.min(changes.length, 5)} ключевых изменений` : "";
+
+  if (stable || !material) {
+    return "No material dashboard changes";
+  }
+
+  return `${sourceCount > 0 ? `Системы: ${sourceDashboards.slice(0, 3).join(", ")}.` : ""} ${material}.`;
 }
 
 function renderCommands() {
@@ -2035,7 +2345,42 @@ function renderCommands() {
         statusLabel: "Системное сообщение"
       }))
   ].sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
-  const activeItems = state.activeTimelineTab === "notifications" ? notificationItems : timelineItems;
+  const reportItems = [
+    ...state.reports
+      .map((report) => {
+        const metricChanges = Array.isArray(report?.metric_changes)
+          ? report.metric_changes
+              .filter((change) => Number.isFinite(Number(change?.delta_abs || 0)))
+              .sort((left, right) => Math.abs(Number(right?.delta_abs || 0)) - Math.abs(Number(left?.delta_abs || 0)))
+              .slice(0, 5)
+          : [];
+        const status = String(report?.status || "ok").trim().toLowerCase();
+        const createdAt = report?.generated_at || report?.generatedAt || new Date().toISOString();
+
+        return {
+          id: `report:${String(report?.report_id || "").trim()}`,
+          kind: "report",
+          role: "assistant",
+          createdAt,
+          text: getReportSummary(report),
+          threadId: "dashboard-reports",
+          threadLabel: "Отчёты",
+          report,
+          title: String(report?.title || "").trim() || `Dashboard report (${report?.report_date || ""})`,
+          status,
+          statusLabel: formatReportStatusLabel(status),
+          summary: String(report?.summary || report?.highlights?.[0] || "").trim(),
+          metricChanges,
+          details: buildReportDetailsReport(report)
+        };
+      })
+      .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || ""))
+  )];
+  const activeItems = state.activeTimelineTab === "notifications"
+    ? notificationItems
+    : state.activeTimelineTab === "reports"
+      ? reportItems
+      : timelineItems;
 
   const signature = buildTimelineSignature(activeItems, {
     activeThreadId,
@@ -2054,6 +2399,8 @@ function renderCommands() {
   if (!activeItems.length) {
     commandTimeline.innerHTML = state.activeTimelineTab === "notifications"
       ? '<div class="command-empty">Системные сообщения появятся здесь.</div>'
+      : state.activeTimelineTab === "reports"
+        ? '<div class="command-empty">Пока нет ежедневных отчётов.</div>'
       : '<div class="command-empty">Здесь будут только ваши сообщения и их доставка.</div>';
     state.lastRenderedTimelineSize = 0;
     return;
@@ -2064,6 +2411,42 @@ function renderCommands() {
   activeItems.forEach((entry) => {
     const element = document.createElement("article");
     element.className = `command-item ${entry.role === "assistant" ? "command-item-assistant" : "command-item-user"}`;
+
+    if (entry.kind === "report") {
+      const report = entry.report || {};
+      const sourceDashboards = Array.isArray(report.source_dashboards) ? report.source_dashboards : [];
+      const sourceList = sourceDashboards.length
+        ? sourceDashboards.slice(0, 6).map((value) => `<span>${escapeHtml(value)}</span>`).join("")
+        : "<span>источники не определены</span>";
+      const metricRows = (entry.metricChanges || [])
+        .map((change) => `<li>${escapeHtml(formatReportMetricLine(change))}</li>`)
+        .join("");
+
+      element.classList.add("command-item-report");
+      element.innerHTML = `
+        <div class="command-item-top">
+          <strong>Ежедневный отчёт</strong>
+          <time>${formatDate(entry.createdAt)}</time>
+        </div>
+        <div class="command-item-top">
+          <span class="report-item-status" data-status="${escapeHtml(entry.status || "ok")}">${escapeHtml(entry.statusLabel || "Нормально")}</span>
+          <span>${escapeHtml(formatReportWindow(report))}</span>
+        </div>
+        <p class="report-item-title">${escapeHtml(entry.title || "Отчёт")}</p>
+        <p>${escapeHtml(entry.summary || entry.text || "No material dashboard changes")}</p>
+        ${metricRows ? `<ul class="report-item-metric-list">${metricRows}</ul>` : ""}
+        <div class="command-context">
+          <span>Источники:</span>
+          <span class="report-item-source-badges">${sourceList}</span>
+        </div>
+        <details class="report-item-details">
+          <summary>Показать сырой JSON</summary>
+          <pre>${escapeHtml(entry.details || "{}")}</pre>
+        </details>
+      `;
+      fragment.appendChild(element);
+      return;
+    }
 
     if (entry.kind === "notification") {
       element.classList.add("command-item-notification");
@@ -2091,7 +2474,7 @@ function renderCommands() {
 
       element.innerHTML = `
         <div class="command-item-top">
-          <strong>Вы</strong>
+          <strong>${escapeHtml(getUserTimelineTitle(command, entry.threadLabel || ""))}</strong>
           <time>${formatDate(entry.createdAt)}</time>
         </div>
         <p>${escapeHtml(text)}</p>
@@ -2126,7 +2509,7 @@ function renderCommands() {
 
     element.innerHTML = `
       <div class="command-item-top">
-        <strong>${isAssistant ? "Codex" : "Вы"}</strong>
+        <strong>${escapeHtml(isAssistant ? "Codex" : getUserTimelineTitle(linkedCommand || message, entry.threadLabel || ""))}</strong>
         <time>${formatDate(entry.createdAt)}</time>
       </div>
       ${body}
@@ -2722,6 +3105,85 @@ function mergeMessageCollection(messages) {
   );
 }
 
+function normalizeIncomingReport(report) {
+  if (!report || typeof report !== "object") {
+    return null;
+  }
+
+  return {
+    report_id: String(report.report_id || "").trim(),
+    report_key: String(report.report_key || "daily-dashboard-report").trim(),
+    report_date: String(report.report_date || "").trim(),
+    window_start: String(report.window_start || "").trim(),
+    window_end: String(report.window_end || "").trim(),
+    source_dashboards: Array.isArray(report.source_dashboards)
+      ? report.source_dashboards.map((value) => String(value || "").trim()).filter(Boolean)
+      : [],
+    highlights: Array.isArray(report.highlights)
+      ? report.highlights.map((value) => String(value || "").trim()).filter(Boolean)
+      : [],
+    metric_changes: Array.isArray(report.metric_changes)
+      ? report.metric_changes.map((change) => ({
+        dashboard: String(change.dashboard || "").trim(),
+        metric: String(change.metric || "").trim(),
+        old: Number(change.old),
+        new: Number(change.new),
+        delta_abs: Number(change.delta_abs),
+        delta_pct: Number.isFinite(Number(change.delta_pct)) ? Number(change.delta_pct) : null,
+        trend: String(change.trend || "").trim() || (Number(change.new) > Number(change.old) ? "up" : (Number(change.new) < Number(change.old) ? "down" : "flat"))
+      }))
+      : [],
+    status: String(report.status || "ok").trim(),
+    generated_at: String(report.generated_at || report.generatedAt || "").trim(),
+    title: String(report.title || "").trim(),
+    summary: String(report.summary || "").trim()
+  };
+}
+
+function dedupeReportMap(existing, incoming = []) {
+  const byId = new Map(
+    existing.map((report) => [String(report?.report_id || "").trim(), report]).filter(([id]) => Boolean(id))
+  );
+
+  incoming.forEach((incomingReport) => {
+    const report = normalizeIncomingReport(incomingReport);
+
+    if (!report || !report.report_id) {
+      return;
+    }
+
+    const current = byId.get(report.report_id);
+
+    if (!current) {
+      byId.set(report.report_id, report);
+      return;
+    }
+
+    const incomingAt = Date.parse(report.generated_at || "");
+    const currentAt = Date.parse(current.generated_at || "");
+
+    if (!Number.isFinite(incomingAt) || (Number.isFinite(currentAt) && incomingAt < currentAt)) {
+      return;
+    }
+
+    byId.set(report.report_id, {
+      ...current,
+      ...report,
+      metric_changes: incomingReport?.metric_changes || current.metric_changes || [],
+      source_dashboards: incomingReport?.source_dashboards || current.source_dashboards || []
+    });
+  });
+
+  return [...byId.values()].sort((left, right) => {
+    return String(right.generated_at || "").localeCompare(String(left.generated_at || ""));
+  });
+}
+
+function mergeReportCollection(reports) {
+  const merged = dedupeReportMap(state.reports, reports);
+  state.reports = merged;
+}
+
 function buildOptimisticUserMessage(command) {
   if (!command || typeof command !== "object") {
     return null;
@@ -2806,6 +3268,7 @@ function applyDeliverySnapshot(snapshot) {
 
   mergeCommandCollection(snapshot?.commands);
   mergeMessageCollection(snapshot?.messages);
+  mergeReportCollection(snapshot?.reports);
   noteNewMessages(previousMessages, state.messages);
 
   const status = snapshot?.status || {};
@@ -2942,6 +3405,7 @@ async function submitCommand(event) {
   const dispatchMode = requestedDispatchMode;
   const threadId = requestedThreadId;
   const threadLabel = activeRepo?.label || fallbackThreadLabel;
+  const previousAssistantReply = getPreviousAssistantReplyContext(threadId);
 
   if (!text && !photoFile) {
     setCommandStatusMessage("Введите сообщение или прикрепите фото.", { tone: "error" });
@@ -2971,6 +3435,7 @@ async function submitCommand(event) {
     threadId,
     threadLabel,
     text,
+    previousAssistantReply,
     dispatchMode: dispatchMode === "cloud" ? "cloud" : "local-bridge",
     targetExecutionMode: dispatchMode
   };
@@ -3150,6 +3615,12 @@ function bindEvents() {
   timelineTabNotifications?.addEventListener("click", () => {
     state.activeTimelineTab = "notifications";
     storage.activeTimelineTab = "notifications";
+    renderCommands();
+  });
+
+  timelineTabReports?.addEventListener("click", () => {
+    state.activeTimelineTab = "reports";
+    storage.activeTimelineTab = "reports";
     renderCommands();
   });
 

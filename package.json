@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test tests/*.test.mjs",
     "dev": "wrangler pages dev public",
     "deploy": "wrangler pages deploy public --project-name codex-links",
     "kv:seed": "node scripts/seed-demo.mjs",
@@ -13,6 +14,7 @@
     "cloud:photo-smoke": "node scripts/smoke-cloud-photo-delivery.mjs",
     "bridge:smoke": "node scripts/smoke-bridge-delivery.mjs",
     "bridge:photo-smoke": "node scripts/smoke-bridge-photo-delivery.mjs",
+    "maintenance:run": "node scripts/run-delivery-maintenance.mjs",
     "cloud:install-secrets": "zsh scripts/install-pages-secrets.sh",
     "cloud:save-config": "node scripts/save-cloud-config.mjs",
     "cloud:sync-repos": "node scripts/sync-cloud-repos.mjs",

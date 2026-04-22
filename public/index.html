@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
     <script>
       (function () {
-        var build = "20260421-0135";
+        var build = "20260421-0145";
         var current = new URL(window.location.href);
         var requested = String(current.searchParams.get("v") || "").trim();
         if (requested === build) {
@@ -24,7 +24,8 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260421-0135" />
+    <link rel="stylesheet" href="/styles.css?v=20260421-0145" />
+    <link rel="stylesheet" href="/styles.css?v=20260421-0145" />
   </head>
   <body>
     <main class="page">
@@ -124,6 +125,7 @@
           <nav class="timeline-tabs" aria-label="Меню чатов">
             <button class="timeline-tab-button is-active" id="timeline-tab-dialog" type="button" data-tab="dialog">Диалоги</button>
             <button class="timeline-tab-button" id="timeline-tab-notifications" type="button" data-tab="notifications">Уведомления</button>
+            <button class="timeline-tab-button" id="timeline-tab-reports" type="button" data-tab="reports">Отчёты</button>
           </nav>
           <div id="command-timeline" class="command-timeline" aria-live="polite"></div>
         </section>
@@ -131,6 +133,7 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260421-0135"></script>
+    <script type="module" src="/app.js?v=20260421-0145"></script>
+    <script type="module" src="/app.js?v=20260421-0145"></script>
   </body>
 </html>

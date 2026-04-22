@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   claimNextCommand,
+  createCommandRecord,
   runCommandMaintenance,
   writeCommands
 } from "../functions/_lib/commands.js";
@@ -231,9 +232,136 @@ test("runCommandMaintenance fails stale photo bridge commands instead of rerouti
   const updated = result.commands.find((command) => command.id === "cmd-bridge-photo-timeout");
   assert.ok(updated);
   assert.equal(updated.dispatchMode, "local-bridge");
-  assert.equal(updated.status, "failed");
-  assert.equal(updated.progressStage, "failed");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "retrying-photo-bridge");
   assert.equal(updated.timeoutPhase, "result-timeout");
   assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
-  assert.match(updated.errorMessage, /bridge_result_timeout/);
+  assert.match(updated.errorMessage, /retrying_photo_bridge/);
+});
+
+test("runCommandMaintenance reroutes stale queued bridge text commands even when another thread is processing", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (40 * 1000)).toISOString();
+  const freshIso = new Date().toISOString();
+
+  await writeCommands(env, [
+    {
+      id: "cmd-processing-other-thread",
+      clientId: "test-client",
+      threadId: "ezohata",
+      threadLabel: "ezohata",
+      text: "other thread still running",
+      createdAt: freshIso,
+      progressUpdatedAt: freshIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "bridge",
+      status: "processing",
+      progressStage: "waiting-for-codex",
+      processingStartedAt: freshIso,
+      processingLeaseUntil: new Date(Date.now() + 60_000).toISOString()
+    },
+    {
+      id: "cmd-queued-stale-text",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "fix the dialogs",
+      createdAt: staleIso,
+      progressUpdatedAt: staleIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued",
+      targetRepo: "andylitvinov-design/codex-links"
+    }
+  ]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-queued-stale-text");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "slack-codex-cloud");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "switched-to-cloud");
+  assert.equal(updated.lastDiagnosticCode, "bridge_claim_timeout");
+});
+
+test("runCommandMaintenance keeps queued bridge commands waiting when the same thread still has a fresh processing command", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (40 * 1000)).toISOString();
+  const freshIso = new Date().toISOString();
+
+  await writeCommands(env, [
+    {
+      id: "cmd-processing-same-thread",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "same thread still running",
+      createdAt: freshIso,
+      progressUpdatedAt: freshIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "bridge",
+      status: "processing",
+      progressStage: "waiting-for-codex",
+      processingStartedAt: freshIso,
+      processingLeaseUntil: new Date(Date.now() + 60_000).toISOString()
+    },
+    {
+      id: "cmd-queued-same-thread",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "fix the dialogs",
+      createdAt: staleIso,
+      progressUpdatedAt: staleIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued",
+      targetRepo: "andylitvinov-design/codex-links"
+    }
+  ]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-queued-same-thread");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "queued");
+});
+
+test("createCommandRecord accepts explicit retrying bridge stages for bridge-unavailable intake", () => {
+  const created = createCommandRecord({
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Посмотри на фото",
+    dispatchMode: "local-bridge",
+    progressStage: "waiting-photo-bridge",
+    lastDiagnosticCode: "bridge_temporarily_unavailable",
+    lastDiagnosticDetail: "Bridge is offline right now.",
+    photo: {
+      contentType: "image/png",
+      fileName: "photo.png",
+      size: 128,
+      dataUrl: "data:image/png;base64,AA=="
+    }
+  });
+
+  assert.equal(created.ok, true);
+  assert.equal(created.value.progressStage, "waiting-photo-bridge");
+  assert.equal(created.value.lastDiagnosticCode, "bridge_temporarily_unavailable");
+  assert.equal(created.value.lastDiagnosticDetail, "Bridge is offline right now.");
 });
