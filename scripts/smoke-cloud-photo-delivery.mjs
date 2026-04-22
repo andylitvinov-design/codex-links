@@ -169,8 +169,8 @@ async function pollCommand(id) {
 
         const actualExecutor = String(command.actualExecutor || "").trim();
 
-        if (actualExecutor !== "cloud" && actualExecutor !== "bridge") {
-          throw new Error(`Cloud photo smoke expected actualExecutor=cloud or bridge, got ${actualExecutor || "empty"}.`);
+        if (actualExecutor !== "cloud-via-slack" && actualExecutor !== "bridge") {
+          throw new Error(`Cloud photo smoke expected actualExecutor=cloud-via-slack or bridge, got ${actualExecutor || "empty"}.`);
         }
 
         return command;

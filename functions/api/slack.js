@@ -181,6 +181,7 @@ async function ingestSlackReply(env, command, event, options = {}) {
 
   const classification = classifySlackReply(text);
   const progressStage = options.progressStage || "slack-reply-received";
+  const isTerminalReply = classification.status === "answered" || classification.status === "failed";
 
   const nextState = await upsertCommandDispatchState(env, {
     id: command.id,
@@ -190,8 +191,10 @@ async function ingestSlackReply(env, command, event, options = {}) {
     actualExecutor: "cloud-via-slack",
     slackReplyReceived: true,
     slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
-    replyMatched: true,
-    replyMatchedBy: progressStage === "slack-reply-received-unthreaded" ? "unthreaded-fallback" : "thread",
+    replyMatched: isTerminalReply,
+    replyMatchedBy: isTerminalReply
+      ? (progressStage === "slack-reply-received-unthreaded" ? "unthreaded-fallback" : "thread")
+      : "",
     firstAckAt: command.firstAckAt || new Date().toISOString(),
     timeoutPhase: "",
     lastDiagnosticCode: progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : "",
@@ -208,7 +211,7 @@ async function ingestSlackReply(env, command, event, options = {}) {
     resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""
   });
 
-  if (text) {
+  if (text && isTerminalReply) {
     await upsertMessages(env, [{
       id: `slack:${channelId}:${String(event.ts || "").trim()}`,
       clientId: command.clientId,

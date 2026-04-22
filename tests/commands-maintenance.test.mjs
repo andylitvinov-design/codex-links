@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import {
   claimNextCommand,
   createCommandRecord,
+  getCommandById,
+  markCommandAnswered,
   runCommandMaintenance,
+  updateCommandProgress,
   writeCommands
 } from "../functions/_lib/commands.js";
 import {
@@ -227,6 +230,11 @@ test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", asyn
   assert.equal(updated.progressStage, "switched-to-cloud");
   assert.equal(updated.timeoutPhase, "result-timeout");
   assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
+  assert.equal(updated.actualExecutor, "cloud-via-slack");
+  assert.equal(updated.bridgeClaimedAt, "");
+  assert.equal(updated.processingStartedAt, "");
+  assert.equal(updated.processingLeaseUntil, "");
+  assert.equal(updated.firstAckAt, "");
   assert.match(updated.errorMessage, /fallback_to_slack/);
 });
 
@@ -374,6 +382,124 @@ test("runCommandMaintenance keeps queued bridge commands waiting when the same t
   assert.equal(updated.dispatchMode, "local-bridge");
   assert.equal(updated.status, "queued");
   assert.equal(updated.progressStage, "queued");
+});
+
+test("runCommandMaintenance fails stale Slack commands that never got an ack", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-no-ack",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "bridge",
+    actualExecutor: "",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    dispatchedAt: staleIso,
+    fallbackCount: 1,
+    fallbackApplied: true,
+    fallbackReason: "local bridge did not claim the command in time",
+    lastDiagnosticCode: "bridge_claim_timeout"
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: false,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-no-ack");
+  assert.ok(updated);
+  assert.equal(updated.status, "failed");
+  assert.equal(updated.progressStage, "failed");
+  assert.equal(updated.timeoutPhase, "first-ack-timeout");
+  assert.equal(updated.lastDiagnosticCode, "slack_first_ack_timeout");
+  assert.equal(updated.actualExecutor, "cloud-via-slack");
+});
+
+test("updateCommandProgress ignores heartbeats for queued photo commands", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-photo-queued",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "inspect photo",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued",
+    photoAttached: true,
+    photoBytesPresent: true,
+    photoSeenByBridge: true,
+    photoProcessed: true
+  }]);
+
+  const updated = await updateCommandProgress(env, {
+    id: "cmd-photo-queued",
+    progressStage: "waiting-for-codex",
+    processingLeaseUntil: new Date(Date.now() + 60_000).toISOString()
+  });
+
+  assert.equal(updated.ok, true);
+  assert.equal(updated.value?.status, "queued");
+  assert.equal(updated.value?.progressStage, "queued");
+  assert.ok(!updated.value?.processingLeaseUntil);
+  assert.equal(updated.value?.photoSeenByBridge, true);
+  assert.equal(updated.value?.photoProcessed, true);
+});
+
+test("markCommandAnswered ignores late bridge completion after processor ownership changed", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-owned-processing",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "bridge",
+    actualExecutor: "cloud-via-slack",
+    status: "queued",
+    progressStage: "switched-to-cloud",
+    processorId: "",
+    fallbackApplied: true,
+    fallbackCount: 1,
+    fallbackReason: "local bridge stopped heartbeating"
+  }]);
+
+  const result = await markCommandAnswered(env, {
+    id: "cmd-owned-processing",
+    progressStage: "answered",
+    actualExecutor: "bridge",
+    expectedProcessorId: "bridge-worker-1"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value?.status, "queued");
+  assert.equal(result.value?.progressStage, "switched-to-cloud");
+  assert.equal(result.value?.actualExecutor, "cloud-via-slack");
+
+  const stored = await getCommandById(env, "cmd-owned-processing");
+  assert.equal(stored?.status, "queued");
+  assert.equal(stored?.progressStage, "switched-to-cloud");
 });
 
 test("createCommandRecord accepts explicit retrying bridge stages for bridge-unavailable intake", () => {

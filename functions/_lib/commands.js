@@ -1357,42 +1357,31 @@ export async function updateCommandProgress(env, input = {}) {
     };
   }
 
-  const nowIso = new Date().toISOString();
-  const current = await readCommands(env);
-  let updated = null;
-
-  const next = current.map((command) => {
-    if (command.id !== id) {
+  return updateCommand(env, id, (command, nowIso) => {
+    if (command.status !== "processing") {
       return command;
     }
 
-    updated = {
+    const expectedProcessorId = String(input.expectedProcessorId || input.processorId || "").trim();
+    const currentProcessorId = String(command.processorId || "").trim();
+
+    if (expectedProcessorId && currentProcessorId && expectedProcessorId !== currentProcessorId) {
+      return command;
+    }
+
+    const updated = {
       ...command,
       ...mergeCommandDebugState(command, input, command.dispatchMode),
       progressStage,
       progressUpdatedAt: normalizeProgressUpdatedAt(input.progressUpdatedAt) || nowIso
     };
 
-    if (command.status === "processing" && processingLeaseUntil) {
+    if (processingLeaseUntil) {
       updated.processingLeaseUntil = processingLeaseUntil;
     }
 
     return updated;
   });
-
-  if (!updated) {
-    return {
-      ok: false,
-      error: "Command not found."
-    };
-  }
-
-  await writeCommands(env, next);
-
-  return {
-    ok: true,
-    value: updated
-  };
 }
 
 async function updateCommand(env, id, updater) {
@@ -1416,6 +1405,12 @@ async function updateCommand(env, id, updater) {
 
   const nowIso = new Date().toISOString();
   const updated = updater(current, nowIso) || current;
+  if (updated === current) {
+    return {
+      ok: true,
+      value: current
+    };
+  }
   await persistCommand(env, updated);
   return {
     ok: true,
@@ -1455,62 +1450,84 @@ export async function markCommandDispatched(env, input = {}) {
 }
 
 export async function markCommandAnswered(env, input = {}) {
-  return updateCommand(env, input.id, (command, nowIso) => ({
-    ...command,
-    ...mergeCommandDebugState(command, {
-      actualExecutor: input.actualExecutor || input.actualDispatchMode || command.actualExecutor || command.actualDispatchMode,
-      slackReplyReceived: typeof input.slackReplyReceived === "boolean" ? input.slackReplyReceived : command.slackReplyReceived,
-      slackReplyThreaded: typeof input.slackReplyThreaded === "boolean" ? input.slackReplyThreaded : command.slackReplyThreaded,
-      replyMatched: typeof input.replyMatched === "boolean"
-        ? input.replyMatched
-        : (typeof input.slackReplyMatched === "boolean" ? input.slackReplyMatched : command.replyMatched),
-      replyMatchedBy: input.replyMatchedBy || command.replyMatchedBy,
-      firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt || nowIso,
+  return updateCommand(env, input.id, (command, nowIso) => {
+    if (shouldIgnoreProcessorMutation(command, input)) {
+      return command;
+    }
+
+    return {
+      ...command,
+      ...mergeCommandDebugState(command, {
+        actualExecutor: input.actualExecutor || input.actualDispatchMode || command.actualExecutor || command.actualDispatchMode,
+        slackReplyReceived: typeof input.slackReplyReceived === "boolean" ? input.slackReplyReceived : command.slackReplyReceived,
+        slackReplyThreaded: typeof input.slackReplyThreaded === "boolean" ? input.slackReplyThreaded : command.slackReplyThreaded,
+        replyMatched: typeof input.replyMatched === "boolean"
+          ? input.replyMatched
+          : (typeof input.slackReplyMatched === "boolean" ? input.slackReplyMatched : command.replyMatched),
+        replyMatchedBy: input.replyMatchedBy || command.replyMatchedBy,
+        firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt || nowIso,
+        resultAt: normalizeDateValue(input.resultAt) || nowIso,
+        photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoAttached || command.photoSeenByBridge),
+        timeoutPhase: "",
+        lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+        lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+        firstExecutorAckSeenAt: normalizeDateValue(input.firstExecutorAckSeenAt) || command.firstExecutorAckSeenAt || normalizeDateValue(input.firstAckAt) || nowIso,
+        firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt) || command.firstReplySeenAt || nowIso,
+        replyIngestedAt: normalizeDateValue(input.replyIngestedAt) || command.replyIngestedAt || nowIso
+      }, input.dispatchMode || command.dispatchMode),
+      status: "answered",
+      progressStage: normalizeProgressStage(input.progressStage) || "answered",
+      progressUpdatedAt: nowIso,
+      prUrl: String(input.prUrl || command.prUrl || "").trim(),
+      branchName: normalizeSlackValue(input.branchName || command.branchName),
       resultAt: normalizeDateValue(input.resultAt) || nowIso,
-      photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoAttached || command.photoSeenByBridge),
-      timeoutPhase: "",
-      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
-      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
-      firstExecutorAckSeenAt: normalizeDateValue(input.firstExecutorAckSeenAt) || command.firstExecutorAckSeenAt || normalizeDateValue(input.firstAckAt) || nowIso,
-      firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt) || command.firstReplySeenAt || nowIso,
-      replyIngestedAt: normalizeDateValue(input.replyIngestedAt) || command.replyIngestedAt || nowIso
-    }, input.dispatchMode || command.dispatchMode),
-    status: "answered",
-    progressStage: normalizeProgressStage(input.progressStage) || "answered",
-    progressUpdatedAt: nowIso,
-    prUrl: String(input.prUrl || command.prUrl || "").trim(),
-    branchName: normalizeSlackValue(input.branchName || command.branchName),
-    resultAt: normalizeDateValue(input.resultAt) || nowIso,
-    completedAt: normalizeDateValue(input.completedAt) || nowIso,
-    errorMessage: ""
-  }));
+      completedAt: normalizeDateValue(input.completedAt) || nowIso,
+      errorMessage: ""
+    };
+  });
 }
 
 export async function markCommandFailed(env, input = {}) {
-  return updateCommand(env, input.id, (command, nowIso) => ({
-    ...command,
-    ...mergeCommandDebugState(command, {
-      actualExecutor: input.actualExecutor || input.actualDispatchMode || command.actualExecutor || command.actualDispatchMode,
-      firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt,
+  return updateCommand(env, input.id, (command, nowIso) => {
+    if (shouldIgnoreProcessorMutation(command, input)) {
+      return command;
+    }
+
+    return {
+      ...command,
+      ...mergeCommandDebugState(command, {
+        actualExecutor: input.actualExecutor || input.actualDispatchMode || command.actualExecutor || command.actualDispatchMode,
+        firstAckAt: normalizeDateValue(input.firstAckAt) || command.firstAckAt,
+        resultAt: normalizeDateValue(input.resultAt) || nowIso,
+        timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
+        fallbackApplied: typeof input.fallbackApplied === "boolean" ? input.fallbackApplied : command.fallbackApplied,
+        fallbackCount: Object.prototype.hasOwnProperty.call(input, "fallbackCount") ? input.fallbackCount : command.fallbackCount,
+        fallbackReason: input.fallbackReason || command.fallbackReason,
+        lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+        lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+        photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoSeenByBridge),
+        firstExecutorAckSeenAt: normalizeDateValue(input.firstExecutorAckSeenAt) || command.firstExecutorAckSeenAt,
+        firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt) || command.firstReplySeenAt,
+        replyIngestedAt: normalizeDateValue(input.replyIngestedAt) || command.replyIngestedAt
+      }, input.dispatchMode || command.dispatchMode),
+      status: "failed",
+      progressStage: normalizeProgressStage(input.progressStage) || "failed",
+      progressUpdatedAt: nowIso,
+      errorMessage: normalizeErrorMessage(input.errorMessage),
       resultAt: normalizeDateValue(input.resultAt) || nowIso,
-      timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
-      fallbackApplied: typeof input.fallbackApplied === "boolean" ? input.fallbackApplied : command.fallbackApplied,
-      fallbackCount: Object.prototype.hasOwnProperty.call(input, "fallbackCount") ? input.fallbackCount : command.fallbackCount,
-      fallbackReason: input.fallbackReason || command.fallbackReason,
-      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
-      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
-      photoProcessed: typeof input.photoProcessed === "boolean" ? input.photoProcessed : Boolean(command.photoSeenByBridge),
-      firstExecutorAckSeenAt: normalizeDateValue(input.firstExecutorAckSeenAt) || command.firstExecutorAckSeenAt,
-      firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt) || command.firstReplySeenAt,
-      replyIngestedAt: normalizeDateValue(input.replyIngestedAt) || command.replyIngestedAt
-    }, input.dispatchMode || command.dispatchMode),
-    status: "failed",
-    progressStage: normalizeProgressStage(input.progressStage) || "failed",
-    progressUpdatedAt: nowIso,
-    errorMessage: normalizeErrorMessage(input.errorMessage),
-    resultAt: normalizeDateValue(input.resultAt) || nowIso,
-    completedAt: normalizeDateValue(input.completedAt) || nowIso
-  }));
+      completedAt: normalizeDateValue(input.completedAt) || nowIso
+    };
+  });
+}
+
+function shouldIgnoreProcessorMutation(command, input = {}) {
+  const expectedProcessorId = String(input.expectedProcessorId || input.processorId || "").trim();
+
+  if (!expectedProcessorId) {
+    return false;
+  }
+
+  return command.status !== "processing" || String(command.processorId || "").trim() !== expectedProcessorId;
 }
 
 export async function upsertCommandDispatchState(env, input = {}) {
