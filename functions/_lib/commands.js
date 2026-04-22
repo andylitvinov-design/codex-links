@@ -1113,29 +1113,34 @@ export async function claimNextCommand(env, input = {}) {
       isClaudeProcessor ? isClaudeProcessingCommand : isLocalProcessingCommand
     )
   ]);
-  const activeThreadKeys = new Set();
+  const getActiveThreadKeys = async (commands) => {
+    const activeKeys = new Set();
 
-  for (const command of processingCommands) {
-    const leaseDeadline = Date.parse(String(command.processingLeaseUntil || "").trim());
+    for (const command of commands) {
+      const leaseDeadline = Date.parse(String(command.processingLeaseUntil || "").trim());
 
-    if (!Number.isNaN(leaseDeadline) && leaseDeadline <= now) {
-      await persistCommand(env, {
-        ...command,
-        status: "queued",
-        progressStage: "queued",
-        progressUpdatedAt: nowIso,
-        processingStartedAt: "",
-        processingLeaseUntil: "",
-        processorId: ""
-      });
-      continue;
+      if (!Number.isNaN(leaseDeadline) && leaseDeadline <= now) {
+        await persistCommand(env, {
+          ...command,
+          status: "queued",
+          progressStage: "queued",
+          progressUpdatedAt: nowIso,
+          processingStartedAt: "",
+          processingLeaseUntil: "",
+          processorId: ""
+        });
+        continue;
+      }
+
+      const threadKey = getCommandThreadKey(command);
+      if (threadKey !== "::") {
+        activeKeys.add(threadKey);
+      }
     }
 
-    const threadKey = getCommandThreadKey(command);
-    if (threadKey !== "::") {
-      activeThreadKeys.add(threadKey);
-    }
-  }
+    return activeKeys;
+  };
+  let activeThreadKeys = await getActiveThreadKeys(processingCommands);
 
   const isClaimableLocalQueued = (command) => {
     if (!command || command.dispatchMode !== requestedDispatchMode || command.status !== "queued") {
@@ -1149,6 +1154,9 @@ export async function claimNextCommand(env, input = {}) {
 
   if (!candidate) {
     const snapshotCommands = await readCommands(env);
+    activeThreadKeys = await getActiveThreadKeys(snapshotCommands.filter((command) =>
+      isClaudeProcessor ? isClaudeProcessingCommand(command) : isLocalProcessingCommand(command)
+    ));
     candidate = snapshotCommands.find((command) => isClaimableLocalQueued(command)) || null;
 
     if (!candidate) {
