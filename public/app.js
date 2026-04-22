@@ -36,7 +36,11 @@ const state = {
   visibleCommandUpdates: {}
 };
 
+<<<<<<< HEAD
 const BUILD_VERSION = "20260423-1225";
+=======
+const BUILD_VERSION = "20260422-1645";
+>>>>>>> 739883e (Harden photo delivery routes)
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
