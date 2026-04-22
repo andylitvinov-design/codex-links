@@ -56,6 +56,8 @@ const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
 const SLACK_DISPATCH_GRACE_MS = 15_000;
 const SLACK_FIRST_ACK_TIMEOUT_MS = 30_000;
 const SLACK_RESULT_WAIT_MS = 120_000;
+const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90_000;
+const SLACK_PHOTO_RESULT_WAIT_MS = 300_000;
 const SLACK_SYNC_POLL_MS = 2_000;
 const READ_SLACK_SYNC_BUDGET_MS = 2_500;
 const READ_SLACK_API_TIMEOUT_MS = 1_500;
@@ -66,6 +68,21 @@ function logCommandError(context, error, extra = {}) {
     ...extra,
     error: message
   });
+}
+
+function commandHasPhoto(command) {
+  return Boolean(command?.photo?.dataUrl)
+    || Boolean(command?.photo?.hasDataUrl)
+    || Boolean(command?.photoAttached)
+    || Boolean(command?.photoBytesPresent);
+}
+
+function getSlackFirstAckTimeoutMs(command) {
+  return commandHasPhoto(command) ? SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS : SLACK_FIRST_ACK_TIMEOUT_MS;
+}
+
+function getSlackResultWaitMs(command) {
+  return commandHasPhoto(command) ? SLACK_PHOTO_RESULT_WAIT_MS : SLACK_RESULT_WAIT_MS;
 }
 
 function resolveRequestedDispatchMode(payload, runtimeConfig) {
@@ -259,6 +276,12 @@ function serializeCommand(command, options = {}) {
     photoSeenByBridge: Boolean(command.photoSeenByBridge),
     photoProcessed: Boolean(command.photoProcessed),
     photoUnsupportedReason: String(command.photoUnsupportedReason || "").trim(),
+    slackPhotoFileId: String(command.slackPhotoFileId || "").trim(),
+    slackPhotoPermalink: String(command.slackPhotoPermalink || "").trim(),
+    slackPhotoUploadThreaded: Boolean(command.slackPhotoUploadThreaded),
+    slackPhotoUploadCompletedAt: String(command.slackPhotoUploadCompletedAt || "").trim(),
+    slackPhotoUploadError: String(command.slackPhotoUploadError || "").trim(),
+    slackAckObservedAt: String(command.slackAckObservedAt || "").trim(),
     projectId: String(command.projectId || "").trim(),
     projectLabel: String(command.projectLabel || "").trim(),
     projectCategory: String(command.projectCategory || "").trim(),
@@ -358,6 +381,7 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     lastDiagnosticDetail: progressStage === "slack-reply-received-unthreaded"
       ? "A Codex reply arrived outside the original Slack thread and was reconciled from recent channel history."
       : "",
+    slackAckObservedAt: command.slackAckObservedAt || new Date().toISOString(),
     slackChannelId: channelId,
     slackThreadTs: progressStage === "slack-reply-received-unthreaded"
       ? (latestReply.threadTs || latestReply.ts || threadTs)
@@ -802,6 +826,11 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       slackChannelId: published.channel,
       slackMessageTs: published.ts,
       slackThreadTs: published.threadTs,
+      slackPhotoFileId: String(published.photoUpload?.fileId || "").trim(),
+      slackPhotoPermalink: String(published.photoUpload?.permalink || "").trim(),
+      slackPhotoUploadThreaded: Boolean(published.photoUpload?.threaded),
+      slackPhotoUploadCompletedAt: published.photoUpload?.fileId ? new Date().toISOString() : "",
+      slackPhotoUploadError: String(published.photoUploadError || "").trim(),
       dispatchedAt: new Date().toISOString()
     });
 
@@ -876,9 +905,11 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
 
   if (command.dispatchMode === DISPATCH_MODE_SLACK) {
     const startedAt = Date.now();
+    const firstAckTimeoutMs = getSlackFirstAckTimeoutMs(command);
+    const resultWaitMs = getSlackResultWaitMs(command);
     let dispatchObservedAt = 0;
 
-    while ((Date.now() - startedAt) < SLACK_RESULT_WAIT_MS) {
+    while ((Date.now() - startedAt) < resultWaitMs) {
       await sleep(SLACK_SYNC_POLL_MS);
       command = await getCommandById(env, commandId);
 
@@ -927,7 +958,7 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
         }
 
         if (
-          (Date.now() - dispatchObservedAt) >= SLACK_FIRST_ACK_TIMEOUT_MS
+          (Date.now() - dispatchObservedAt) >= firstAckTimeoutMs
           && canFallbackToLocalBridge(command)
         ) {
           const fallbackCommand = await fallbackToLocalBridge(env, command, {

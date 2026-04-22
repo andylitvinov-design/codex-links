@@ -4,6 +4,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
+import { resolveClaudeBin, validateClaudeCli } from "./_lib/claude-cli.mjs";
 import {
   buildBridgePrompt,
   buildPhotoOnlyPrompt,
@@ -47,6 +48,8 @@ const bridgeRunWatchdog = setTimeout(() => {
 }, BRIDGE_RUN_TIMEOUT_MS);
 
 bridgeRunWatchdog.unref();
+
+await runClaudeBridgePreflight();
 
 async function appendBridgeErrorLog(context, error, extra = {}) {
   const message = error instanceof Error ? error.stack || error.message : String(error || "Unknown error");
@@ -1084,6 +1087,48 @@ async function publishBridgeStatus(status) {
   }
 }
 
+async function runClaudeBridgePreflight() {
+  if (BRIDGE_EXECUTOR !== "claude") {
+    return null;
+  }
+
+  try {
+    return await validateClaudeCli({
+      env: process.env,
+      timeoutMs: WRITE_TIMEOUT_MS
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "Claude CLI validation failed.");
+
+    await logBridgeError("Claude bridge preflight failed", error, {
+      claudeBin: resolveClaudeBin(process.env)
+    });
+
+    await publishBridgeStatus({
+      bridgeOnline: false,
+      state: "degraded",
+      lastRunAt: new Date().toISOString(),
+      lastSuccessAt: "",
+      pendingCount: 0,
+      oldestPendingAt: "",
+      lastDeliveredCount: 0,
+      lastError: message,
+      claudeBridge: {
+        online: false,
+        state: "degraded",
+        lastRunAt: new Date().toISOString(),
+        lastSuccessAt: "",
+        pendingCount: 0,
+        oldestPendingAt: "",
+        lastDeliveredCount: 0,
+        lastError: message
+      }
+    });
+
+    throw new Error(message);
+  }
+}
+
 function createMessageId(threadId, timestamp, text) {
   return crypto
     .createHash("sha1")
@@ -1137,7 +1182,7 @@ function getImmediateAssistantText(result, prompt = "") {
 }
 
 function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
-  const claudeBin = process.env.CLAUDE_BIN || "/Users/andriilitvinov/.npm-global/bin/claude";
+  const claudeBin = resolveClaudeBin(process.env);
   const instructions = [
     String(prompt || "").trim(),
     photoPath

@@ -70,6 +70,7 @@ extract_from_automation() {
 
 BASE_URL="${LINKS_BASE_URL:-$(extract_from_automation LINKS_BASE_URL)}"
 WRITE_TOKEN="${LINKS_WRITE_TOKEN:-$(extract_from_automation LINKS_WRITE_TOKEN)}"
+CLAUDE_BIN_VALUE="${CLAUDE_BIN:-$(extract_from_dev_vars CLAUDE_BIN)}"
 
 if [[ -z "${BASE_URL}" ]]; then
   BASE_URL="$(extract_from_dev_vars LINKS_BASE_URL)"
@@ -93,6 +94,7 @@ exec env \
   PATH="${PATH}" \
   LINKS_BASE_URL="${BASE_URL}" \
   LINKS_WRITE_TOKEN="${WRITE_TOKEN}" \
+  CLAUDE_BIN="${CLAUDE_BIN_VALUE}" \
   BRIDGE_EXECUTOR="claude" \
   BRIDGE_DISPATCH_MODE="claude-bridge" \
   "${NODE_BIN}" scripts/bridge-codex-commands.mjs

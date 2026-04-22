@@ -157,7 +157,14 @@ async function pollCommand(id) {
     if (command) {
       assertManifestContext(command, "cloud photo poll");
       const status = String(command.status || "").trim().toLowerCase();
-      console.log(`status=${status || "unknown"} stage=${String(command.progressStage || "").trim() || "unknown"} dispatchMode=${String(command.dispatchMode || "").trim() || "unknown"}`);
+      console.log([
+        `status=${status || "unknown"}`,
+        `stage=${String(command.progressStage || "").trim() || "unknown"}`,
+        `dispatchMode=${String(command.dispatchMode || "").trim() || "unknown"}`,
+        `photoUploaded=${String(command.slackPhotoUploadCompletedAt || "").trim() ? "yes" : "no"}`,
+        `ackSeen=${String(command.slackAckObservedAt || command.firstExecutorAckSeenAt || "").trim() ? "yes" : "no"}`,
+        `actualExecutor=${String(command.actualExecutor || "").trim() || "unknown"}`
+      ].join(" "));
 
       if (status === "answered") {
         const replies = await fetchAssistantReplies(command.id);
@@ -169,8 +176,8 @@ async function pollCommand(id) {
 
         const actualExecutor = String(command.actualExecutor || "").trim();
 
-        if (actualExecutor !== "cloud-via-slack" && actualExecutor !== "bridge") {
-          throw new Error(`Cloud photo smoke expected actualExecutor=cloud-via-slack or bridge, got ${actualExecutor || "empty"}.`);
+        if (actualExecutor !== "cloud-via-slack") {
+          throw new Error(`Cloud photo smoke expected actualExecutor=cloud-via-slack, got ${actualExecutor || "empty"}.`);
         }
 
         return command;

@@ -35,6 +35,8 @@ const CLOUD_FIRST_ACK_TIMEOUT_MS = 15 * 1000;
 const CLOUD_RESULT_TIMEOUT_MS = 180 * 1000;
 const SLACK_FIRST_ACK_TIMEOUT_MS = 30 * 1000;
 const SLACK_RESULT_TIMEOUT_MS = 120 * 1000;
+const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90 * 1000;
+const SLACK_PHOTO_RESULT_TIMEOUT_MS = 300 * 1000;
 const BRIDGE_CLAIM_TIMEOUT_MS = 20 * 1000;
 const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
 const BRIDGE_PHOTO_CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -43,6 +45,10 @@ const BRIDGE_PHOTO_RETRY_WINDOW_MS = 30 * 60 * 1000;
 export const COMMAND_TIMEOUTS = {
   cloudFirstAckMs: CLOUD_FIRST_ACK_TIMEOUT_MS,
   cloudResultMs: CLOUD_RESULT_TIMEOUT_MS,
+  slackFirstAckMs: SLACK_FIRST_ACK_TIMEOUT_MS,
+  slackResultMs: SLACK_RESULT_TIMEOUT_MS,
+  slackPhotoFirstAckMs: SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS,
+  slackPhotoResultMs: SLACK_PHOTO_RESULT_TIMEOUT_MS,
   bridgeClaimMs: BRIDGE_CLAIM_TIMEOUT_MS,
   bridgeResultMs: BRIDGE_RESULT_TIMEOUT_MS,
   bridgePhotoClaimMs: BRIDGE_PHOTO_CLAIM_TIMEOUT_MS,
@@ -502,6 +508,14 @@ function commandHasPhoto(command) {
     || Boolean(command?.photoBytesPresent);
 }
 
+function getSlackFirstAckTimeoutMs(command) {
+  return commandHasPhoto(command) ? SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS : SLACK_FIRST_ACK_TIMEOUT_MS;
+}
+
+function getSlackResultTimeoutMs(command) {
+  return commandHasPhoto(command) ? SLACK_PHOTO_RESULT_TIMEOUT_MS : SLACK_RESULT_TIMEOUT_MS;
+}
+
 function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispatchMode || command?.dispatchMode) {
   const actualDispatchMode = dispatchModeToExecutionMode(dispatchMode);
   const requestedExecutor = normalizeExecutionMode(
@@ -574,8 +588,17 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
         ? input.photoUnsupportedReason
         : command?.photoUnsupportedReason
     ),
+    slackPhotoUploadError: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "slackPhotoUploadError")
+        ? input.slackPhotoUploadError
+        : command?.slackPhotoUploadError,
+      500
+    ),
     firstAckAt: normalizeDateValue(
       Object.prototype.hasOwnProperty.call(input, "firstAckAt") ? input.firstAckAt : command?.firstAckAt
+    ),
+    slackAckObservedAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "slackAckObservedAt") ? input.slackAckObservedAt : command?.slackAckObservedAt
     ),
     resultAt: normalizeDateValue(
       Object.prototype.hasOwnProperty.call(input, "resultAt") ? input.resultAt : command?.resultAt
@@ -734,7 +757,9 @@ function normalizeStoredCommandEntry(entry) {
     photoSeenByBridge: normalizeBooleanValue(entry.photoSeenByBridge),
     photoProcessed: normalizeBooleanValue(entry.photoProcessed),
     photoUnsupportedReason: normalizePhotoUnsupportedReason(entry.photoUnsupportedReason),
+    slackPhotoUploadError: normalizeDiagnosticText(entry.slackPhotoUploadError, 500),
     firstAckAt: normalizeDateValue(entry.firstAckAt),
+    slackAckObservedAt: normalizeDateValue(entry.slackAckObservedAt),
     resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
     slackChannelId: normalizeSlackValue(entry.slackChannelId),
     slackMessageTs: normalizeSlackValue(entry.slackMessageTs),
@@ -1448,6 +1473,13 @@ export async function markCommandDispatched(env, input = {}) {
     slackChannelId: normalizeSlackValue(input.slackChannelId),
     slackMessageTs: normalizeSlackValue(input.slackMessageTs),
     slackThreadTs: normalizeSlackValue(input.slackThreadTs || input.slackMessageTs),
+    slackPhotoFileId: String(input.slackPhotoFileId || command.slackPhotoFileId || "").trim(),
+    slackPhotoPermalink: String(input.slackPhotoPermalink || command.slackPhotoPermalink || "").trim(),
+    slackPhotoUploadThreaded: typeof input.slackPhotoUploadThreaded === "boolean"
+      ? input.slackPhotoUploadThreaded
+      : Boolean(command.slackPhotoUploadThreaded),
+    slackPhotoUploadCompletedAt: normalizeDateValue(input.slackPhotoUploadCompletedAt || command.slackPhotoUploadCompletedAt),
+    slackPhotoUploadError: normalizeDiagnosticText(input.slackPhotoUploadError || command.slackPhotoUploadError, 500),
     dispatchedAt: normalizeDateValue(input.dispatchedAt) || nowIso,
     errorMessage: "",
     processorId: "",
@@ -1577,6 +1609,7 @@ export async function upsertCommandDispatchState(env, input = {}) {
         ? (normalizeDateValue(input.firstAckAt) || command.firstAckAt)
         : "")
     ),
+    slackAckObservedAt: normalizeDateValue(input.slackAckObservedAt || command.slackAckObservedAt),
     firstReplySeenAt: normalizeDateValue(input.firstReplySeenAt || command.firstReplySeenAt),
     replyIngestedAt: normalizeDateValue(input.replyIngestedAt || command.replyIngestedAt),
     uiVisibleAt: normalizeDateValue(input.uiVisibleAt || command.uiVisibleAt)
@@ -1767,6 +1800,8 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
 
   const fallbackAllowed = canFallbackToLocal(command, options);
   const status = String(command.status || "").trim().toLowerCase();
+  const firstAckTimeoutMs = getSlackFirstAckTimeoutMs(command);
+  const resultTimeoutMs = getSlackResultTimeoutMs(command);
 
   if (status !== "processing" && status !== "dispatched") {
     return command;
@@ -1776,7 +1811,7 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
   const hasFirstAck = Boolean(String(command.firstExecutorAckSeenAt || command.firstAckAt || "").trim());
 
   if (!hasFirstAck) {
-    if (!isOlderThan(dispatchObservedAt, SLACK_FIRST_ACK_TIMEOUT_MS)) {
+    if (!isOlderThan(dispatchObservedAt, firstAckTimeoutMs)) {
       return command;
     }
 
@@ -1811,7 +1846,7 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
     });
   }
 
-  if (!isOlderThan(command.progressUpdatedAt || dispatchObservedAt, SLACK_RESULT_TIMEOUT_MS)) {
+  if (!isOlderThan(command.progressUpdatedAt || dispatchObservedAt, resultTimeoutMs)) {
     return command;
   }
 
