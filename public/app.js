@@ -33,14 +33,11 @@ const state = {
   voiceHadResult: false,
   deliverySpeedUntil: 0,
   speedModeClientId: "",
-  visibleCommandUpdates: {}
+  visibleCommandUpdates: {},
+  replyContext: null
 };
 
-<<<<<<< HEAD
 const BUILD_VERSION = "20260423-1225";
-=======
-const BUILD_VERSION = "20260422-1645";
->>>>>>> 739883e (Harden photo delivery routes)
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -284,6 +281,9 @@ const commandPhotoInput = document.querySelector("#command-photo-input");
 const commandPhotoClear = document.querySelector("#command-photo-clear");
 const commandPhotoStatus = document.querySelector("#command-photo-status");
 const commandInput = document.querySelector("#command-input");
+const replyContextBar = document.querySelector("#reply-context-bar");
+const replyContextText = document.querySelector("#reply-context-text");
+const replyContextClearButton = document.querySelector("#reply-context-clear");
 const commandVoiceButton = document.querySelector("#command-voice-button");
 const commandVoiceStatus = document.querySelector("#command-voice-status");
 const commandStatus = document.querySelector("#command-status");
@@ -1391,7 +1391,7 @@ function getCommandLifecycleState(command) {
     return "failed";
   }
 
-  if (status === "answered" || status === "acked" || hasAssistantReply(command?.id, command)) {
+  if (status === "answered" || status === "acked") {
     return "done";
   }
 
@@ -1423,10 +1423,6 @@ function getCommandLifecycleState(command) {
 }
 
 function getCommandDeliveryStatus(command) {
-  if (hasAssistantReply(command?.id, command)) {
-    return null;
-  }
-
   const lifecycleState = getCommandLifecycleState(command);
   const stageLabel = formatProgressStage(command?.progressStage, String(command?.status || "").trim().toLowerCase());
   const errorMessage = String(command?.errorMessage || "").trim();
@@ -1864,6 +1860,84 @@ async function requestAdminWriteToken(forcePrompt = false) {
   return storage.adminWriteToken;
 }
 
+function getLikelyStuckBridgeCommands() {
+  const now = Date.now();
+
+  return state.commands.filter((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    const requestedExecutor = getCommandRequestedExecutor(command);
+    const dispatchMode = String(command?.dispatchMode || "").trim().toLowerCase();
+
+    if (status === "answered" || status === "acked" || status === "failed") {
+      return false;
+    }
+
+    if (requestedExecutor !== "bridge" && dispatchMode !== "local-bridge") {
+      return false;
+    }
+
+    const bridgeClaimedAt = String(command?.bridgeClaimedAt || "").trim();
+    const firstReplySeenAt = String(command?.firstReplySeenAt || "").trim();
+    const staleSince = bridgeClaimedAt
+      ? (firstReplySeenAt ? "" : String(command?.firstAckAt || bridgeClaimedAt).trim())
+      : String(command?.dispatchStartedAt || command?.progressUpdatedAt || command?.createdAt || "").trim();
+    const staleTimestamp = toTimestamp(staleSince);
+
+    if (!Number.isFinite(staleTimestamp)) {
+      return false;
+    }
+
+    const staleMs = now - staleTimestamp;
+
+    if (!bridgeClaimedAt) {
+      return staleMs > 45_000;
+    }
+
+    if (!firstReplySeenAt) {
+      return staleMs > 90_000;
+    }
+
+    return false;
+  });
+}
+
+async function runBridgeMaintenanceFromRefresh() {
+  const token = storage.adminWriteToken;
+
+  if (!token) {
+    return false;
+  }
+
+  const response = await fetch("/api/admin/commands-maintenance", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "x-write-token": token
+    },
+    body: JSON.stringify({
+      clientId: storage.clientId,
+      syncReplies: true
+    })
+  });
+
+  if (response.status === 401) {
+    storage.adminWriteToken = "";
+    return false;
+  }
+
+  const result = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(String(result?.error || "").trim() || `Bridge maintenance failed (HTTP ${response.status}).`);
+  }
+
+  const changedCount = Number(result?.summary?.changedCount || 0);
+  const dispatchedCount = Number(result?.summary?.dispatchedCount || 0);
+  setCommandStatusMessage(`Refresh: проверил зависшие bridge-сообщения. changed ${changedCount}, dispatched ${dispatchedCount}.`, { tone: "processing" });
+  return true;
+}
+
 async function runDeliveryReset() {
   if (state.resetInFlight) {
     return;
@@ -2058,6 +2132,14 @@ function getPreviousAssistantReplyContext(threadId) {
     return "";
   }
 
+  if (
+    state.replyContext
+    && String(state.replyContext.threadId || "").trim() === normalizedThreadId
+    && String(state.replyContext.text || "").trim()
+  ) {
+    return String(state.replyContext.text || "").trim();
+  }
+
   const assistantMessages = state.messages
     .filter((message) => message?.role === "assistant")
     .filter((message) => isSameThreadTarget(message?.threadId, normalizedThreadId))
@@ -2067,6 +2149,39 @@ function getPreviousAssistantReplyContext(threadId) {
 
   const terminalReply = assistantMessages.find((message) => isTerminalAssistantReplyText(message?.text || ""));
   return String(terminalReply?.text || assistantMessages[0]?.text || "").trim();
+}
+
+function truncateReplyContextText(value, max = 220) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
+
+function clearReplyContext() {
+  state.replyContext = null;
+  renderReplyContext();
+}
+
+function renderReplyContext() {
+  if (!replyContextBar || !replyContextText) {
+    return;
+  }
+
+  const activeThreadId = getActiveThreadId();
+  const replyContext = state.replyContext;
+
+  if (!replyContext || (replyContext.threadId && replyContext.threadId !== activeThreadId)) {
+    replyContextBar.hidden = true;
+    replyContextText.textContent = "";
+    return;
+  }
+
+  replyContextBar.hidden = false;
+  replyContextText.textContent = `Ответ на Codex: ${truncateReplyContextText(replyContext.text)}`;
 }
 
 function normalizeEntryText(entry) {
@@ -2186,46 +2301,60 @@ function renderTimelineTabButtons() {
 function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
-  const detailsId = String(message?.id || "").trim();
+  const messageId = String(message?.id || "").trim();
   const title = linkedCommand?.threadLabel
     ? `Ответ Codex · ${linkedCommand.threadLabel}`
     : getCommandAnswerTitle(linkedCommand);
+  const replyThreadId = String(linkedCommand?.threadId || message?.threadId || "").trim();
 
   return `
-    <details class="command-answer" data-entry-id="${escapeHtml(detailsId)}">
-      <summary>
+    <article class="command-answer" data-entry-id="${escapeHtml(messageId)}">
+      <div class="command-answer-summary">
         <span class="command-answer-title">${escapeHtml(title)}</span>
-      </summary>
+      </div>
       <div class="command-answer-body">
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
+        <div class="command-answer-actions">
+          <button
+            class="button button-secondary command-answer-reply"
+            type="button"
+            data-reply-message-id="${escapeHtml(messageId)}"
+            data-thread-id="${escapeHtml(replyThreadId)}"
+          >Ответить</button>
+        </div>
       </div>
-    </details>
+    </article>
   `;
 }
 
 function bindAssistantReplyInteractions(container, replies) {
-  container.querySelectorAll(".command-answer").forEach((details) => {
-    const detailsId = String(details.dataset.entryId || "").trim();
+  container.querySelectorAll(".command-answer-reply").forEach((button) => {
+    button.addEventListener("click", () => {
+      const messageId = String(button.dataset.replyMessageId || "").trim();
+      const threadId = canonicalizeRepoSelectionId(button.dataset.threadId || "");
+      const message = state.messages.find((entry) => String(entry?.id || "").trim() === messageId);
+      const replyText = String(message?.text || "").trim();
 
-    if (detailsId && state.answerOpenUntil[detailsId] && state.answerOpenUntil[detailsId] > Date.now()) {
-      details.open = true;
-    }
-
-    details.addEventListener("toggle", () => {
-      if (!detailsId) {
+      if (!replyText) {
         return;
       }
 
-      if (details.open) {
-        state.answerOpenUntil[detailsId] = Date.now() + 2 * 60 * 1000;
-      } else {
-        delete state.answerOpenUntil[detailsId];
+      state.replyContext = {
+        messageId,
+        threadId,
+        text: replyText
+      };
+
+      if (threadId) {
+        commandThreadSelect.dataset.pendingValue = threadId;
+        renderCommandThreads();
       }
 
-      scheduleAnswerAutoClose();
+      renderReplyContext();
+      commandInput?.focus();
+      setCommandStatusMessage("Следующее сообщение уйдёт как ответ на выбранный reply Codex.", { tone: "processing" });
     });
   });
-
 }
 
 function formatReportWindow(report) {
@@ -3028,6 +3157,7 @@ function renderDispatchModeUi() {
   renderThreadSettingsSummary();
   renderThreadSettingsList();
   renderCommandThreads();
+  renderReplyContext();
 
   if (!hasPendingCommand && !hasActiveStatus) {
     setCommandStatusMessage(
@@ -3641,6 +3771,7 @@ async function submitCommand(event) {
   }
 
   commandInput.value = "";
+  clearReplyContext();
   clearSelectedPhoto();
   mergeCommandCollection([result?.command].filter(Boolean));
   mergeMessageCollection([buildOptimisticUserMessage(result?.command)].filter(Boolean));
@@ -3757,6 +3888,27 @@ function bindEvents() {
     }
 
     await refreshAll();
+
+    const stuckBridgeCommands = getLikelyStuckBridgeCommands();
+
+    if (!stuckBridgeCommands.length) {
+      return;
+    }
+
+    enterDeliverySpeedMode();
+    startPolling();
+
+    if (!storage.adminWriteToken) {
+      setCommandStatusMessage("Refresh: вижу зависшее bridge-сообщение, но для auto-maintenance нужен сохранённый admin token.", { tone: "processing" });
+      return;
+    }
+
+    setCommandStatusMessage("Refresh: вижу зависшее bridge-сообщение, запускаю maintenance…", { tone: "processing" });
+    const refreshed = await runBridgeMaintenanceFromRefresh();
+
+    if (refreshed) {
+      await refreshAll();
+    }
   });
 
   deliveryResetButton?.addEventListener("click", () => {
@@ -3789,6 +3941,7 @@ function bindEvents() {
 
     renderDispatchModeUi();
     renderThreadSettingsSummary();
+    renderReplyContext();
     renderCommands();
   });
 
@@ -3826,6 +3979,11 @@ function bindEvents() {
 
   commandPhotoClear?.addEventListener("click", () => {
     clearSelectedPhoto("Фото удалено из формы.");
+  });
+
+  replyContextClearButton?.addEventListener("click", () => {
+    clearReplyContext();
+    commandInput?.focus();
   });
 
   threadSettingsToggle?.addEventListener("click", () => {
@@ -3930,6 +4088,7 @@ async function boot() {
     commandInput.value = "";
   }
 
+  clearReplyContext();
   clearSelectedPhoto();
   syncVoiceButton();
   setVoiceStatusMessage(
