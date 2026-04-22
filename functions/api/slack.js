@@ -187,7 +187,7 @@ async function ingestSlackReply(env, command, event, options = {}) {
     dispatchMode: DISPATCH_MODE_SLACK,
     status: classification.status,
     progressStage,
-    actualExecutor: "cloud",
+    actualExecutor: "cloud-via-slack",
     slackReplyReceived: true,
     slackReplyThreaded: progressStage !== "slack-reply-received-unthreaded",
     replyMatched: true,

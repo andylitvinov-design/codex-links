@@ -8,6 +8,7 @@ const state = {
   activeThreadCategories: [],
   activeTimelineTab: "dialog",
   dispatchMode: "bridge",
+  cloudRoute: "cloud-via-slack",
   bridgeWatchdog: null,
   commandPoller: null,
   commandPollerInterval: 0,
@@ -18,6 +19,8 @@ const state = {
   hardReloading: false,
   hasLoadedMessagesOnce: false,
   audioUnlocked: false,
+  audioContext: null,
+  replySoundGain: null,
   resetInFlight: false,
   voiceRecognition: null,
   voiceRecognitionActive: false,
@@ -29,7 +32,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260421-0145";
+const BUILD_VERSION = "20260422-0235";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -198,13 +201,24 @@ const storage = {
 
   get dispatchModePreference() {
     const raw = safeLocalStorageGet("codex-links-dispatch-mode") ?? readCookie("codex-links-dispatch-mode");
-    return raw === "cloud" ? "cloud" : "bridge";
+    return raw === "cloud" || raw === "claude" ? raw : "bridge";
   },
 
   set dispatchModePreference(value) {
-    const normalized = value === "cloud" ? "cloud" : "bridge";
+    const normalized = value === "cloud" || value === "claude" ? value : "bridge";
     safeLocalStorageSet("codex-links-dispatch-mode", normalized);
     writeCookie("codex-links-dispatch-mode", normalized);
+  },
+
+  get cloudRoutePreference() {
+    const raw = safeLocalStorageGet("codex-links-cloud-route") ?? readCookie("codex-links-cloud-route");
+    return raw === "direct-openai" ? "direct-openai" : "cloud-via-slack";
+  },
+
+  set cloudRoutePreference(value) {
+    const normalized = value === "direct-openai" ? "direct-openai" : "cloud-via-slack";
+    safeLocalStorageSet("codex-links-cloud-route", normalized);
+    writeCookie("codex-links-cloud-route", normalized);
   },
 
   get selectedRepoId() {
@@ -250,6 +264,10 @@ const refreshButton = document.querySelector("#refresh-button");
 const deliveryResetButton = document.querySelector("#delivery-reset-button");
 const dispatchModeBridgeButton = document.querySelector("#dispatch-mode-bridge");
 const dispatchModeCloudButton = document.querySelector("#dispatch-mode-cloud");
+const dispatchModeClaudeButton = document.querySelector("#dispatch-mode-claude");
+const cloudRouteToggle = document.querySelector("#cloud-route-toggle");
+const cloudRouteSlackButton = document.querySelector("#cloud-route-slack");
+const cloudRouteDirectButton = document.querySelector("#cloud-route-direct");
 const projectNav = document.querySelector("#project-nav");
 const commandForm = document.querySelector("#command-form");
 const commandTargetLabel = document.querySelector("#command-target-label");
@@ -433,7 +451,11 @@ function escapeThreadLabel(thread) {
 }
 
 function getActiveDispatchMode() {
-  return state.dispatchMode === "cloud" ? "cloud" : "bridge";
+  return state.dispatchMode === "cloud" || state.dispatchMode === "claude" ? state.dispatchMode : "bridge";
+}
+
+function getActiveCloudRoute() {
+  return state.cloudRoute === "direct-openai" ? "direct-openai" : "cloud-via-slack";
 }
 
 function normalizeRepoSelectionId(value) {
@@ -537,19 +559,35 @@ function getProjectStatusLabel(repo) {
 }
 
 function getSelectedDispatchModeLabel() {
-  return getActiveDispatchMode() === "cloud" ? "Cloud" : "Bridge";
+  if (getActiveDispatchMode() === "cloud") {
+    return "Codex Cloud";
+  }
+
+  if (getActiveDispatchMode() === "claude") {
+    return "Claude";
+  }
+
+  return "Bridge";
 }
 
 function formatExecutorStatus(status = {}) {
   const selectedModeLabel = getSelectedDispatchModeLabel();
-  const executorLabel = String(status?.executorLabel || "").trim() || "неизвестно";
-  const executorState = String(status?.state || "").trim() || "idle";
+  const selectedMode = getActiveDispatchMode();
 
-  if (getActiveDispatchMode() === "cloud") {
-    return `Статус: ${selectedModeLabel} selected · ${executorLabel} · ${executorState}`;
+  if (selectedMode === "bridge") {
+    const local = status?.localBridge || {};
+    return `Статус: ${selectedModeLabel} selected · local bridge · ${String(local.state || "idle").trim() || "idle"}`;
   }
 
-  return `Статус: ${selectedModeLabel} selected · backend ${executorLabel} · ${executorState}`;
+  if (selectedMode === "claude") {
+    const claude = status?.claudeBridge || {};
+    return `Статус: ${selectedModeLabel} selected · Claude bridge · ${String(claude.state || "idle").trim() || "idle"}`;
+  }
+
+  const cloudLabel = getActiveCloudRoute() === "direct-openai" ? "direct OpenAI" : "via Slack";
+  const executorLabel = String(status?.executorLabel || "").trim() || "неизвестно";
+  const executorState = String(status?.state || "").trim() || "idle";
+  return `Статус: ${selectedModeLabel} selected · ${cloudLabel} · backend ${executorLabel} · ${executorState}`;
 }
 
 function formatWatchdogMessage(rawValue) {
@@ -2070,12 +2108,16 @@ function isCodexDialogMessage(entry) {
 }
 
 function getReleaseNotificationEntry() {
+  const createdAt = BUILD_VERSION.length >= 13
+    ? `${BUILD_VERSION.slice(0, 4)}-${BUILD_VERSION.slice(4, 6)}-${BUILD_VERSION.slice(6, 8)}T${BUILD_VERSION.slice(9, 11)}:${BUILD_VERSION.slice(11, 13)}:00.000Z`
+    : new Date().toISOString();
+
   return {
     id: `release:${BUILD_VERSION}`,
     kind: "notification",
     role: "assistant",
-    text: "готово",
-    createdAt: "2026-04-17T12:30:00.000Z",
+    text: `Build ${BUILD_VERSION} готов к проверке.`,
+    createdAt,
     threadId: "system-notifications",
     threadLabel: "Уведомления",
     systemChannel: "notifications",
@@ -2778,10 +2820,6 @@ function setSubmitProgress(stage = "", tone = "") {
 }
 
 function unlockReplySound() {
-  if (state.audioUnlocked) {
-    return;
-  }
-
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 
   if (!AudioContextClass) {
@@ -2790,17 +2828,20 @@ function unlockReplySound() {
   }
 
   try {
-    const context = new AudioContextClass();
-    const gain = context.createGain();
-    gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.connect(context.destination);
+    if (!state.audioContext || state.audioContext.state === "closed") {
+      state.audioContext = new AudioContextClass();
+      state.replySoundGain = state.audioContext.createGain();
+      state.replySoundGain.gain.setValueAtTime(0.0001, state.audioContext.currentTime);
+      state.replySoundGain.connect(state.audioContext.destination);
+    }
+
+    const context = state.audioContext;
     const resumePromise = typeof context.resume === "function" ? context.resume() : Promise.resolve();
 
     Promise.resolve(resumePromise)
       .catch(() => {})
       .finally(() => {
         state.audioUnlocked = context.state === "running";
-        context.close().catch(() => {});
       });
   } catch {
     // Ignore browsers that block or do not support Web Audio setup here.
@@ -2808,16 +2849,13 @@ function unlockReplySound() {
 }
 
 function playReplySound() {
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-
-  if (!AudioContextClass) {
+  if (!state.audioUnlocked || !state.audioContext || !state.replySoundGain) {
     return;
   }
 
   try {
-    const context = new AudioContextClass();
+    const context = state.audioContext;
     const oscillator = context.createOscillator();
-    const gain = context.createGain();
     const resumePromise = typeof context.resume === "function" ? context.resume() : Promise.resolve();
 
     Promise.resolve(resumePromise)
@@ -2825,28 +2863,25 @@ function playReplySound() {
         oscillator.type = "sine";
         oscillator.frequency.setValueAtTime(880, context.currentTime);
         oscillator.frequency.exponentialRampToValueAtTime(1240, context.currentTime + 0.16);
-        gain.gain.setValueAtTime(0.0001, context.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.07, context.currentTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
+        state.replySoundGain.gain.cancelScheduledValues(context.currentTime);
+        state.replySoundGain.gain.setValueAtTime(0.0001, context.currentTime);
+        state.replySoundGain.gain.exponentialRampToValueAtTime(0.07, context.currentTime + 0.02);
+        state.replySoundGain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
 
-        oscillator.connect(gain);
-        gain.connect(context.destination);
+        oscillator.connect(state.replySoundGain);
         oscillator.start();
         oscillator.stop(context.currentTime + 0.34);
-        oscillator.addEventListener("ended", () => {
-          context.close().catch(() => {});
-        });
       })
-      .catch(() => {
-        context.close().catch(() => {});
-      });
+      .catch(() => {});
   } catch {
     // Ignore browsers that do not allow playback in the current state.
   }
 }
 
 function renderDispatchModeUi() {
-  const isCloud = getActiveDispatchMode() === "cloud";
+  const activeDispatchMode = getActiveDispatchMode();
+  const isCloud = activeDispatchMode === "cloud";
+  const isClaude = activeDispatchMode === "claude";
   const selectedRepo = getMenuRepoById(storage.selectedRepoId);
   const activeRepo = selectedRepo || state.menuRepos[0] || null;
   const hasActiveStatus = Boolean(String(commandStatus?.textContent || "").trim());
@@ -2859,10 +2894,17 @@ function renderDispatchModeUi() {
     storage.selectedRepoId = activeRepo.id;
   }
 
-  dispatchModeBridgeButton?.classList.toggle("is-active", !isCloud);
+  dispatchModeBridgeButton?.classList.toggle("is-active", activeDispatchMode === "bridge");
   dispatchModeCloudButton?.classList.toggle("is-active", isCloud);
-  dispatchModeBridgeButton?.setAttribute("aria-selected", String(!isCloud));
+  dispatchModeClaudeButton?.classList.toggle("is-active", isClaude);
+  dispatchModeBridgeButton?.setAttribute("aria-selected", String(activeDispatchMode === "bridge"));
   dispatchModeCloudButton?.setAttribute("aria-selected", String(isCloud));
+  dispatchModeClaudeButton?.setAttribute("aria-selected", String(isClaude));
+  if (cloudRouteToggle) {
+    cloudRouteToggle.hidden = !isCloud;
+  }
+  cloudRouteSlackButton?.classList.toggle("is-active", getActiveCloudRoute() === "cloud-via-slack");
+  cloudRouteDirectButton?.classList.toggle("is-active", getActiveCloudRoute() === "direct-openai");
 
   if (commandTargetLabel) {
     commandTargetLabel.textContent = "Проект";
@@ -2877,9 +2919,9 @@ function renderDispatchModeUi() {
   if (!hasPendingCommand && !hasActiveStatus) {
     setCommandStatusMessage(
       activeRepo
-        ? isCloud && !isCloudReadyRepo(activeRepo)
+        ? (isCloud || isClaude) && !isCloudReadyRepo(activeRepo) && !isClaude
           ? `Проект: ${formatProjectPath(activeRepo)} · bridge-only, manifest GitHub repo ещё не подтверждён.`
-          : `Проект: ${formatProjectPath(activeRepo)} · ${getProjectStatusLabel(activeRepo)} · отправка через ${isCloud ? "cloud" : "bridge"}.`
+          : `Проект: ${formatProjectPath(activeRepo)} · ${getProjectStatusLabel(activeRepo)} · отправка через ${activeDispatchMode === "cloud" ? getActiveCloudRoute() : activeDispatchMode}.`
         : "Выберите проект."
     );
   }
@@ -3218,21 +3260,12 @@ function noteNewMessages(previousMessages, nextMessages) {
       .map((message) => String(message.id || "").trim())
       .filter(Boolean)
   );
-  const previousNotificationIds = new Set(
-    previousMessages
-      .filter((message) => isNotificationEntry(message))
-      .map((message) => String(message.id || "").trim())
-      .filter(Boolean)
-  );
 
   const hasNewCodexReply = state.hasLoadedMessagesOnce && nextMessages.some((message) => (
     isCodexDialogMessage(message) && !previousCodexReplyIds.has(String(message.id || "").trim())
   ));
-  const hasNewNotification = state.hasLoadedMessagesOnce && nextMessages.some((message) => (
-    isNotificationEntry(message) && !previousNotificationIds.has(String(message.id || "").trim())
-  ));
 
-  if (hasNewCodexReply || hasNewNotification) {
+  if (hasNewCodexReply) {
     playReplySound();
   }
 
@@ -3397,6 +3430,7 @@ async function submitCommand(event) {
   const text = String(commandInput?.value || "").trim();
   const requestedThreadId = getActiveThreadId();
   const requestedDispatchMode = getActiveDispatchMode();
+  const requestedCloudRoute = getActiveCloudRoute();
   const activeRepo = getMenuRepoById(requestedThreadId);
   const fallbackThreadId = requestedThreadId;
   const fallbackThreadLabel = activeRepo ? formatMenuRepoLabel(activeRepo) : getThreadDisplayLabel(fallbackThreadId, "");
@@ -3424,10 +3458,23 @@ async function submitCommand(event) {
 
   setCommandStatusMessage(
     dispatchMode === "cloud"
-      ? "Отправляю через cloud…"
-      : "Отправляю через bridge…"
+      ? `Отправляю через ${requestedCloudRoute}…`
+      : dispatchMode === "claude"
+        ? "Отправляю через Claude bridge…"
+        : "Отправляю через bridge…"
   );
   setSubmitProgress("queued", "queued");
+
+  const requestDispatchMode = dispatchMode === "cloud"
+    ? (requestedCloudRoute === "direct-openai" ? "cloud" : "slack-codex-cloud")
+    : dispatchMode === "claude"
+      ? "claude-bridge"
+      : "local-bridge";
+  const targetExecutionMode = dispatchMode === "cloud"
+    ? requestedCloudRoute
+    : dispatchMode === "claude"
+      ? "claude"
+      : "bridge";
 
   const payload = {
     clientId: storage.clientId,
@@ -3436,8 +3483,8 @@ async function submitCommand(event) {
     threadLabel,
     text,
     previousAssistantReply,
-    dispatchMode: dispatchMode === "cloud" ? "cloud" : "local-bridge",
-    targetExecutionMode: dispatchMode
+    dispatchMode: requestDispatchMode,
+    targetExecutionMode
   };
 
   payload.targetRepo = String(activeRepo.targetRepo || "").trim();
@@ -3491,7 +3538,9 @@ async function submitCommand(event) {
             ? "Команда создана, отправляю в cloud via Slack…"
             : "Команда создана, запускаю cloud executor…"
         )
-      : "Команда создана, жду bridge claim…",
+      : dispatchMode === "claude"
+        ? "Команда создана, жду Claude bridge claim…"
+        : "Команда создана, жду bridge claim…",
     { tone: "processing" }
   );
 
@@ -3562,6 +3611,24 @@ function bindEvents() {
 
     state.dispatchMode = "cloud";
     storage.dispatchModePreference = "cloud";
+    renderDispatchModeUi();
+  });
+
+  dispatchModeClaudeButton?.addEventListener("click", () => {
+    state.dispatchMode = "claude";
+    storage.dispatchModePreference = "claude";
+    renderDispatchModeUi();
+  });
+
+  cloudRouteSlackButton?.addEventListener("click", () => {
+    state.cloudRoute = "cloud-via-slack";
+    storage.cloudRoutePreference = "cloud-via-slack";
+    renderDispatchModeUi();
+  });
+
+  cloudRouteDirectButton?.addEventListener("click", () => {
+    state.cloudRoute = "direct-openai";
+    storage.cloudRoutePreference = "direct-openai";
     renderDispatchModeUi();
   });
 
@@ -3636,7 +3703,9 @@ function bindEvents() {
       ? `${(file.size / 1_000_000).toFixed(1)} MB`
       : `${Math.max(1, Math.round(file.size / 1000))} KB`;
     const suffix = getActiveDispatchMode() === "cloud"
-      ? " · для фото будет использован bridge"
+      ? ` · cloud route: ${getActiveCloudRoute()}`
+      : getActiveDispatchMode() === "claude"
+        ? " · будет использован Claude bridge"
       : "";
     syncPhotoClearButton();
     setPhotoStatusMessage(`Выбрано фото: ${file.name} (${sizeLabel})${suffix}`);
@@ -3726,7 +3795,10 @@ async function boot() {
     !commandThreadSelect ||
     !commandPhotoInput ||
     !commandForm ||
-    !commandStatus
+    !commandStatus ||
+    !dispatchModeClaudeButton ||
+    !cloudRouteSlackButton ||
+    !cloudRouteDirectButton
   ) {
     console.error("Codex Links: missing required DOM nodes during boot.");
     return;
@@ -3737,6 +3809,7 @@ async function boot() {
   }
 
   state.dispatchMode = storage.dispatchModePreference;
+  state.cloudRoute = storage.cloudRoutePreference;
   state.activeTimelineTab = storage.activeTimelineTab;
   renderTimelineTabButtons();
 

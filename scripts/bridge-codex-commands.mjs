@@ -13,13 +13,15 @@ import {
 
 const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
+const BRIDGE_DISPATCH_MODE = process.env.BRIDGE_DISPATCH_MODE || "local-bridge";
+const BRIDGE_EXECUTOR = (process.env.BRIDGE_EXECUTOR || "codex").trim().toLowerCase() === "claude" ? "claude" : "codex";
 const EXEC_TIMEOUT_MS = 4 * 60 * 1000;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const READ_TIMEOUT_MS = 15 * 1000;
 const WRITE_TIMEOUT_MS = 60 * 1000;
 const PHOTO_EXEC_TIMEOUT_MS = 90 * 1000;
 const SNAPSHOT_TIMEOUT_MS = 12 * 1000;
-const BRIDGE_RUN_TIMEOUT_MS = 30 * 60 * 1000;
+const BRIDGE_RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
@@ -785,7 +787,8 @@ async function claimNextCommand() {
       body: JSON.stringify({
         action: "claim",
         processorId: "launchd-bridge",
-        leaseMs: CLAIM_LEASE_MS
+        leaseMs: CLAIM_LEASE_MS,
+        dispatchMode: BRIDGE_DISPATCH_MODE
       })
     }, WRITE_TIMEOUT_MS, "claimNextCommand");
 
@@ -924,7 +927,7 @@ async function markAnswered(commandId, assistantText, completedAt) {
       id: commandId,
       progressStage: "answered",
       completedAt,
-      actualDispatchMode: "bridge",
+      actualDispatchMode: BRIDGE_EXECUTOR === "claude" ? "claude" : "bridge",
       resultAt: completedAt
     })
   }, WRITE_TIMEOUT_MS, "markAnswered");
@@ -951,7 +954,7 @@ async function markFailed(commandId, errorMessage, completedAt) {
       id: commandId,
       progressStage: "failed",
       completedAt,
-      actualDispatchMode: "bridge",
+      actualDispatchMode: BRIDGE_EXECUTOR === "claude" ? "claude" : "bridge",
       errorMessage,
       resultAt: completedAt
     })
@@ -1102,6 +1105,47 @@ function getImmediateAssistantText(result, prompt = "") {
   }
 
   return stdout;
+}
+
+function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
+  const claudeBin = process.env.CLAUDE_BIN || "/Users/andriilitvinov/.npm-global/bin/claude";
+  const instructions = [
+    String(prompt || "").trim(),
+    photoPath
+      ? `Attached local image path: ${photoPath}\nRead that local image file before answering. Base the answer on visible evidence from the image.`
+      : ""
+  ].filter(Boolean).join("\n\n");
+
+  return new Promise((resolve, reject) => {
+    execFile(claudeBin, [
+      "-p",
+      "--output-format",
+      "text",
+      "--permission-mode",
+      "bypassPermissions",
+      "--add-dir",
+      cwd || process.cwd(),
+      instructions
+    ], {
+      cwd: cwd || process.cwd(),
+      timeout: timeoutMs,
+      maxBuffer: 10 * 1024 * 1024,
+      env: {
+        ...process.env
+      }
+    }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(String(stderr || error.message || "Claude CLI failed.")));
+        return;
+      }
+
+      resolve({
+        output: String(stdout || "").trim(),
+        stdout: String(stdout || "").trim(),
+        stderr: String(stderr || "").trim()
+      });
+    });
+  });
 }
 
 function extractTurnText(item) {
@@ -1302,13 +1346,36 @@ const legacyLinksThreadId = await getLegacyLinksThreadId();
 let idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
 
 await publishBridgeStatus({
-  bridgeOnline: true,
+  bridgeOnline: BRIDGE_EXECUTOR !== "claude",
   state: "running",
   lastRunAt: new Date().toISOString(),
   pendingCount: initialQueued.length + initialProcessing.length,
   oldestPendingAt: initialQueued[0]?.createdAt || initialProcessing[0]?.createdAt || "",
   lastDeliveredCount: 0,
-  lastError: ""
+  lastError: "",
+  ...(BRIDGE_EXECUTOR === "claude"
+    ? {
+        claudeBridge: {
+          online: true,
+          state: "running",
+          lastRunAt: new Date().toISOString(),
+          pendingCount: initialQueued.length + initialProcessing.length,
+          oldestPendingAt: initialQueued[0]?.createdAt || initialProcessing[0]?.createdAt || "",
+          lastDeliveredCount: 0,
+          lastError: ""
+        }
+      }
+    : {
+        localBridge: {
+          online: true,
+          state: "running",
+          lastRunAt: new Date().toISOString(),
+          pendingCount: initialQueued.length + initialProcessing.length,
+          oldestPendingAt: initialQueued[0]?.createdAt || initialProcessing[0]?.createdAt || "",
+          lastDeliveredCount: 0,
+          lastError: ""
+        }
+      })
 });
 
 while (true) {
@@ -1341,7 +1408,7 @@ while (true) {
     } = await getResolvedExecutionThread(command, legacyLinksThreadId);
     let threadId = executionThreadId;
 
-    if (!threadId) {
+    if (!threadId && BRIDGE_EXECUTOR !== "claude") {
       throw new Error("Missing threadId.");
     }
 
@@ -1378,11 +1445,18 @@ while (true) {
     try {
       if (photoPath) {
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-          runCodexExecEphemeral(
-            photoPrompt || "See attached image and respond.",
-            photoPath,
-            String(command?.targetWorkspacePath || "").trim() || process.cwd()
-          )
+          BRIDGE_EXECUTOR === "claude"
+            ? runClaudePrint(
+                photoPrompt || "See attached image and respond.",
+                photoPath,
+                String(command?.targetWorkspacePath || "").trim() || process.cwd(),
+                PHOTO_EXEC_TIMEOUT_MS
+              )
+            : runCodexExecEphemeral(
+                photoPrompt || "See attached image and respond.",
+                photoPath,
+                String(command?.targetWorkspacePath || "").trim() || process.cwd()
+              )
         );
         assistantText = getImmediateAssistantText(result, photoPrompt);
 
@@ -1391,23 +1465,41 @@ while (true) {
           const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
           const retryPrompt = buildPhotoRetryPrompt(command, photoOcrText);
           const retryResult = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-            runCodexExecEphemeral(
-              retryPrompt,
-              retryPhotoPath || photoPath,
-              String(command?.targetWorkspacePath || "").trim() || process.cwd()
-            )
+            BRIDGE_EXECUTOR === "claude"
+              ? runClaudePrint(
+                  retryPrompt,
+                  retryPhotoPath || photoPath,
+                  String(command?.targetWorkspacePath || "").trim() || process.cwd(),
+                  PHOTO_EXEC_TIMEOUT_MS
+                )
+              : runCodexExecEphemeral(
+                  retryPrompt,
+                  retryPhotoPath || photoPath,
+                  String(command?.targetWorkspacePath || "").trim() || process.cwd()
+                )
           );
           assistantText = getImmediateAssistantText(retryResult, retryPrompt) || assistantText;
         }
       } else {
-        const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-          runTurnStart(threadId, input, {
-            onHeartbeat: async () => {
-              await updateProgress(command.id, "waiting-for-codex");
-            }
-          })
-        );
-        assistantText = getAssistantTextFromTurn(turn);
+        if (BRIDGE_EXECUTOR === "claude") {
+          const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+            runClaudePrint(
+              prompt || "Handle the task.",
+              "",
+              String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            )
+          );
+          assistantText = getImmediateAssistantText(result, prompt);
+        } else {
+          const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+            runTurnStart(threadId, input, {
+              onHeartbeat: async () => {
+                await updateProgress(command.id, "waiting-for-codex");
+              }
+            })
+          );
+          assistantText = getAssistantTextFromTurn(turn);
+        }
       }
     } catch (appServerError) {
       if (photoPath) {
@@ -1416,16 +1508,29 @@ while (true) {
         });
         const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-          runCodexExecEphemeral(
-            buildPhotoRetryPrompt(command, photoOcrText),
-            retryPhotoPath || photoPath,
-            String(command?.targetWorkspacePath || "").trim() || process.cwd()
-          )
+          BRIDGE_EXECUTOR === "claude"
+            ? runClaudePrint(
+                buildPhotoRetryPrompt(command, photoOcrText),
+                retryPhotoPath || photoPath,
+                String(command?.targetWorkspacePath || "").trim() || process.cwd(),
+                PHOTO_EXEC_TIMEOUT_MS
+              )
+            : runCodexExecEphemeral(
+                buildPhotoRetryPrompt(command, photoOcrText),
+                retryPhotoPath || photoPath,
+                String(command?.targetWorkspacePath || "").trim() || process.cwd()
+              )
         );
         assistantText = getImmediateAssistantText(result, buildPhotoRetryPrompt(command, photoOcrText));
       } else {
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-          runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
+          BRIDGE_EXECUTOR === "claude"
+            ? runClaudePrint(
+                prompt || "Handle the task.",
+                "",
+                String(command?.targetWorkspacePath || "").trim() || process.cwd()
+              )
+            : runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
         );
         assistantText = getImmediateAssistantText(result, prompt);
       }
@@ -1437,16 +1542,23 @@ while (true) {
       await updateProgress(command.id, "retrying-photo-read");
       const retryPhotoPath = await createRetryPhotoVariant(command.id, photoPath);
       const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-        runCodexExecEphemeral(
-          photoPrompt || buildPhotoOnlyPrompt(command, photoOcrText),
-          retryPhotoPath || photoPath,
-          String(command?.targetWorkspacePath || "").trim() || process.cwd()
-        )
+        BRIDGE_EXECUTOR === "claude"
+          ? runClaudePrint(
+              photoPrompt || buildPhotoOnlyPrompt(command, photoOcrText),
+              retryPhotoPath || photoPath,
+              String(command?.targetWorkspacePath || "").trim() || process.cwd(),
+              PHOTO_EXEC_TIMEOUT_MS
+            )
+          : runCodexExecEphemeral(
+              photoPrompt || buildPhotoOnlyPrompt(command, photoOcrText),
+              retryPhotoPath || photoPath,
+              String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            )
       );
       assistantText = getImmediateAssistantText(result);
     }
 
-    if (!assistantText && !photoPath) {
+    if (!assistantText && !photoPath && BRIDGE_EXECUTOR !== "claude") {
       await updateProgress(command.id, "reading-codex-reply");
       assistantText = await getThreadFallbackAssistantText(command, threadId);
     }
@@ -1565,14 +1677,39 @@ const remainingProcessing = remainingCommands
   .sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));
 
 await publishBridgeStatus({
-  bridgeOnline: true,
+  bridgeOnline: BRIDGE_EXECUTOR !== "claude",
   state: failed.length ? "degraded" : "idle",
   lastRunAt: new Date().toISOString(),
   lastSuccessAt: failed.length ? "" : new Date().toISOString(),
   pendingCount: remainingQueued.length + remainingProcessing.length,
   oldestPendingAt: remainingQueued[0]?.createdAt || remainingProcessing[0]?.createdAt || "",
   lastDeliveredCount: completed.length,
-  lastError: failed[0]?.error || ""
+  lastError: failed[0]?.error || "",
+  ...(BRIDGE_EXECUTOR === "claude"
+    ? {
+        claudeBridge: {
+          online: true,
+          state: failed.length ? "degraded" : "idle",
+          lastRunAt: new Date().toISOString(),
+          lastSuccessAt: failed.length ? "" : new Date().toISOString(),
+          pendingCount: remainingQueued.length + remainingProcessing.length,
+          oldestPendingAt: remainingQueued[0]?.createdAt || remainingProcessing[0]?.createdAt || "",
+          lastDeliveredCount: completed.length,
+          lastError: failed[0]?.error || ""
+        }
+      }
+    : {
+        localBridge: {
+          online: true,
+          state: failed.length ? "degraded" : "idle",
+          lastRunAt: new Date().toISOString(),
+          lastSuccessAt: failed.length ? "" : new Date().toISOString(),
+          pendingCount: remainingQueued.length + remainingProcessing.length,
+          oldestPendingAt: remainingQueued[0]?.createdAt || remainingProcessing[0]?.createdAt || "",
+          lastDeliveredCount: completed.length,
+          lastError: failed[0]?.error || ""
+        }
+      })
 });
 
 console.log(JSON.stringify({

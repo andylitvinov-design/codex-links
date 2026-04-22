@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
     <script>
       (function () {
-        var build = "20260421-0145";
+        var build = "20260422-0235";
         var current = new URL(window.location.href);
         var requested = String(current.searchParams.get("v") || "").trim();
         if (requested === build) {
@@ -24,8 +24,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260421-0145" />
-    <link rel="stylesheet" href="/styles.css?v=20260421-0145" />
+    <link rel="stylesheet" href="/styles.css?v=20260422-0235" />
   </head>
   <body>
     <main class="page">
@@ -106,8 +105,16 @@
               </button>
               <button class="dispatch-toggle-button" id="dispatch-mode-cloud" type="button" data-mode="cloud" role="tab" aria-selected="false">
                 <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
-                <span>Cloud</span>
+                <span>Codex Cloud</span>
               </button>
+              <button class="dispatch-toggle-button" id="dispatch-mode-claude" type="button" data-mode="claude" role="tab" aria-selected="false">
+                <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
+                <span>Claude</span>
+              </button>
+            </div>
+            <div class="dispatch-subtoggle" id="cloud-route-toggle" hidden>
+              <button class="dispatch-subtoggle-button is-active" id="cloud-route-slack" type="button" data-route="cloud-via-slack">via Slack</button>
+              <button class="dispatch-subtoggle-button" id="cloud-route-direct" type="button" data-route="direct-openai">direct OpenAI</button>
             </div>
             <div class="command-actions">
               <span id="command-status" class="form-status" aria-live="polite"></span>
@@ -133,7 +140,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260421-0145"></script>
-    <script type="module" src="/app.js?v=20260421-0145"></script>
+    <script type="module" src="/app.js?v=20260422-0235"></script>
   </body>
 </html>
