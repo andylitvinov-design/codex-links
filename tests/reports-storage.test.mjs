@@ -73,3 +73,22 @@ test("upsertReports accepts baseline status when previous snapshot missing", asy
   assert.equal(read.length, 1);
   assert.equal(read[0].status, "baseline");
 });
+
+test("upsertReports preserves report title and summary", async () => {
+  const env = createMockEnv();
+  await upsertReports(env, [{
+    report_id: "management-morning-report-2026-04-23",
+    report_key: "management-morning-report",
+    report_date: "2026-04-23",
+    status: "ok",
+    generated_at: "2026-04-23T11:46:54.152Z",
+    title: "Management Morning Report (2026-04-23)",
+    summary: "Agent 1: focus; Agent 2: action; Daily Changes: item.",
+    metric_changes: []
+  }]);
+
+  const reports = await readReports(env);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].title, "Management Morning Report (2026-04-23)");
+  assert.equal(reports[0].summary, "Agent 1: focus; Agent 2: action; Daily Changes: item.");
+});

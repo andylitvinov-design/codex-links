@@ -1115,6 +1115,21 @@ input[type="radio"] {
   color: #164e63;
 }
 
+.report-item-highlights {
+  margin: 0;
+  padding-left: 22px;
+  line-height: 1.45;
+  color: #0f172a;
+}
+
+.report-item-highlights li {
+  margin-bottom: 6px;
+}
+
+.report-item-highlights li:last-child {
+  margin-bottom: 0;
+}
+
 .report-item-metric-list {
   margin: 0;
   padding-left: 22px;
@@ -1168,6 +1183,7 @@ input[type="radio"] {
 }
 
 .report-item-source-badges span {
+.report-item-source-badges a {
   display: inline-flex;
   align-items: center;
   min-height: 20px;
@@ -1178,6 +1194,12 @@ input[type="radio"] {
   color: #0b5f59;
   font-size: 0.74rem;
   line-height: 1;
+  text-decoration: none;
+}
+
+.report-item-source-badges a:hover {
+  border-color: rgba(15, 118, 110, 0.32);
+  background: rgba(15, 118, 110, 0.12);
 }
 
 .report-item-details {

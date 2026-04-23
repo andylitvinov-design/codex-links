@@ -163,7 +163,9 @@ function normalizeReport(input) {
       .map((change) => JSON.stringify(change))
     )].map((json) => JSON.parse(json)),
     status: normalizeStatus(input.status || ""),
-    generated_at: generatedAt
+    generated_at: generatedAt,
+    title: normalizeText(input.title, 160),
+    summary: normalizeText(input.summary)
   };
 }
 
