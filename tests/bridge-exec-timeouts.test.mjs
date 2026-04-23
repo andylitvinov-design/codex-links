@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   BRIDGE_EXEC_TIMEOUT_MS,
+  BRIDGE_LONG_TEXT_EXEC_TIMEOUT_MS,
   BRIDGE_PHOTO_EXEC_TIMEOUT_MS,
   getBridgeExecTimeoutMs
 } from "../scripts/_lib/bridge-exec-timeouts.mjs";
@@ -10,6 +11,12 @@ import {
 test("getBridgeExecTimeoutMs keeps default timeout for text-only bridge commands", () => {
   assert.equal(getBridgeExecTimeoutMs({ photo: null }), BRIDGE_EXEC_TIMEOUT_MS);
   assert.equal(getBridgeExecTimeoutMs({ photoAttached: false }), BRIDGE_EXEC_TIMEOUT_MS);
+});
+
+test("getBridgeExecTimeoutMs uses longer timeout for large text-only commands", () => {
+  assert.equal(getBridgeExecTimeoutMs({
+    text: "x".repeat(501)
+  }), BRIDGE_LONG_TEXT_EXEC_TIMEOUT_MS);
 });
 
 test("getBridgeExecTimeoutMs uses longer timeout for commands with attached photo bytes", () => {

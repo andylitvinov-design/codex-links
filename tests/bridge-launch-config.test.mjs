@@ -94,7 +94,18 @@ test("bridge loop supports bounded in-flight workers instead of a strictly seria
 
   assert.match(source, /const MAX_IN_FLIGHT_BRIDGE_TASKS = 2;/);
   assert.match(source, /const inFlightTasks = new Set\(\);/);
-  assert.match(source, /while \(inFlightTasks\.size < MAX_IN_FLIGHT_BRIDGE_TASKS\)/);
+  assert.match(source, /textLaneTask/);
+  assert.match(source, /generalLaneTask/);
+  assert.match(source, /textOnly: true/);
+});
+
+test("bridge loop keeps retrying after claim timeouts instead of aborting the runner", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /await appendBridgeErrorLog\("claimNextCommand\.loop", error/);
+  assert.match(source, /await sleep\(IDLE_DRAIN_POLL_MS\);/);
+  assert.match(source, /lane:\s*"text"/);
+  assert.match(source, /lane:\s*"general"/);
 });
 
 test("bridge executor tolerates benign stdin warnings when Codex already produced usable output", async () => {
@@ -109,4 +120,13 @@ test("bridge executor falls back to immediate assistant text when the Codex outp
   const source = await readFile(bridgeScriptPath, "utf8");
 
   assert.match(source, /if \(readOutputError && !getImmediateAssistantText\(result, prompt\)\) \{/);
+});
+
+test("bridge runner guards the photo preparation phase with a dedicated timeout and progress stage", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /const PHOTO_PREP_TIMEOUT_MS = 60 \* 1000;/);
+  assert.match(source, /await updateProgress\(command\.id, "waiting-for-photo"/);
+  assert.match(source, /lastDiagnosticCode: "bridge_waiting_photo"/);
+  assert.match(source, /photoPhaseTimeout/);
 });
