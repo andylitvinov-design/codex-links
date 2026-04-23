@@ -573,6 +573,47 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
   return fallback.value || command;
 }
 
+function isSlackCommandAlreadyPosted(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
+
+  return (
+    command?.dispatchMode === DISPATCH_MODE_SLACK
+    && (status === "dispatched" || status === "processing")
+    && Boolean(String(command?.slackChannelId || "").trim())
+    && Boolean(String(command?.slackThreadTs || command?.slackMessageTs || "").trim())
+  );
+}
+
+function isRecentSlackDispatchInFlight(command) {
+  if (command?.dispatchMode !== DISPATCH_MODE_SLACK) {
+    return false;
+  }
+
+  const status = String(command?.status || "").trim().toLowerCase();
+  const progressStage = String(command?.progressStage || "").trim().toLowerCase();
+  const dispatchStartedAt = Date.parse(String(command?.dispatchStartedAt || command?.progressUpdatedAt || "").trim());
+  const hasSlackThread = Boolean(String(command?.slackChannelId || "").trim())
+    && Boolean(String(command?.slackThreadTs || command?.slackMessageTs || "").trim());
+
+  if (hasSlackThread) {
+    return false;
+  }
+
+  if (status !== "queued" && status !== "processing") {
+    return false;
+  }
+
+  if (progressStage !== "dispatching") {
+    return false;
+  }
+
+  if (Number.isNaN(dispatchStartedAt)) {
+    return false;
+  }
+
+  return (Date.now() - dispatchStartedAt) < SLACK_DISPATCH_GRACE_MS;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -880,21 +921,22 @@ async function fallbackSlackActorValidationFailure(env, command, commandError) {
 
 export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   const config = runtimeConfig || await readRuntimeConfig(env);
-  const dispatchMode = command?.dispatchMode || getConfiguredDispatchMode(config);
+  const latestCommand = await getCommandById(env, command?.id) || command;
+  const dispatchMode = latestCommand?.dispatchMode || getConfiguredDispatchMode(config);
   const dispatchStartedAt = new Date().toISOString();
 
   if (dispatchMode === DISPATCH_MODE_CLOUD) {
     return {
       ok: true,
-      command: await executeDirectCloudCommand(env, command)
+      command: await executeDirectCloudCommand(env, latestCommand)
     };
   }
 
   if (dispatchMode !== DISPATCH_MODE_SLACK) {
     const staged = await upsertCommandDispatchState(env, {
-      id: command.id,
+      id: latestCommand.id,
       dispatchMode,
-      status: command.status || "queued",
+      status: latestCommand.status || "queued",
       progressStage: "queued",
       dispatchStartedAt
     });
@@ -924,20 +966,37 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     };
   }
 
+  if (isSlackCommandAlreadyPosted(latestCommand) || isRecentSlackDispatchInFlight(latestCommand)) {
+    try {
+      await syncSpecificSlackReplies(env, config, [latestCommand], {
+        budgetMs: READ_SLACK_API_TIMEOUT_MS,
+        timeoutMs: READ_SLACK_API_TIMEOUT_MS
+      });
+    } catch (error) {
+      logCommandError("dispatchCommandIfNeeded.syncSpecificSlackReplies", error, { commandId: latestCommand?.id || "" });
+    }
+
+    return {
+      ok: true,
+      command: await getCommandById(env, latestCommand.id) || latestCommand
+    };
+  }
+
   try {
     await upsertCommandDispatchState(env, {
-      id: command.id,
+      id: latestCommand.id,
       dispatchMode,
-      status: command.status || "queued",
+      status: latestCommand.status || "queued",
       progressStage: "dispatching",
       dispatchStartedAt,
       actorValidationStartedAt: new Date().toISOString()
     });
 
-    const published = await postSlackCommand(config, command, getSlackCodexMention(config));
-    if (isPhotoSlackDispatchFailure(command, published)) {
+    const dispatchingCommand = await getCommandById(env, latestCommand.id) || latestCommand;
+    const published = await postSlackCommand(config, dispatchingCommand, getSlackCodexMention(config));
+    if (isPhotoSlackDispatchFailure(dispatchingCommand, published)) {
       const stagedFailure = await markCommandDispatched(env, {
-        id: command.id,
+        id: latestCommand.id,
         dispatchMode,
         progressStage: "dispatched",
         dispatchStartedAt,
@@ -962,7 +1021,7 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     }
 
     const dispatched = await markCommandDispatched(env, {
-      id: command.id,
+      id: latestCommand.id,
       dispatchMode,
       progressStage: "dispatched",
       dispatchStartedAt,
@@ -979,9 +1038,9 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       dispatchedAt: new Date().toISOString()
     });
 
-    await storeSlackThreadCommandMap(env, published.channel, published.threadTs, command.id);
-    await storeSlackThreadCommandMap(env, published.channel, published.ts, command.id);
-    await storeSlackActiveChannelCommand(env, published.channel, command.id);
+    await storeSlackThreadCommandMap(env, published.channel, published.threadTs, latestCommand.id);
+    await storeSlackThreadCommandMap(env, published.channel, published.ts, latestCommand.id);
+    await storeSlackActiveChannelCommand(env, published.channel, latestCommand.id);
 
     await refreshBridgeStatusFromCommands(env, {
       dispatchMode,
@@ -1019,16 +1078,16 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
           fallback: ""
         };
 
-    if (isSlackActorValidationFailure(detail) && canFallbackToLocalBridge(command)) {
+    if (isSlackActorValidationFailure(detail) && canFallbackToLocalBridge(latestCommand)) {
       return {
         ok: true,
-        command: await fallbackSlackActorValidationFailure(env, command, detail)
+        command: await fallbackSlackActorValidationFailure(env, latestCommand, detail)
       };
     }
 
     return {
       ok: true,
-      command: await markSlackCloudCommandFailed(env, command, {
+      command: await markSlackCloudCommandFailed(env, latestCommand, {
         ...detail,
         message: detail.message || "Cloud via Slack dispatch failed.",
         detail: detail.detail || errorMessage,
@@ -1309,17 +1368,6 @@ async function reconcileCommandsForRead(env, runtimeConfig) {
     logCommandError("reconcileCommandsForRead.runCommandMaintenance", error);
     return;
   }
-
-  for (const commandId of maintenance?.commandsToDispatch || []) {
-    try {
-      const command = await getCommandById(env, commandId);
-      if (command) {
-        await dispatchCommandIfNeeded(env, command, runtimeConfig);
-      }
-    } catch (error) {
-      logCommandError("reconcileCommandsForRead.dispatchCommandIfNeeded", error, { commandId });
-    }
-  }
 }
 
 export async function onRequest(context) {
@@ -1497,7 +1545,8 @@ export async function onRequest(context) {
     const claimed = await claimNextCommand(env, {
       processorId: payload?.processorId,
       leaseMs: payload?.leaseMs,
-      dispatchMode: payload?.dispatchMode
+      dispatchMode: payload?.dispatchMode,
+      textOnly: payload?.textOnly
     });
 
     if (!claimed.ok) {
@@ -1509,11 +1558,13 @@ export async function onRequest(context) {
     if (!claimed.value) {
       const snapshot = await readCommands(env);
       const requestedDispatchMode = normalizeDispatchMode(payload?.dispatchMode || DISPATCH_MODE_LOCAL);
+      const textOnly = Boolean(payload?.textOnly);
+      const claimableForDiagnostics = (command) => !textOnly || !command?.photoAttached;
       const queuedRequested = snapshot.filter((command) =>
-        command.dispatchMode === requestedDispatchMode && command.status === "queued"
+        command.dispatchMode === requestedDispatchMode && command.status === "queued" && claimableForDiagnostics(command)
       );
       const processingRequested = snapshot.filter((command) =>
-        command.dispatchMode === requestedDispatchMode && command.status === "processing"
+        command.dispatchMode === requestedDispatchMode && command.status === "processing" && claimableForDiagnostics(command)
       );
       const oldestQueuedRequested = [...queuedRequested]
         .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")))[0] || null;
@@ -1526,6 +1577,7 @@ export async function onRequest(context) {
 
       claimDiagnostics = {
         requestedDispatchMode,
+        textOnly,
         queuedRequestedCount: queuedRequested.length,
         processingRequestedCount: processingRequested.length,
         queuedRequestedIds: queuedRequested.slice(0, 5).map((command) => command.id),

@@ -29,6 +29,7 @@ const MAINTENANCE_INTERVAL_MS = 60 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
 const MAX_IN_FLIGHT_BRIDGE_TASKS = 2;
+const PHOTO_PREP_TIMEOUT_MS = 60 * 1000;
 const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
 const LOG_DIR = `${process.env.HOME || ""}/Library/Logs`;
 const BRIDGE_LOG_PATH = `${LOG_DIR}/codex-links-bridge.log`;
@@ -267,6 +268,61 @@ async function getResolvedExecutionThread(command, legacyLinksThreadId = "") {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function photoPhaseTimeout(task, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || PHOTO_PREP_TIMEOUT_MS);
+  const commandId = String(options.commandId || "").trim();
+  const phase = String(options.phase || "photo-prep").trim() || "photo-prep";
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      const error = new Error(`photo_wait_timeout:${phase}`);
+      error.code = "photo_wait_timeout";
+      error.phase = phase;
+      error.commandId = commandId;
+      void appendBridgeErrorLog("photoPhaseTimeout", error, {
+        commandId,
+        phase,
+        timeoutMs
+      });
+      reject(error);
+    }, timeoutMs);
+
+    timer.unref?.();
+
+    Promise.resolve()
+      .then(task)
+      .then((value) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function isPhotoWaitTimeoutError(error) {
+  return String(error?.code || "").trim() === "photo_wait_timeout"
+    || /photo_wait_timeout/i.test(String(error?.message || "").trim());
 }
 
 async function runWithProgressHeartbeat(commandId, progressStage, task, processorId = "") {
@@ -594,7 +650,7 @@ function buildInput(command, photoPath, ocrText = "") {
   return items;
 }
 
-function runCodexResume(threadId, prompt, photoPath) {
+function runCodexResume(threadId, prompt, photoPath, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS) {
   const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
   return new Promise((resolve, reject) => {
     const outputPath = join(tmpdir(), `codex-links-output-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
@@ -617,7 +673,7 @@ function runCodexResume(threadId, prompt, photoPath) {
 
     execFile(codexBin, args, {
       cwd: process.cwd(),
-      timeout: BRIDGE_EXEC_TIMEOUT_MS,
+      timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"]
     }, async (error, stdout, stderr) => {
@@ -795,7 +851,9 @@ async function fetchCommandById(commandId) {
   return data?.command || null;
 }
 
-async function claimNextCommand() {
+async function claimNextCommand(options = {}) {
+  const textOnly = Boolean(options.textOnly);
+
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
       method: "POST",
@@ -807,7 +865,8 @@ async function claimNextCommand() {
         action: "claim",
         processorId: "launchd-bridge",
         leaseMs: CLAIM_LEASE_MS,
-        dispatchMode: BRIDGE_DISPATCH_MODE
+        dispatchMode: BRIDGE_DISPATCH_MODE,
+        textOnly
       })
     }, WRITE_TIMEOUT_MS, "claimNextCommand");
 
@@ -835,6 +894,7 @@ async function claimNextCommand() {
       await appendBridgeErrorLog("claimNextCommand.nullWithQueued", new Error("Claim returned null while queued commands exist for the requested dispatch mode."), {
         attempt,
         bridgeDispatchMode: BRIDGE_DISPATCH_MODE,
+        textOnly,
         requestedDispatchMode: String(data?.claimDiagnostics?.requestedDispatchMode || "").trim(),
         queuedRequestedCount,
         processingRequestedCount,
@@ -1238,6 +1298,13 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_
   ];
 
   return new Promise((resolve, reject) => {
+    void logBridgeInfo("claudePrint.start", {
+      cwd: cwd || process.cwd(),
+      timeoutMs,
+      photoAttached: Boolean(photoPath),
+      promptChars: instructions.length
+    });
+
     execFile(claudeBin, [
       "-p",
       "--output-format",
@@ -1255,16 +1322,32 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_
         ...process.env
       }
     }, (error, stdout, stderr) => {
+      const result = {
+        output: String(stdout || "").trim(),
+        stdout: String(stdout || "").trim(),
+        stderr: String(stderr || "").trim()
+      };
+
       if (error) {
+        void logBridgeError("claudePrint.error", error, {
+          cwd: cwd || process.cwd(),
+          timeoutMs,
+          photoAttached: Boolean(photoPath),
+          stdoutChars: result.stdout.length,
+          stderrChars: result.stderr.length
+        });
         reject(new Error(String(stderr || error.message || "Claude CLI failed.")));
         return;
       }
 
-      resolve({
-        output: String(stdout || "").trim(),
-        stdout: String(stdout || "").trim(),
-        stderr: String(stderr || "").trim()
+      void logBridgeInfo("claudePrint.finish", {
+        cwd: cwd || process.cwd(),
+        timeoutMs,
+        photoAttached: Boolean(photoPath),
+        stdoutChars: result.stdout.length,
+        stderrChars: result.stderr.length
       });
+      resolve(result);
     });
   });
 }
@@ -1357,7 +1440,7 @@ async function runTurnStart(threadId, input, options = {}) {
       throw new Error("turn/start did not return turn id.");
     }
 
-    return waitForTurnCompletion(request, threadId, turnId, BRIDGE_EXEC_TIMEOUT_MS, options);
+    return waitForTurnCompletion(request, threadId, turnId, Number(options.timeoutMs || BRIDGE_EXEC_TIMEOUT_MS), options);
   });
 }
 
@@ -1427,6 +1510,8 @@ const completed = [];
 const failed = [];
 const syncedMessages = [];
 const inFlightTasks = new Set();
+let textLaneTask = null;
+let generalLaneTask = null;
 
 function buildRunnerHeartbeatStatus() {
   const now = new Date().toISOString();
@@ -1571,9 +1656,42 @@ async function processClaimedCommand(command) {
       throw new Error("Missing threadId.");
     }
 
-    await updateProgress(command.id, "preparing-input", {}, command.processorId);
-    const photoPath = await materializePhoto(command);
-    const photoOcrText = photoPath ? normalizePhotoOcrHint(await extractPhotoOcrText(command.id, photoPath)) : "";
+    let photoPath = null;
+    let photoOcrText = "";
+
+    if (command.photo) {
+      await updateProgress(command.id, "waiting-for-photo", {
+        photoAttached: true,
+        photoBytesPresent: Boolean(command.photo.hasDataUrl || command.photo.dataUrl),
+        photoSeenByBridge: true,
+        photoProcessed: false,
+        lastDiagnosticCode: "bridge_waiting_photo",
+        lastDiagnosticDetail: "Bridge is preparing the attached photo for delivery."
+      }, command.processorId);
+
+      const photoPrep = await runWithProgressHeartbeat(command.id, "waiting-for-photo", () =>
+        photoPhaseTimeout(async () => {
+          const preparedPhotoPath = await materializePhoto(command);
+          const preparedPhotoOcrText = preparedPhotoPath
+            ? normalizePhotoOcrHint(await extractPhotoOcrText(command.id, preparedPhotoPath))
+            : "";
+
+          return {
+            photoPath: preparedPhotoPath,
+            photoOcrText: preparedPhotoOcrText
+          };
+        }, {
+          commandId: command.id,
+          phase: "prepare-photo"
+        })
+      , command.processorId);
+
+      photoPath = photoPrep?.photoPath || null;
+      photoOcrText = String(photoPrep?.photoOcrText || "").trim();
+    } else {
+      await updateProgress(command.id, "preparing-input", {}, command.processorId);
+    }
+
     const input = buildInput(command, photoPath, photoOcrText);
 
     if (!input.length) {
@@ -1596,7 +1714,10 @@ async function processClaimedCommand(command) {
           photoAttached: true,
           photoBytesPresent: true,
           photoSeenByBridge: true,
-          photoProcessed: true
+          photoProcessed: true,
+          lastDiagnosticCode: "",
+          lastDiagnosticDetail: "",
+          photoUnsupportedReason: ""
         }
       : {}, command.processorId);
     let assistantText = "";
@@ -1653,6 +1774,7 @@ async function processClaimedCommand(command) {
         } else {
           const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
             runTurnStart(threadId, input, {
+              timeoutMs: commandExecTimeoutMs,
               onHeartbeat: async () => {
                 await updateProgress(command.id, "waiting-for-codex", {}, command.processorId);
               }
@@ -1686,11 +1808,11 @@ async function processClaimedCommand(command) {
         const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
           BRIDGE_EXECUTOR === "claude"
             ? runClaudePrint(
-                prompt || "Handle the task.",
-                "",
-                String(command?.targetWorkspacePath || "").trim() || process.cwd()
-              )
-              : runCodexResume(threadId, prompt || "See attached image and respond.", photoPath)
+              prompt || "Handle the task.",
+              "",
+              String(command?.targetWorkspacePath || "").trim() || process.cwd()
+            )
+              : runCodexResume(threadId, prompt || "See attached image and respond.", photoPath, commandExecTimeoutMs)
         , command.processorId);
         assistantText = getImmediateAssistantText(result, prompt);
       }
@@ -1782,6 +1904,19 @@ async function processClaimedCommand(command) {
       } catch {}
     }
 
+    if (command?.photo && isPhotoWaitTimeoutError(error)) {
+      try {
+        await updateProgress(command.id, "waiting-for-photo", {
+          photoAttached: true,
+          photoBytesPresent: Boolean(command.photo?.hasDataUrl || command.photo?.dataUrl || command.photoBytesPresent),
+          photoSeenByBridge: true,
+          photoProcessed: false,
+          lastDiagnosticCode: "bridge_waiting_photo",
+          lastDiagnosticDetail: "Bridge photo preparation timed out before delivery started."
+        }, command.processorId);
+      } catch {}
+    }
+
     const ackedAt = new Date().toISOString();
     const threadId = (await getResolvedExecutionThread(command, legacyLinksThreadId)).executionThreadId
       || String(command?.threadId || "").trim()
@@ -1843,19 +1978,74 @@ function trackInFlightTask(task) {
   return wrapped;
 }
 
+function startLaneTask(lane, command) {
+  const task = trackInFlightTask(processClaimedCommand(command));
+
+  if (lane === "text") {
+    textLaneTask = task;
+  } else {
+    generalLaneTask = task;
+  }
+
+  task.finally(() => {
+    if (lane === "text" && textLaneTask === task) {
+      textLaneTask = null;
+      return;
+    }
+
+    if (lane === "general" && generalLaneTask === task) {
+      generalLaneTask = null;
+    }
+  });
+
+  return task;
+}
+
 while (true) {
   let claimedAny = false;
 
-  while (inFlightTasks.size < MAX_IN_FLIGHT_BRIDGE_TASKS) {
-    const command = await claimNextCommand();
+  if (!textLaneTask) {
+    let command = null;
 
-    if (!command) {
-      break;
+    try {
+      command = await claimNextCommand({ textOnly: true });
+    } catch (error) {
+      await appendBridgeErrorLog("claimNextCommand.loop", error, {
+        bridgeDispatchMode: BRIDGE_DISPATCH_MODE,
+        inFlightCount: inFlightTasks.size,
+        lane: "text",
+        textOnly: true
+      });
+      await sleep(IDLE_DRAIN_POLL_MS);
     }
 
-    claimedAny = true;
-    idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
-    trackInFlightTask(processClaimedCommand(command));
+    if (command) {
+      claimedAny = true;
+      idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
+      startLaneTask("text", command);
+    }
+  }
+
+  if (!generalLaneTask) {
+    let command = null;
+
+    try {
+      command = await claimNextCommand();
+    } catch (error) {
+      await appendBridgeErrorLog("claimNextCommand.loop", error, {
+        bridgeDispatchMode: BRIDGE_DISPATCH_MODE,
+        inFlightCount: inFlightTasks.size,
+        lane: "general",
+        textOnly: false
+      });
+      await sleep(IDLE_DRAIN_POLL_MS);
+    }
+
+    if (command) {
+      claimedAny = true;
+      idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
+      startLaneTask("general", command);
+    }
   }
 
   if (claimedAny) {

@@ -83,6 +83,139 @@ test("claimNextCommand recomputes active thread locks from a fresh snapshot when
   assert.equal(claimed.value.status, "processing");
 });
 
+test("claimNextCommand does not let an in-flight photo analysis block a same-thread text command", async () => {
+  const env = createMockEnv();
+  const nowIso = new Date().toISOString();
+
+  await writeCommands(env, [
+    {
+      id: "cmd-photo-processing",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "посмотри внимательно и скажи что здесь не так",
+      createdAt: nowIso,
+      progressUpdatedAt: nowIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "bridge",
+      status: "processing",
+      progressStage: "waiting-for-photo",
+      processorId: "test-bridge",
+      processingStartedAt: nowIso,
+      processingLeaseUntil: new Date(Date.now() + 60_000).toISOString(),
+      photo: {
+        dataUrl: "data:image/jpeg;base64,AA=="
+      }
+    },
+    {
+      id: "cmd-text-queued",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "сделай короткий summary по логу",
+      createdAt: nowIso,
+      progressUpdatedAt: nowIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued"
+    }
+  ]);
+
+  const claimed = await claimNextCommand(env, {
+    processorId: "test-bridge",
+    leaseMs: 30_000
+  });
+
+  assert.equal(claimed.ok, true);
+  assert.ok(claimed.value);
+  assert.equal(claimed.value.id, "cmd-text-queued");
+  assert.equal(claimed.value.status, "processing");
+});
+
+test("claimNextCommand with textOnly ignores queued photo commands", async () => {
+  const env = createMockEnv();
+  const nowIso = new Date().toISOString();
+
+  await writeCommands(env, [
+    {
+      id: "cmd-photo-queued",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "что на фото",
+      createdAt: nowIso,
+      progressUpdatedAt: nowIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued",
+      photo: {
+        dataUrl: "data:image/jpeg;base64,AA=="
+      }
+    },
+    {
+      id: "cmd-text-queued-text-only",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "summarize the error log",
+      createdAt: nowIso,
+      progressUpdatedAt: nowIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued"
+    }
+  ]);
+
+  const claimed = await claimNextCommand(env, {
+    processorId: "test-bridge",
+    leaseMs: 30_000,
+    textOnly: true
+  });
+
+  assert.equal(claimed.ok, true);
+  assert.ok(claimed.value);
+  assert.equal(claimed.value.id, "cmd-text-queued-text-only");
+});
+
+test("claimNextCommand with textOnly returns null when only photo commands are queued", async () => {
+  const env = createMockEnv();
+  const nowIso = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-photo-only-queued",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "read the image",
+    createdAt: nowIso,
+    progressUpdatedAt: nowIso,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued",
+    photo: {
+      dataUrl: "data:image/jpeg;base64,AA=="
+    }
+  }]);
+
+  const claimed = await claimNextCommand(env, {
+    processorId: "test-bridge",
+    leaseMs: 30_000,
+    textOnly: true
+  });
+
+  assert.equal(claimed.ok, true);
+  assert.equal(claimed.value, null);
+});
+
 test("updateCommandProgress retries transient KV write rate limits", async () => {
   const store = new Map();
   let putAttempts = 0;

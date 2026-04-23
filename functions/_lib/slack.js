@@ -126,6 +126,15 @@ function getSlackActorValidationCacheTtlMs(env, fallback = DEFAULT_SLACK_ACTOR_V
   return configured;
 }
 
+function isSlackActorLiveProbeEnabled(env, options = {}) {
+  if (typeof options.liveProbe === "boolean") {
+    return options.liveProbe;
+  }
+
+  const configured = normalizeText(env?.SLACK_ACTOR_LIVE_PROBE).toLowerCase();
+  return configured === "1" || configured === "true" || configured === "yes" || configured === "on";
+}
+
 function getSlackActorValidationCacheKey(channel, targetUserId) {
   return `${SLACK_ACTOR_VALIDATION_CACHE_KEY_PREFIX}${normalizeText(channel)}:${normalizeText(targetUserId)}`;
 }
@@ -144,16 +153,17 @@ async function readSlackActorValidationCache(env, channel, targetUserId) {
   }
 
   const normalized = buildSlackActorValidationResult(cached);
+  const checkedAt = normalized.lastValidatedAt;
 
   if (
-    normalized.validationStatus !== "validated"
+    !["validated", "unverified"].includes(normalized.validationStatus)
     || normalized.configuredUserId !== normalizeText(targetUserId)
-    || !normalized.lastValidatedAt
+    || !checkedAt
   ) {
     return null;
   }
 
-  const ageMs = Date.now() - Date.parse(normalized.lastValidatedAt);
+  const ageMs = Date.now() - Date.parse(checkedAt);
 
   if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > getSlackActorValidationCacheTtlMs(env)) {
     return null;
@@ -165,7 +175,7 @@ async function readSlackActorValidationCache(env, channel, targetUserId) {
 async function writeSlackActorValidationCache(env, channel, targetUserId, result) {
   const store = env?.LINKS_STORE;
 
-  if (!store?.put || !result || result.validationStatus !== "validated") {
+  if (!store?.put || !result || !["validated", "unverified"].includes(result.validationStatus)) {
     return;
   }
 
@@ -607,6 +617,19 @@ export async function validateSlackCodexActor(env, options = {}) {
     return result;
   }
 
+  if (!isSlackActorLiveProbeEnabled(env, options)) {
+    const result = buildSlackActorValidationResult({
+      validationStatus: "unverified",
+      code: "codex_target_actor_unverified",
+      message: "Configured Slack target user has no recent confirmed activity.",
+      detail: "Live actor probe is disabled. Dispatch can continue, but Slack actor verification remains unconfirmed until a real worker reply is observed.",
+      configuredUserId: targetUserId,
+      lastValidatedAt: new Date().toISOString()
+    });
+    await writeSlackActorValidationCache(env, channel, targetUserId, result);
+    return result;
+  }
+
   const timeoutMs = Number.isFinite(Number(options.timeoutMs))
     ? Number(options.timeoutMs)
     : getSlackActorProbeTimeoutMs(env);
@@ -654,16 +677,20 @@ export async function validateSlackCodexActor(env, options = {}) {
     await sleep(pollIntervalMs);
   }
 
-  return buildSlackActorValidationResult({
-    validationStatus: "invalid",
+  const result = buildSlackActorValidationResult({
+    validationStatus: "unverified",
     code: "codex_target_actor_unverified",
     message: "Configured Slack target user did not acknowledge the live probe.",
-    detail: "Slack membership is not enough. The configured target did not reply in-thread during the actor validation probe window.",
+    detail: "Slack membership is confirmed, but the target did not reply in-thread during the probe window. Dispatch can continue and will still fall back to bridge if no live Codex ack appears.",
     configuredUserId: targetUserId,
     probeChannelId,
     probeMessageTs,
-    probeThreadTs
+    probeThreadTs,
+    lastValidatedAt: new Date().toISOString()
   });
+
+  await writeSlackActorValidationCache(env, channel, targetUserId, result);
+  return result;
 }
 
 async function resolveStoredCodexThreadId(env, command) {
@@ -786,7 +813,7 @@ export async function postSlackCommand(env, command, mention) {
 
   const actorValidation = await validateSlackCodexActor(env);
 
-  if (actorValidation.validationStatus !== "validated") {
+  if (actorValidation.validationStatus === "invalid") {
     throw withCommandError(
       new Error(actorValidation.detail || actorValidation.message || "Configured Slack target actor is not validated."),
       {

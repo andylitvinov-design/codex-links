@@ -43,7 +43,7 @@ const state = {
   replyContext: null
 };
 
-const BUILD_VERSION = "20260423-1712";
+const BUILD_VERSION = "20260423-1828";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1623,15 +1623,15 @@ function getCommandAnswerTitle(command) {
   const executor = getCommandActualExecutor(command);
 
   if (executor === "bridge") {
-    return "Ответ Codex - codex bridge";
+    return "Ответ Codex - Bridge";
   }
 
   if (executor === "cloud") {
-    return "Ответ Codex - cloud";
+    return "Ответ Codex - Cloud";
   }
 
   if (executor === "claude") {
-    return "Ответ Codex - claude code";
+    return "Ответ Claude";
   }
 
   return "Ответ Codex";
@@ -2359,9 +2359,7 @@ function renderAssistantReplyMarkup(replyEntry) {
   const message = replyEntry?.message || null;
   const linkedCommand = replyEntry?.linkedCommand || null;
   const messageId = String(message?.id || "").trim();
-  const title = linkedCommand?.threadLabel
-    ? `Ответ Codex · ${linkedCommand.threadLabel}`
-    : getCommandAnswerTitle(linkedCommand);
+  const title = getCommandAnswerTitle(linkedCommand);
   const replyThreadId = String(linkedCommand?.threadId || message?.threadId || "").trim();
 
   return `
@@ -2385,14 +2383,30 @@ function renderAssistantReplyMarkup(replyEntry) {
 }
 
 function bindAssistantReplyInteractions(container, replies) {
+  const replyEntriesById = new Map(
+    (Array.isArray(replies) ? replies : [])
+      .map((replyEntry) => {
+        const messageId = String(replyEntry?.message?.id || "").trim();
+        return messageId ? [messageId, replyEntry] : null;
+      })
+      .filter(Boolean)
+  );
+
   container.querySelectorAll(".command-answer-reply").forEach((button) => {
     button.addEventListener("click", () => {
       const messageId = String(button.dataset.replyMessageId || "").trim();
-      const threadId = canonicalizeRepoSelectionId(button.dataset.threadId || "");
+      const replyEntry = replyEntriesById.get(messageId) || null;
+      const threadId = canonicalizeRepoSelectionId(
+        button.dataset.threadId
+        || replyEntry?.linkedCommand?.threadId
+        || replyEntry?.message?.threadId
+        || ""
+      );
       const message = state.messages.find((entry) => String(entry?.id || "").trim() === messageId);
-      const replyText = String(message?.text || "").trim();
+      const replyText = String(replyEntry?.text || message?.text || "").trim();
 
       if (!replyText) {
+        setCommandStatusMessage("Не удалось прочитать текст ответа Codex для reply.", { tone: "error" });
         return;
       }
 
@@ -2409,6 +2423,7 @@ function bindAssistantReplyInteractions(container, replies) {
 
       renderReplyContext();
       commandInput?.focus();
+      replyContextBar?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       setCommandStatusMessage("Следующее сообщение уйдёт как ответ на выбранный reply Codex.", { tone: "processing" });
     });
   });
@@ -2759,7 +2774,8 @@ function renderCommands() {
       const command = entry.command;
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
-      const deliveryStatus = getCommandDeliveryStatus(command);
+      const hasReplies = Array.isArray(entry.replies) && entry.replies.length > 0;
+      const deliveryStatus = hasReplies ? null : getCommandDeliveryStatus(command);
       const failureMessage = getCommandFailureMessage(command);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
 
@@ -2784,9 +2800,10 @@ function renderCommands() {
     const linkedCommand = entry.linkedCommand;
     const isAssistant = entry.role === "assistant";
     const hasPhoto = Boolean(linkedCommand?.photo);
+    const hasReplies = Array.isArray(entry.replies) && entry.replies.length > 0;
     const deliveryStatus = isAssistant
       ? null
-      : (getCommandDeliveryStatus(linkedCommand) || getFallbackMessageDeliveryStatus(message?.commandId));
+      : (hasReplies ? null : (getCommandDeliveryStatus(linkedCommand) || getFallbackMessageDeliveryStatus(message?.commandId)));
     const failureMessage = isAssistant ? "" : getCommandFailureMessage(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)

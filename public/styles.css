@@ -1068,11 +1068,13 @@ input[type="radio"] {
 
 .reply-context-text {
   min-width: 0;
+  flex: 1 1 auto;
   color: #115e59;
   font-size: 0.84rem;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .reply-context-clear {
@@ -1507,6 +1509,19 @@ code {
   .command-answer-text {
     font-size: 0.96rem;
     line-height: 1.55;
+  }
+
+  .reply-context-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reply-context-text {
+    width: 100%;
+  }
+
+  .reply-context-clear {
+    width: 100%;
   }
 
   .bridge-status {

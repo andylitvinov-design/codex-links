@@ -46,7 +46,7 @@ function createSlackOkResponse(body) {
   };
 }
 
-test("dispatchCommandIfNeeded falls back to local bridge when Slack actor live probe is not acknowledged", async () => {
+test("dispatchCommandIfNeeded still posts to Slack when the actor probe is unacknowledged but channel membership is valid", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();
 
@@ -106,17 +106,138 @@ test("dispatchCommandIfNeeded falls back to local bridge when Slack actor live p
     const result = await dispatchCommandIfNeeded(env, command, env);
 
     assert.equal(result.ok, true);
-    assert.equal(result.command.status, "queued");
-    assert.equal(result.command.progressStage, "queued");
-    assert.equal(result.command.lastDiagnosticCode, "codex_target_actor_unverified");
-    assert.equal(result.command.slackChannelId, "");
-    assert.equal(result.command.slackThreadTs, "");
-    assert.equal(result.command.dispatchMode, "local-bridge");
-    assert.equal(result.command.actualExecutor, "bridge");
+    assert.equal(result.command.status, "dispatched");
+    assert.equal(result.command.progressStage, "dispatched");
+    assert.equal(result.command.dispatchMode, "slack-codex-cloud");
+    assert.equal(result.command.slackChannelId, "C123");
+    assert.equal(result.command.slackThreadTs, "1712345678.000100");
 
     const storedStatus = await readBridgeStatus(env);
-    assert.equal(storedStatus.slackActor?.validationStatus, "invalid");
+    assert.equal(storedStatus.slackActor?.validationStatus, "unverified");
     assert.equal(storedStatus.slackActor?.configuredUserId, "U999");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("dispatchCommandIfNeeded does not repost an already dispatched Slack command", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-already-dispatched",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackChannelId: "C123",
+    slackMessageTs: "1712345678.000100",
+    slackThreadTs: "1712345678.000100",
+    dispatchedAt: createdAt
+  }]);
+
+  let postMessageCalls = 0;
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({ messages: [] });
+    }
+
+    if (String(url).includes("/api/conversations.replies")) {
+      return createSlackOkResponse({
+        messages: [
+          { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "root task" }
+        ]
+      });
+    }
+
+    if (String(url).includes("/api/chat.postMessage")) {
+      postMessageCalls += 1;
+      return createSlackOkResponse({
+        channel: "C123",
+        ts: "1712345678.000100",
+        message: {
+          ts: "1712345678.000100",
+          thread_ts: "1712345678.000100"
+        }
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-already-dispatched");
+    const result = await dispatchCommandIfNeeded(env, command, env);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.command.status, "dispatched");
+    assert.equal(result.command.slackThreadTs, "1712345678.000100");
+    assert.equal(postMessageCalls, 0);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("dispatchCommandIfNeeded does not repost a Slack command that is already dispatching", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-dispatching",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "dispatching",
+    dispatchStartedAt: createdAt
+  }]);
+
+  let postMessageCalls = 0;
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/chat.postMessage")) {
+      postMessageCalls += 1;
+      throw new Error("Dispatch should not be re-posted while the first attempt is still in flight.");
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const staleCommandSnapshot = {
+      id: "cmd-slack-dispatching",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "fix the dialogs",
+      createdAt,
+      progressUpdatedAt: createdAt,
+      dispatchMode: "slack-codex-cloud",
+      requestedExecutor: "cloud-via-slack",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued"
+    };
+    const result = await dispatchCommandIfNeeded(env, staleCommandSnapshot, env);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.command.progressStage, "dispatching");
+    assert.equal(result.command.slackThreadTs, "");
+    assert.equal(postMessageCalls, 0);
   } finally {
     global.fetch = originalFetch;
   }

@@ -278,6 +278,39 @@ test("runCommandMaintenance fails stale photo bridge commands instead of rerouti
   assert.match(updated.errorMessage, /retrying_photo_bridge/);
 });
 
+test("runCommandMaintenance keeps long text bridge commands processing before the extended timeout window", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (4 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-bridge-long-text-still-processing",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "x".repeat(700),
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "bridge",
+    status: "processing",
+    progressStage: "waiting-for-codex",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() + 60_000).toISOString()
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  assert.equal(result.changed, false);
+  const updated = result.commands.find((command) => command.id === "cmd-bridge-long-text-still-processing");
+  assert.ok(updated);
+  assert.equal(updated.status, "processing");
+  assert.equal(updated.progressStage, "waiting-for-codex");
+});
+
 test("runCommandMaintenance fails stale queued bridge text commands even when another thread is processing", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.bridgeClaimMs + 20 * 1000)).toISOString();
@@ -789,4 +822,78 @@ test("createCommandRecord accepts explicit retrying bridge stages for bridge-una
   assert.equal(created.value.progressStage, "waiting-photo-bridge");
   assert.equal(created.value.lastDiagnosticCode, "bridge_temporarily_unavailable");
   assert.equal(created.value.lastDiagnosticDetail, "Bridge is offline right now.");
+});
+
+test("runCommandMaintenance keeps stalled local photo preparation in bridge retry state with a photo-specific diagnostic", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-bridge-photo-prep-stuck",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "inspect photo",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "bridge",
+    status: "processing",
+    progressStage: "waiting-for-photo",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() - 1000).toISOString(),
+    photoAttached: true,
+    photoBytesPresent: true,
+    photoSeenByBridge: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: false
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-bridge-photo-prep-stuck");
+  assert.ok(updated);
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "retrying-photo-bridge");
+  assert.equal(updated.lastDiagnosticCode, "bridge_waiting_photo");
+  assert.match(updated.errorMessage, /bridge_waiting_photo/);
+});
+
+test("runCommandMaintenance keeps stalled Claude photo preparation in Claude retry state with a photo-specific diagnostic", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-claude-photo-prep-stuck",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "inspect photo",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "claude-bridge",
+    requestedExecutor: "claude",
+    actualExecutor: "claude",
+    status: "processing",
+    progressStage: "waiting-for-photo",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() - 1000).toISOString(),
+    photoAttached: true,
+    photoBytesPresent: true,
+    photoSeenByBridge: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: false
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-claude-photo-prep-stuck");
+  assert.ok(updated);
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "retrying-claude");
+  assert.equal(updated.lastDiagnosticCode, "claude_waiting_photo");
+  assert.match(updated.errorMessage, /claude_waiting_photo/);
 });

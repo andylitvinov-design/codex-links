@@ -39,12 +39,15 @@ const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90 * 1000;
 const SLACK_PHOTO_RESULT_TIMEOUT_MS = 300 * 1000;
 const SLACK_ACTOR_VALIDATION_RECOVERY_MS = 15 * 1000;
 const BRIDGE_CLAIM_TIMEOUT_MS = 60 * 1000;
-const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
+const BRIDGE_RESULT_TIMEOUT_MS = 9 * 60 * 1000;
+const BRIDGE_LONG_TEXT_RESULT_TIMEOUT_MS = 9 * 60 * 1000;
 const BRIDGE_PHOTO_CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
 const BRIDGE_PHOTO_RETRY_WINDOW_MS = 30 * 60 * 1000;
 const CLAUDE_CLAIM_TIMEOUT_MS = 60 * 1000;
-const CLAUDE_RESULT_TIMEOUT_MS = 180 * 1000;
+const CLAUDE_RESULT_TIMEOUT_MS = 9 * 60 * 1000;
+const CLAUDE_LONG_TEXT_RESULT_TIMEOUT_MS = 9 * 60 * 1000;
 const CLAUDE_RETRY_WINDOW_MS = 10 * 60 * 1000;
+const LONG_TEXT_THRESHOLD = 500;
 const DEFAULT_KV_WRITE_MAX_RETRIES = 2;
 const DEFAULT_KV_WRITE_RETRY_DELAY_MS = 100;
 
@@ -57,10 +60,12 @@ export const COMMAND_TIMEOUTS = {
   slackPhotoResultMs: SLACK_PHOTO_RESULT_TIMEOUT_MS,
   bridgeClaimMs: BRIDGE_CLAIM_TIMEOUT_MS,
   bridgeResultMs: BRIDGE_RESULT_TIMEOUT_MS,
+  bridgeLongTextResultMs: BRIDGE_LONG_TEXT_RESULT_TIMEOUT_MS,
   bridgePhotoClaimMs: BRIDGE_PHOTO_CLAIM_TIMEOUT_MS,
   bridgePhotoRetryWindowMs: BRIDGE_PHOTO_RETRY_WINDOW_MS,
   claudeClaimMs: CLAUDE_CLAIM_TIMEOUT_MS,
   claudeResultMs: CLAUDE_RESULT_TIMEOUT_MS,
+  claudeLongTextResultMs: CLAUDE_LONG_TEXT_RESULT_TIMEOUT_MS,
   claudeRetryWindowMs: CLAUDE_RETRY_WINDOW_MS
 };
 
@@ -917,19 +922,7 @@ function isParallelVisionCommand(command) {
     return false;
   }
 
-  const visionHints = [
-    "что на фото",
-    "прочти фото",
-    "кнопка",
-    "what color",
-    "read the image",
-    "what is in the image",
-    "reset",
-    "photo",
-    "screenshot"
-  ];
-
-  return visionHints.some((hint) => text.includes(hint));
+  return true;
 }
 
 function getCommandThreadKey(command) {
@@ -1219,6 +1212,7 @@ export async function acknowledgeCommands(env, ids) {
 export async function claimNextCommand(env, input = {}) {
   const requestedDispatchMode = normalizeDispatchValue(input.dispatchMode || DISPATCH_MODE_LOCAL);
   const isClaudeProcessor = requestedDispatchMode === DISPATCH_MODE_CLAUDE;
+  const textOnly = Boolean(input.textOnly);
   const processorId = String(input.processorId || "").trim().slice(0, 120) || (isClaudeProcessor ? "claude-bridge" : "bridge");
   const leaseMs = Math.max(5_000, Number(input.leaseMs) || COMMAND_PROCESSING_LEASE_MS);
   const now = Date.now();
@@ -1268,6 +1262,10 @@ export async function claimNextCommand(env, input = {}) {
 
   const isClaimableLocalQueued = (command) => {
     if (!command || command.dispatchMode !== requestedDispatchMode || command.status !== "queued") {
+      return false;
+    }
+
+    if (textOnly && commandHasPhoto(command)) {
       return false;
     }
 
@@ -1741,6 +1739,34 @@ function getBridgeClaimTimeoutMs(command) {
   return commandHasPhoto(command) ? BRIDGE_PHOTO_CLAIM_TIMEOUT_MS : BRIDGE_CLAIM_TIMEOUT_MS;
 }
 
+function commandHasLongText(command) {
+  return String(command?.text || "").trim().length > LONG_TEXT_THRESHOLD;
+}
+
+function getBridgeResultTimeoutMs(command) {
+  if (commandHasPhoto(command)) {
+    return BRIDGE_PHOTO_RETRY_WINDOW_MS;
+  }
+
+  if (commandHasLongText(command)) {
+    return BRIDGE_LONG_TEXT_RESULT_TIMEOUT_MS;
+  }
+
+  return BRIDGE_RESULT_TIMEOUT_MS;
+}
+
+function getClaudeResultTimeoutMs(command) {
+  if (commandHasPhoto(command)) {
+    return CLAUDE_RETRY_WINDOW_MS;
+  }
+
+  if (commandHasLongText(command)) {
+    return CLAUDE_LONG_TEXT_RESULT_TIMEOUT_MS;
+  }
+
+  return CLAUDE_RESULT_TIMEOUT_MS;
+}
+
 function getBridgeQueueState(command, nowIso, input = {}) {
   return {
     ...command,
@@ -2079,6 +2105,7 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   const threadKey = getCommandThreadKey(command);
   const hasFreshThreadProcessing = threadKey !== "::" && freshProcessingThreadKeys.has(threadKey);
   const hasPhoto = commandHasPhoto(command);
+  const isWaitingForPhoto = String(command.progressStage || "").trim() === "waiting-for-photo";
 
   if (command.status === "queued") {
     if (hasFreshThreadProcessing) {
@@ -2157,7 +2184,7 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
   const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
   const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
-  const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
+  const isResultStale = isOlderThan(staleSince, getBridgeResultTimeoutMs(command));
 
   if (!isLeaseExpired && !isResultStale) {
     return command;
@@ -2168,6 +2195,21 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     : "The local bridge stopped heartbeating before the command completed.";
 
   if (hasPhoto) {
+    if (isWaitingForPhoto && !isOlderThan(command.createdAt, BRIDGE_PHOTO_RETRY_WINDOW_MS)) {
+      return getBridgeQueueState(command, nowIso, {
+        progressStage: "retrying-photo-bridge",
+        timeoutPhase: "result-timeout",
+        lastDiagnosticCode: "bridge_waiting_photo",
+        lastDiagnosticDetail: "The local bridge stalled while preparing the attached photo.",
+        errorMessage: stringifyCommandError({
+          code: "bridge_waiting_photo",
+          stage: "retrying-photo-bridge",
+          message: "Bridge stalled while preparing the photo. Retrying through bridge.",
+          detail: "The local bridge stopped heartbeating before photo preparation completed."
+        })
+      });
+    }
+
     if (isOlderThan(command.createdAt, BRIDGE_PHOTO_RETRY_WINDOW_MS)) {
       return createFailedMaintenanceState(command, nowIso, {
         timeoutPhase: "result-timeout",
@@ -2218,6 +2260,7 @@ function evaluateClaudeMaintenance(command, nowIso) {
 
   const fallbackAllowed = canFallbackToLocal(command, { fallbackToLocal: true });
   const retryWindowExceeded = isOlderThan(command.createdAt, CLAUDE_RETRY_WINDOW_MS);
+  const isWaitingForPhoto = String(command.progressStage || "").trim() === "waiting-for-photo";
 
   if (command.status === "queued") {
     if (!isOlderThan(command.progressUpdatedAt || command.createdAt, CLAUDE_CLAIM_TIMEOUT_MS)) {
@@ -2277,7 +2320,7 @@ function evaluateClaudeMaintenance(command, nowIso) {
   const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
   const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
   const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
-  const isResultStale = isOlderThan(staleSince, CLAUDE_RESULT_TIMEOUT_MS);
+  const isResultStale = isOlderThan(staleSince, getClaudeResultTimeoutMs(command));
 
   if (!isLeaseExpired && !isResultStale) {
     return command;
@@ -2286,6 +2329,21 @@ function evaluateClaudeMaintenance(command, nowIso) {
   const detail = isLeaseExpired
     ? "The Claude bridge lease expired before the command completed."
     : "The Claude bridge stopped heartbeating before the command completed.";
+
+  if (commandHasPhoto(command) && isWaitingForPhoto && !retryWindowExceeded) {
+    return createClaudeRetryState(command, nowIso, {
+      progressStage: "retrying-claude",
+      timeoutPhase: "result-timeout",
+      lastDiagnosticCode: "claude_waiting_photo",
+      lastDiagnosticDetail: "The Claude bridge stalled while preparing the attached photo.",
+      errorMessage: stringifyCommandError({
+        code: "claude_waiting_photo",
+        stage: "retrying-claude",
+        message: "Claude bridge stalled while preparing the photo. Retrying through Claude bridge.",
+        detail: "The Claude bridge stopped heartbeating before photo preparation completed."
+      })
+    });
+  }
 
   if (!retryWindowExceeded) {
     return createClaudeRetryState(command, nowIso, {
@@ -2346,7 +2404,7 @@ export async function runCommandMaintenance(env, options = {}) {
     const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
     const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
     const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
-    const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
+    const isResultStale = isOlderThan(staleSince, getBridgeResultTimeoutMs(command));
 
     if (isLeaseExpired || isResultStale) {
       return [];
