@@ -58,6 +58,15 @@ test("postSlackCommand uploads attached photos into the original Slack thread", 
       };
     }
 
+    if (String(url).includes("/api/conversations.history")) {
+      return {
+        ok: true,
+        async json() {
+          return { ok: true, messages: [] };
+        }
+      };
+    }
+
     if (String(url).includes("/api/conversations.replies")) {
       return {
         ok: true,
@@ -181,6 +190,10 @@ test("postSlackCommand retries photo upload before succeeding", async () => {
       return { ok: true, async json() { return { ok: true, members: ["U999", "UBOT"] }; } };
     }
 
+    if (String(url).includes("/api/conversations.history")) {
+      return { ok: true, async json() { return { ok: true, messages: [] }; } };
+    }
+
     if (String(url).includes("/api/conversations.replies")) {
       return {
         ok: true,
@@ -289,6 +302,10 @@ test("postSlackCommand keeps the Slack thread alive when photo upload fails", as
 
     if (String(url).includes("/api/conversations.members")) {
       return { ok: true, async json() { return { ok: true, members: ["U999", "UBOT"] }; } };
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return { ok: true, async json() { return { ok: true, messages: [] }; } };
     }
 
     if (String(url).includes("/api/conversations.replies")) {

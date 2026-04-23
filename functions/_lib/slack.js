@@ -8,6 +8,7 @@ const SLACK_PHOTO_UPLOAD_RETRY_COUNT = 3;
 const SLACK_PHOTO_UPLOAD_RETRY_DELAY_MS = 1_500;
 const DEFAULT_SLACK_ACTOR_PROBE_TIMEOUT_MS = 30_000;
 const DEFAULT_SLACK_ACTOR_PROBE_POLL_MS = 2_000;
+const DEFAULT_SLACK_ACTOR_ACTIVITY_FRESHNESS_MS = 15 * 60_000;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -97,6 +98,16 @@ function getSlackActorProbePollMs(env, fallback = DEFAULT_SLACK_ACTOR_PROBE_POLL
   const configured = Number(env?.SLACK_ACTOR_PROBE_POLL_MS);
 
   if (!Number.isFinite(configured) || configured < 1) {
+    return fallback;
+  }
+
+  return configured;
+}
+
+function getSlackActorActivityFreshnessMs(env, fallback = DEFAULT_SLACK_ACTOR_ACTIVITY_FRESHNESS_MS) {
+  const configured = Number(env?.SLACK_ACTOR_ACTIVITY_FRESHNESS_MS);
+
+  if (!Number.isFinite(configured) || configured < 1_000) {
     return fallback;
   }
 
@@ -473,6 +484,17 @@ function pickValidatedProbeReply(replies, targetUserId) {
   return candidates.at(-1) || null;
 }
 
+function pickValidatedChannelActivity(messages, targetUserId) {
+  const normalizedTarget = normalizeText(targetUserId);
+  const candidates = (Array.isArray(messages) ? messages : [])
+    .filter((message) => normalizeText(message?.ts))
+    .filter((message) => normalizeText(message?.text))
+    .filter((message) => !isIgnorableSlackReplyText(message?.text))
+    .filter((message) => normalizeText(message?.user) === normalizedTarget);
+
+  return candidates.at(0) || null;
+}
+
 export async function validateSlackCodexActor(env, options = {}) {
   const token = normalizeText(env?.SLACK_BOT_TOKEN);
   const channel = normalizeText(env?.SLACK_CODEX_CHANNEL_ID);
@@ -492,6 +514,21 @@ export async function validateSlackCodexActor(env, options = {}) {
 
   if (membershipResult.validationStatus === "invalid" || membershipResult.validationStatus === "validated") {
     return membershipResult;
+  }
+
+  const recentChannelActivity = await fetchSlackChannelMessages(env, channel, {
+    oldest: new Date(Date.now() - getSlackActorActivityFreshnessMs(env)).toISOString(),
+    timeoutMs: options.timeoutMs
+  });
+  const recentActorActivity = pickValidatedChannelActivity(recentChannelActivity, targetUserId);
+
+  if (recentActorActivity) {
+    return buildSlackActorValidationResult({
+      validationStatus: "validated",
+      configuredUserId: targetUserId,
+      lastValidatedAt: new Date().toISOString(),
+      observedReply: recentActorActivity
+    });
   }
 
   const timeoutMs = Number.isFinite(Number(options.timeoutMs))
