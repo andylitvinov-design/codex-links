@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { validateSlackCodexActor } from "../functions/_lib/slack.js";
 
 const ROOT = process.cwd();
 const DEV_VARS_PATH = path.join(ROOT, ".dev.vars");
@@ -152,6 +153,21 @@ async function main() {
     console.log("All required local values are present.");
   }
 
+  if (hasSlackRoute) {
+    console.log("");
+    const actorValidation = await validateSlackCodexActor(merged, {
+      timeoutMs: 10_000,
+      pollIntervalMs: 1_000
+    }).catch((error) => ({
+      validationStatus: "invalid",
+      detail: error instanceof Error ? error.message : String(error)
+    }));
+    console.log("Local Slack actor validation:");
+    console.log(`- configuredUserId: ${mask(actorValidation.configuredUserId || merged.SLACK_CODEX_USER_ID)}`);
+    console.log(`- validationStatus: ${actorValidation.validationStatus || "unknown"}`);
+    console.log(`- detail: ${actorValidation.detail || actorValidation.message || "none"}`);
+  }
+
   console.log("");
 
   const prod = await loadProdStatus();
@@ -167,6 +183,7 @@ async function main() {
   console.log(`- dispatchMode: ${status.dispatchMode || "unknown"}`);
   console.log(`- executorLabel: ${status.executorLabel || "unknown"}`);
   console.log(`- bridgeOnline: ${status.bridgeOnline ? "true" : "false"}`);
+  console.log(`- slackActor: ${status.slackActor?.configuredUserId ? mask(status.slackActor.configuredUserId) : "missing"} / ${status.slackActor?.validationStatus || "unknown"}`);
   console.log(`- state: ${status.state || "unknown"}`);
   console.log(`- lastError: ${status.lastError || "none"}`);
 

@@ -1,0 +1,19 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const appScriptPath = new URL("../public/app.js", import.meta.url);
+
+test("delivery status is not suppressed solely because a non-terminal assistant reply exists", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.doesNotMatch(source, /function getCommandDeliveryStatus\(command\)\s*\{\s*if \(hasAssistantReply\(command\?\.id, command\)\)\s*\{\s*return null;/);
+  assert.match(source, /if \(status === "answered" \|\| status === "acked"\)/);
+});
+
+test("UI maps Slack actor validation failures to a visible diagnostic message", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.match(source, /diagnosticCode === "codex_target_actor_unverified"/);
+  assert.match(source, /diagnosticCode === "codex_target_user_invalid"/);
+});

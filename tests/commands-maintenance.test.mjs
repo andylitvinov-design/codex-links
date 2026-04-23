@@ -382,6 +382,58 @@ test("runCommandMaintenance keeps queued bridge commands waiting when the same t
   assert.equal(updated.progressStage, "queued");
 });
 
+test("runCommandMaintenance refreshes queued bridge freshness while the same thread is still processing", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (40 * 1000)).toISOString();
+  const freshIso = new Date().toISOString();
+
+  await writeCommands(env, [
+    {
+      id: "cmd-processing-same-thread-refresh",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "same thread still running",
+      createdAt: freshIso,
+      progressUpdatedAt: freshIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "bridge",
+      status: "processing",
+      progressStage: "waiting-for-codex",
+      processingStartedAt: freshIso,
+      processingLeaseUntil: new Date(Date.now() + 60_000).toISOString()
+    },
+    {
+      id: "cmd-queued-same-thread-refresh",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "fix the dialogs",
+      createdAt: staleIso,
+      progressUpdatedAt: staleIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued",
+      targetRepo: "andylitvinov-design/codex-links"
+    }
+  ]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-queued-same-thread-refresh");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "queued");
+  assert.ok(Date.parse(String(updated.progressUpdatedAt || "").trim()) > Date.parse(staleIso));
+});
+
 test("runCommandMaintenance fails stale Slack commands that never got an ack", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();

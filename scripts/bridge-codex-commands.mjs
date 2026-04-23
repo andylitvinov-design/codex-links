@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
 import { resolveClaudeBin, validateClaudeCli } from "./_lib/claude-cli.mjs";
+import { BRIDGE_EXEC_TIMEOUT_MS, getBridgeExecTimeoutMs } from "./_lib/bridge-exec-timeouts.mjs";
 import {
   buildBridgePrompt,
   buildPhotoOnlyPrompt,
@@ -16,18 +17,18 @@ const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
 const BRIDGE_DISPATCH_MODE = process.env.BRIDGE_DISPATCH_MODE || "local-bridge";
 const BRIDGE_EXECUTOR = (process.env.BRIDGE_EXECUTOR || "codex").trim().toLowerCase() === "claude" ? "claude" : "codex";
-const EXEC_TIMEOUT_MS = 4 * 60 * 1000;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const READ_TIMEOUT_MS = 15 * 1000;
 const WRITE_TIMEOUT_MS = 60 * 1000;
-const PHOTO_EXEC_TIMEOUT_MS = 90 * 1000;
 const SNAPSHOT_TIMEOUT_MS = 12 * 1000;
 const BRIDGE_RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const LEASE_EXTENSION_MS = 5 * 60 * 1000;
 const TURN_PROGRESS_HEARTBEAT_MS = 15 * 1000;
+const BRIDGE_STATUS_HEARTBEAT_MS = 30 * 1000;
 const MAINTENANCE_INTERVAL_MS = 60 * 1000;
 const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
+const MAX_IN_FLIGHT_BRIDGE_TASKS = 2;
 const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
 const LOG_DIR = `${process.env.HOME || ""}/Library/Logs`;
 const BRIDGE_LOG_PATH = `${LOG_DIR}/codex-links-bridge.log`;
@@ -616,7 +617,7 @@ function runCodexResume(threadId, prompt, photoPath) {
 
     execFile(codexBin, args, {
       cwd: process.cwd(),
-      timeout: EXEC_TIMEOUT_MS,
+      timeout: BRIDGE_EXEC_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"]
     }, async (error, stdout, stderr) => {
@@ -635,11 +636,16 @@ function runCodexResume(threadId, prompt, photoPath) {
       }
 
       if (error) {
+        if (shouldTreatCodexExecAsUsable(error, result, prompt)) {
+          resolve(result);
+          return;
+        }
+
         reject(new Error(result.stderr || result.stdout || error.message));
         return;
       }
 
-      if (readOutputError && !result.output) {
+      if (readOutputError && !getImmediateAssistantText(result, prompt)) {
         reject(new Error("Codex completed without a readable output file."));
         return;
       }
@@ -649,7 +655,7 @@ function runCodexResume(threadId, prompt, photoPath) {
   });
 }
 
-function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
+function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS) {
   const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
   return new Promise((resolve, reject) => {
     const outputPath = join(tmpdir(), `codex-links-output-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
@@ -695,6 +701,11 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_
       } catch {}
 
       if (error) {
+        if (shouldTreatCodexExecAsUsable(error, result, prompt)) {
+          resolve(result);
+          return;
+        }
+
         reject(new Error(result.stderr || result.stdout || error.message));
         return;
       }
@@ -704,7 +715,7 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_
   });
 }
 
-async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = EXEC_TIMEOUT_MS, options = {}) {
+async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS, options = {}) {
   const startedAt = Date.now();
   let lastHeartbeatAt = 0;
 
@@ -811,22 +822,29 @@ async function claimNextCommand() {
       return data.command;
     }
 
-    const queuedLocalCount = Number(data?.claimDiagnostics?.queuedLocalCount || 0);
-    const processingLocalCount = Number(data?.claimDiagnostics?.processingLocalCount || 0);
-    const processingLocalIds = Array.isArray(data?.claimDiagnostics?.processingLocalIds)
-      ? data.claimDiagnostics.processingLocalIds.map((id) => String(id || "").trim()).filter(Boolean)
+    const queuedRequestedCount = Number(data?.claimDiagnostics?.queuedRequestedCount || 0);
+    const processingRequestedCount = Number(data?.claimDiagnostics?.processingRequestedCount || 0);
+    const queuedRequestedIds = Array.isArray(data?.claimDiagnostics?.queuedRequestedIds)
+      ? data.claimDiagnostics.queuedRequestedIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    const processingRequestedIds = Array.isArray(data?.claimDiagnostics?.processingRequestedIds)
+      ? data.claimDiagnostics.processingRequestedIds.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
 
-    if (queuedLocalCount > 0) {
-      await appendBridgeErrorLog("claimNextCommand.nullWithQueued", new Error("Claim returned null while queued local commands exist."), {
+    if (queuedRequestedCount > 0) {
+      await appendBridgeErrorLog("claimNextCommand.nullWithQueued", new Error("Claim returned null while queued commands exist for the requested dispatch mode."), {
         attempt,
-        queuedLocalCount,
-        processingLocalCount,
-        queuedLocalIds: Array.isArray(data?.claimDiagnostics?.queuedLocalIds) ? data.claimDiagnostics.queuedLocalIds.join(",") : "",
-        processingLocalIds: processingLocalIds.join(",")
+        bridgeDispatchMode: BRIDGE_DISPATCH_MODE,
+        requestedDispatchMode: String(data?.claimDiagnostics?.requestedDispatchMode || "").trim(),
+        queuedRequestedCount,
+        processingRequestedCount,
+        queuedRequestedIds: queuedRequestedIds.join(","),
+        processingRequestedIds: processingRequestedIds.join(","),
+        oldestQueuedRequestedAt: String(data?.claimDiagnostics?.oldestQueuedRequestedAt || "").trim(),
+        oldestQueuedRequestedAgeMs: Number(data?.claimDiagnostics?.oldestQueuedRequestedAgeMs || 0)
       });
 
-      const processingCommandId = processingLocalIds[0];
+      const processingCommandId = processingRequestedIds[0];
 
       if (processingCommandId) {
         try {
@@ -1181,7 +1199,31 @@ function getImmediateAssistantText(result, prompt = "") {
   return stdout;
 }
 
-function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
+function isBenignCodexExecErrorMessage(message) {
+  const text = String(message || "").trim().toLowerCase();
+
+  if (!text) {
+    return false;
+  }
+
+  return text.includes("no stdin data received in 3s");
+}
+
+function shouldTreatCodexExecAsUsable(error, result, prompt = "") {
+  if (!error) {
+    return false;
+  }
+
+  if (!getImmediateAssistantText(result, prompt)) {
+    return false;
+  }
+
+  return isBenignCodexExecErrorMessage(error.message)
+    || isBenignCodexExecErrorMessage(result?.stderr)
+    || isBenignCodexExecErrorMessage(result?.stdout);
+}
+
+function runClaudePrint(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS) {
   const claudeBin = resolveClaudeBin(process.env);
   const instructions = [
     String(prompt || "").trim(),
@@ -1189,7 +1231,11 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
       ? `Attached local image path: ${photoPath}\nRead that local image file before answering. Base the answer on visible evidence from the image.`
       : ""
   ].filter(Boolean).join("\n\n");
-  const photoDir = photoPath ? dirname(photoPath) : null;
+  const addDirArgs = [
+    "--add-dir",
+    cwd || process.cwd(),
+    ...(photoPath ? ["--add-dir", dirname(photoPath)] : [])
+  ];
 
   return new Promise((resolve, reject) => {
     execFile(claudeBin, [
@@ -1198,9 +1244,7 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = EXEC_TIMEOUT_MS) {
       "text",
       "--permission-mode",
       "bypassPermissions",
-      "--add-dir",
-      cwd || process.cwd(),
-      ...(photoDir ? ["--add-dir", photoDir] : []),
+      ...addDirArgs,
       "--",
       instructions
     ], {
@@ -1313,7 +1357,7 @@ async function runTurnStart(threadId, input, options = {}) {
       throw new Error("turn/start did not return turn id.");
     }
 
-    return waitForTurnCompletion(request, threadId, turnId, EXEC_TIMEOUT_MS, options);
+    return waitForTurnCompletion(request, threadId, turnId, BRIDGE_EXEC_TIMEOUT_MS, options);
   });
 }
 
@@ -1382,6 +1426,36 @@ const initialProcessing = initialCommands
 const completed = [];
 const failed = [];
 const syncedMessages = [];
+const inFlightTasks = new Set();
+
+function buildRunnerHeartbeatStatus() {
+  const now = new Date().toISOString();
+  const runnerState = inFlightTasks.size ? "running" : "idle";
+
+  return {
+    bridgeOnline: BRIDGE_EXECUTOR !== "claude",
+    ...(BRIDGE_EXECUTOR === "claude"
+      ? {
+          claudeBridge: {
+            online: true,
+            state: runnerState,
+            lastRunAt: now,
+            pendingCount: inFlightTasks.size,
+            lastError: ""
+          }
+        }
+      : {
+          localBridge: {
+            online: true,
+            managedBy: "launchd",
+            state: runnerState,
+            lastRunAt: now,
+            pendingCount: inFlightTasks.size,
+            lastError: ""
+          }
+        })
+  };
+}
 
 async function flushCompletedBatch(batchCompleted, batchMessages) {
   if (!batchCompleted.length && !batchMessages.length) {
@@ -1457,6 +1531,7 @@ await publishBridgeStatus({
     : {
         localBridge: {
           online: true,
+          managedBy: "launchd",
           state: "running",
           lastRunAt: new Date().toISOString(),
           pendingCount: initialQueued.length + initialProcessing.length,
@@ -1467,20 +1542,15 @@ await publishBridgeStatus({
       })
 });
 
-while (true) {
-  const command = await claimNextCommand();
+const heartbeatTimer = setInterval(() => {
+  void publishBridgeStatus(buildRunnerHeartbeatStatus()).catch((error) => {
+    void appendBridgeErrorLog("publishBridgeStatus.heartbeat", error);
+  });
+}, BRIDGE_STATUS_HEARTBEAT_MS);
 
-  if (!command) {
-    if (Date.now() >= idleDrainUntil) {
-      break;
-    }
+heartbeatTimer.unref?.();
 
-    await sleep(IDLE_DRAIN_POLL_MS);
-    continue;
-  }
-
-  idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
-
+async function processClaimedCommand(command) {
   try {
     await updateProgress(command.id, "claimed", command.photo
       ? {
@@ -1530,6 +1600,7 @@ while (true) {
         }
       : {}, command.processorId);
     let assistantText = "";
+    const commandExecTimeoutMs = getBridgeExecTimeoutMs(command);
 
     try {
       if (photoPath) {
@@ -1539,7 +1610,7 @@ while (true) {
                 photoPrompt || "See attached image and respond.",
                 photoPath,
                 String(command?.targetWorkspacePath || "").trim() || process.cwd(),
-                PHOTO_EXEC_TIMEOUT_MS
+                commandExecTimeoutMs
               )
             : runCodexExecEphemeral(
                 photoPrompt || "See attached image and respond.",
@@ -1559,7 +1630,7 @@ while (true) {
                   retryPrompt,
                   retryPhotoPath || photoPath,
                   String(command?.targetWorkspacePath || "").trim() || process.cwd(),
-                  PHOTO_EXEC_TIMEOUT_MS
+                  commandExecTimeoutMs
                 )
               : runCodexExecEphemeral(
                   retryPrompt,
@@ -1602,7 +1673,7 @@ while (true) {
                 buildPhotoRetryPrompt(command, photoOcrText),
                 retryPhotoPath || photoPath,
                 String(command?.targetWorkspacePath || "").trim() || process.cwd(),
-                PHOTO_EXEC_TIMEOUT_MS
+                commandExecTimeoutMs
               )
             : runCodexExecEphemeral(
                 buildPhotoRetryPrompt(command, photoOcrText),
@@ -1636,7 +1707,7 @@ while (true) {
               photoPrompt || buildPhotoOnlyPrompt(command, photoOcrText),
               retryPhotoPath || photoPath,
               String(command?.targetWorkspacePath || "").trim() || process.cwd(),
-              PHOTO_EXEC_TIMEOUT_MS
+              commandExecTimeoutMs
             )
           : runCodexExecEphemeral(
               photoPrompt || buildPhotoOnlyPrompt(command, photoOcrText),
@@ -1759,7 +1830,59 @@ while (true) {
   }
 }
 
+function trackInFlightTask(task) {
+  const wrapped = Promise.resolve(task)
+    .catch((error) => {
+      void appendBridgeErrorLog("bridgeWorker.unhandled", error);
+    })
+    .finally(() => {
+      inFlightTasks.delete(wrapped);
+    });
+
+  inFlightTasks.add(wrapped);
+  return wrapped;
+}
+
+while (true) {
+  let claimedAny = false;
+
+  while (inFlightTasks.size < MAX_IN_FLIGHT_BRIDGE_TASKS) {
+    const command = await claimNextCommand();
+
+    if (!command) {
+      break;
+    }
+
+    claimedAny = true;
+    idleDrainUntil = Date.now() + IDLE_DRAIN_WINDOW_MS;
+    trackInFlightTask(processClaimedCommand(command));
+  }
+
+  if (claimedAny) {
+    continue;
+  }
+
+  if (!inFlightTasks.size) {
+    if (Date.now() >= idleDrainUntil) {
+      break;
+    }
+
+    await sleep(IDLE_DRAIN_POLL_MS);
+    continue;
+  }
+
+  await Promise.race([
+    Promise.allSettled([...inFlightTasks]),
+    sleep(IDLE_DRAIN_POLL_MS)
+  ]);
+}
+
+if (inFlightTasks.size) {
+  await Promise.allSettled([...inFlightTasks]);
+}
+
 clearInterval(maintenanceTimer);
+clearInterval(heartbeatTimer);
 
 const remainingCommands = await safeFetchRecentCommands("remainingRecentCommands");
 const remainingQueued = remainingCommands
@@ -1794,6 +1917,7 @@ await publishBridgeStatus({
     : {
         localBridge: {
           online: true,
+          managedBy: "launchd",
           state: failed.length ? "degraded" : "idle",
           lastRunAt: new Date().toISOString(),
           lastSuccessAt: failed.length ? "" : new Date().toISOString(),

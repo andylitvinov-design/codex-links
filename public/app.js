@@ -1,4 +1,10 @@
 import { sanitizeCodexErrorMessage } from "./_lib/command-error-utils.js";
+import {
+  MAX_PHOTO_DIMENSION,
+  MAX_PHOTO_FILE_SIZE,
+  MAX_PHOTO_UPLOAD_BYTES,
+  shouldTranscodePhotoBeforeUpload
+} from "./_lib/photo-prep.js";
 import { getReportHighlightLines, getReportSourceLinks } from "./_lib/report-ui-utils.js";
 
 const state = {
@@ -37,15 +43,11 @@ const state = {
   replyContext: null
 };
 
-const BUILD_VERSION = "20260423-1225";
+const BUILD_VERSION = "20260423-0842";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
 const IDLE_POLL_INTERVAL_MS = 12000;
-const MAX_PHOTO_FILE_SIZE = 4_500_000;
-const MAX_PHOTO_UPLOAD_BYTES = 1_600_000;
-const MAX_PHOTO_DIMENSION = 1600;
-
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
   window.location.hostname.endsWith(".codex-links.pages.dev")
@@ -415,7 +417,7 @@ async function preparePhotoPayload(file) {
     throw new Error("Фото больше 4.5 MB. Уменьшите файл и попробуйте снова.");
   }
 
-  if (file.size <= MAX_PHOTO_UPLOAD_BYTES) {
+  if (!shouldTranscodePhotoBeforeUpload(file.size)) {
     let dataUrl = "";
 
     try {
@@ -1156,6 +1158,14 @@ function getCommandDiagnosticMessage(command) {
     return "Cloud via Slack не подтвердил задачу вовремя.";
   }
 
+  if (diagnosticCode === "codex_target_actor_unverified") {
+    return "Cloud via Slack не подтвердил живого исполнителя перед отправкой задачи.";
+  }
+
+  if (diagnosticCode === "codex_target_user_invalid") {
+    return "Cloud via Slack настроен на неверного Slack-пользователя.";
+  }
+
   if (diagnosticCode === "slack_result_timeout") {
     return "Cloud via Slack не прислал ответ вовремя.";
   }
@@ -1204,7 +1214,7 @@ function getCommandDiagnosticMessage(command) {
 }
 
 function formatCommandStage(command) {
-  if (hasAssistantReply(command?.id, command)) {
+  if (hasTerminalAssistantReply(command?.id, command)) {
     const relative = formatRelativeTime(command?.progressUpdatedAt || command?.createdAt);
     return relative ? `Ответ получен · ${relative}` : "Ответ получен";
   }
@@ -1250,7 +1260,7 @@ function buildPreciseCommandPhase(command) {
     return null;
   }
 
-  if (status === "answered" || status === "acked" || hasAssistantReply(command?.id, command)) {
+  if (status === "answered" || status === "acked" || hasTerminalAssistantReply(command?.id, command)) {
     return {
       tone: "delivery",
       text: "Ответ получен"
@@ -1370,14 +1380,30 @@ function buildPreciseCommandPhase(command) {
 
 function getCommandRequestedExecutor(command) {
   const value = String(command?.requestedExecutor || command?.requestedMode || command?.targetExecutionMode || "").trim().toLowerCase();
-  return value === "cloud" ? "cloud" : "bridge";
+  if (value === "claude") {
+    return "claude";
+  }
+
+  if (value === "cloud" || value === "direct-openai" || value === "cloud-via-slack") {
+    return "cloud";
+  }
+
+  return "bridge";
 }
 
 function getCommandActualExecutor(command) {
   const value = String(command?.actualExecutor || command?.actualDispatchMode || "").trim().toLowerCase();
 
-  if (value === "cloud" || value === "bridge") {
-    return value;
+  if (value === "bridge") {
+    return "bridge";
+  }
+
+  if (value === "cloud" || value === "direct-openai" || value === "cloud-via-slack") {
+    return "cloud";
+  }
+
+  if (value === "claude") {
+    return "claude";
   }
 
   return "pending";
@@ -1391,7 +1417,7 @@ function getCommandLifecycleState(command) {
     return "failed";
   }
 
-  if (status === "answered" || status === "acked") {
+  if (status === "answered" || status === "acked" || hasTerminalAssistantReply(command?.id, command)) {
     return "done";
   }
 
@@ -1423,6 +1449,11 @@ function getCommandLifecycleState(command) {
 }
 
 function getCommandDeliveryStatus(command) {
+  const status = String(command?.status || "").trim().toLowerCase();
+
+  if (status === "answered" || status === "acked" || hasTerminalAssistantReply(command?.id, command)) {
+    return null;
+  }
   const lifecycleState = getCommandLifecycleState(command);
   const stageLabel = formatProgressStage(command?.progressStage, String(command?.status || "").trim().toLowerCase());
   const errorMessage = String(command?.errorMessage || "").trim();
@@ -1520,6 +1551,7 @@ function getFallbackMessageDeliveryStatus(commandId) {
   const hasAssistantMessage = state.messages.some((message) => (
     String(message?.commandId || "").trim() === normalizedId
     && String(message?.role || "").trim() === "assistant"
+    && isTerminalAssistantReplyText(message?.text || "")
   ));
 
   if (hasAssistantMessage) {
@@ -1543,7 +1575,7 @@ function getVisibleTimelineCommands() {
 
 function syncCommandStatusFromState() {
   const activeCommand = getVisibleTimelineCommands().find((command) => {
-    if (hasAssistantReply(command?.id, command)) {
+    if (hasTerminalAssistantReply(command?.id, command)) {
       return false;
     }
 
@@ -1591,11 +1623,15 @@ function getCommandAnswerTitle(command) {
   const executor = getCommandActualExecutor(command);
 
   if (executor === "bridge") {
-    return "Ответ Codex bridge";
+    return "Ответ Codex - codex bridge";
   }
 
   if (executor === "cloud") {
-    return "Ответ Codex сдщгв";
+    return "Ответ Codex - cloud";
+  }
+
+  if (executor === "claude") {
+    return "Ответ Codex - claude code";
   }
 
   return "Ответ Codex";
@@ -2021,6 +2057,27 @@ function hasAssistantReply(commandId, command = null) {
   }
 
   return getInferredAssistantReplies(command, state.messages, state.commands).length > 0;
+}
+
+function hasTerminalAssistantReply(commandId, command = null) {
+  const normalizedId = String(commandId || "").trim();
+  const directTerminalReplyExists = normalizedId
+    ? state.messages.some((message) =>
+      String(message?.commandId || "").trim() === normalizedId
+      && isTerminalAssistantReplyText(message?.text || "")
+    )
+    : false;
+
+  if (directTerminalReplyExists) {
+    return true;
+  }
+
+  if (!command) {
+    return false;
+  }
+
+  return getInferredAssistantReplies(command, state.messages, state.commands)
+    .some((reply) => isTerminalAssistantReplyText(reply?.text || ""));
 }
 
 function toTimestamp(value) {

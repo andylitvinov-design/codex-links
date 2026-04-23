@@ -68,8 +68,45 @@ test("bridge loop runs delivery maintenance automatically on startup and interva
   assert.match(source, /const MAINTENANCE_INTERVAL_MS = 60 \* 1000;/);
 });
 
+test("bridge loop publishes periodic runner heartbeats so status does not go stale while the process stays alive", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /const BRIDGE_STATUS_HEARTBEAT_MS = 30 \* 1000;/);
+  assert.match(source, /const heartbeatTimer = setInterval\(\(\) => \{/);
+  assert.match(source, /void publishBridgeStatus\(buildRunnerHeartbeatStatus\(\)\)\.catch/);
+});
+
 test("Claude bridge passes prompt after -- so --add-dir does not consume it", async () => {
   const source = await readFile(bridgeScriptPath, "utf8");
 
   assert.match(source, /"--",\s*instructions/);
+});
+
+test("Claude bridge grants access to the temp photo directory when a local image is attached", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /"--add-dir",\s*cwd \|\| process\.cwd\(\)/);
+  assert.match(source, /photoPath \? \["--add-dir",\s*dirname\(photoPath\)\] : \[\]/);
+});
+
+test("bridge loop supports bounded in-flight workers instead of a strictly serial claim-execute loop", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /const MAX_IN_FLIGHT_BRIDGE_TASKS = 2;/);
+  assert.match(source, /const inFlightTasks = new Set\(\);/);
+  assert.match(source, /while \(inFlightTasks\.size < MAX_IN_FLIGHT_BRIDGE_TASKS\)/);
+});
+
+test("bridge executor tolerates benign stdin warnings when Codex already produced usable output", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /function shouldTreatCodexExecAsUsable\(error, result, prompt = ""\)/);
+  assert.match(source, /text\.includes\("no stdin data received in 3s"\)/);
+  assert.match(source, /if \(shouldTreatCodexExecAsUsable\(error, result, prompt\)\) \{\s*resolve\(result\);/);
+});
+
+test("bridge executor falls back to immediate assistant text when the Codex output file is missing", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /if \(readOutputError && !getImmediateAssistantText\(result, prompt\)\) \{/);
 });

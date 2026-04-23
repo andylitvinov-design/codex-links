@@ -1980,7 +1980,24 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
 
   if (command.status === "queued") {
     if (hasFreshThreadProcessing) {
-      return command;
+      return getBridgeQueueState(command, nowIso, {
+        progressStage: "queued",
+        timeoutPhase: command.timeoutPhase,
+        lastDiagnosticCode: hasPhoto ? "bridge_waiting_photo" : "bridge_waiting_thread_turn",
+        lastDiagnosticDetail: hasPhoto
+          ? "Photo command is waiting for the current same-thread bridge task to finish."
+          : "Bridge command is waiting for the current same-thread task to finish before claim.",
+        errorMessage: stringifyCommandError({
+          code: hasPhoto ? "bridge_waiting_photo" : "bridge_waiting_thread_turn",
+          stage: hasPhoto ? "waiting-photo-bridge" : "queued",
+          message: hasPhoto
+            ? "Photo is waiting for bridge."
+            : "Bridge is waiting for the current thread turn.",
+          detail: hasPhoto
+            ? "The bridge is still processing another command in the same thread before this photo command can be claimed."
+            : "The bridge is still processing another command in the same thread before this queued command can be claimed."
+        })
+      });
     }
 
     if (!isOlderThan(command.progressUpdatedAt || command.createdAt, getBridgeClaimTimeoutMs(command))) {
