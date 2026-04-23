@@ -2373,7 +2373,7 @@ function renderAssistantReplyMarkup(replyEntry) {
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
         <div class="command-answer-actions">
           <button
-            class="button button-secondary command-answer-reply"
+            class="button button-primary command-answer-reply"
             type="button"
             data-reply-message-id="${escapeHtml(messageId)}"
             data-thread-id="${escapeHtml(replyThreadId)}"
