@@ -263,3 +263,51 @@ test("validateSlackCodexActor accepts recent channel activity from the configure
     global.fetch = originalFetch;
   }
 });
+
+test("validateSlackCodexActor honors configured activity freshness window before probing", async () => {
+  const env = {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    SLACK_CODEX_USER_ID: "U999",
+    SLACK_ACTOR_ACTIVITY_FRESHNESS_MS: String(2 * 60 * 60 * 1000)
+  };
+
+  const originalDateNow = Date.now;
+  const originalFetch = global.fetch;
+  Date.now = () => 2 * 60 * 60 * 1000;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/auth.test")) {
+      return createSlackOkResponse({ user_id: "UBOT" });
+    }
+
+    if (String(url).includes("/api/conversations.members")) {
+      return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({
+        messages: [
+          {
+            ts: "1000",
+            user: "U999",
+            text: "Проверяю и готовлю фикc."
+          }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const result = await validateSlackCodexActor(env, {
+      timeoutMs: 10,
+      pollIntervalMs: 1
+    });
+    assert.equal(result.validationStatus, "validated");
+    assert.equal(result.observedReply?.user, "U999");
+  } finally {
+    Date.now = originalDateNow;
+    global.fetch = originalFetch;
+  }
+});
