@@ -1159,7 +1159,7 @@ function getCommandDiagnosticMessage(command) {
   }
 
   if (diagnosticCode === "codex_target_actor_unverified") {
-    return "Cloud via Slack не подтвердил живого исполнителя перед отправкой задачи.";
+    return "Cloud via Slack не подтвердил живого исполнителя; задача не отправлена и переведена на bridge.";
   }
 
   if (diagnosticCode === "codex_target_user_invalid") {
@@ -3050,7 +3050,7 @@ function clearSelectedPhoto(message = "Фото не выбрано.", tone = ""
 
 function getPhotoSelectionSuffix() {
   return getActiveDispatchMode() === "cloud"
-    ? ` · cloud route: ${getActiveCloudRoute()}`
+    ? " · фото будет отправлено через bridge"
     : getActiveDispatchMode() === "claude"
       ? " · будет использован Claude bridge"
       : "";
@@ -3736,7 +3736,10 @@ async function submitCommand(event) {
   const fallbackThreadLabel = activeRepo ? formatMenuRepoLabel(activeRepo) : getThreadDisplayLabel(fallbackThreadId, "");
   const photoFile = commandPhotoInput?.files?.[0];
   const requestedCloudMode = requestedDispatchMode === "cloud";
-  const dispatchMode = requestedDispatchMode;
+  const hasPhotoAttachment = Boolean(photoFile);
+  const dispatchMode = hasPhotoAttachment && requestedDispatchMode === "cloud"
+    ? "bridge"
+    : requestedDispatchMode;
   const threadId = requestedThreadId;
   const threadLabel = activeRepo?.label || fallbackThreadLabel;
   const previousAssistantReply = getPreviousAssistantReplyContext(threadId);
@@ -3757,7 +3760,9 @@ async function submitCommand(event) {
   }
 
   setCommandStatusMessage(
-    dispatchMode === "cloud"
+    requestedDispatchMode === "cloud" && hasPhotoAttachment
+      ? "Фото отправляю через bridge, чтобы не зависать на Slack cloud…"
+      : dispatchMode === "cloud"
       ? `Отправляю через ${requestedCloudRoute}…`
       : dispatchMode === "claude"
         ? "Отправляю через Claude bridge…"
@@ -3839,7 +3844,9 @@ async function submitCommand(event) {
   setSubmitProgress("queued", "processing");
   const createdDispatchMode = String(result?.command?.dispatchMode || "").trim();
   setCommandStatusMessage(
-    dispatchMode === "cloud"
+    requestedDispatchMode === "cloud" && hasPhotoAttachment
+      ? "Команда с фото создана, жду bridge claim…"
+      : dispatchMode === "cloud"
       ? (
           createdDispatchMode === "slack-codex-cloud"
             ? "Команда создана, отправляю в cloud via Slack…"
