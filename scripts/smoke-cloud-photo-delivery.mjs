@@ -73,6 +73,14 @@ async function fetchAssistantReplies(commandId) {
     : [];
 }
 
+async function fetchCommand(id) {
+  const response = await fetch(`${BASE_URL}/api/commands?id=${encodeURIComponent(id)}`, {
+    headers: { accept: "application/json" }
+  });
+  const data = await response.json().catch(() => ({}));
+  return data?.command || null;
+}
+
 async function fetchStatus() {
   const response = await fetch(`${BASE_URL}/api/status?_=${Date.now()}`, {
     headers: { accept: "application/json" }
@@ -156,11 +164,7 @@ async function pollCommand(id) {
   const startedAt = Date.now();
 
   while ((Date.now() - startedAt) < 300000) {
-    const response = await fetch(`${BASE_URL}/api/commands?id=${encodeURIComponent(id)}`, {
-      headers: { accept: "application/json" }
-    });
-    const data = await response.json().catch(() => ({}));
-    const command = data?.command || null;
+    const command = await fetchCommand(id);
 
     if (command) {
       assertManifestContext(command, "cloud photo poll");
@@ -187,6 +191,12 @@ async function pollCommand(id) {
         const actualExecutor = String(command.actualExecutor || "").trim();
 
         if (actualExecutor !== "cloud-via-slack") {
+          if (actualExecutor === "bridge") {
+            throw new Error(
+              "Cloud photo smoke route failed: Slack thread/photo upload succeeded, Cloud did not acknowledge or reply in time, and bridge fallback delivered PHOTO_OK."
+            );
+          }
+
           throw new Error(`Cloud photo smoke expected actualExecutor=cloud-via-slack, got ${actualExecutor || "empty"}.`);
         }
 

@@ -1068,6 +1068,7 @@ function formatProgressStage(progressStage, status) {
     "waiting-photo-bridge": "Фото ожидает bridge",
     "retrying-photo-bridge": "Bridge завис, перезапускаю фото",
     "retrying-photo-read": "Повторно читаю фото",
+    "waiting-slack-photo-reply": "Фото загружено, жду ответ cloud",
     "switched-to-bridge": "Переведено на bridge",
     "switched-to-cloud": "Переведено в cloud",
     dispatched: "Команда отправлена",

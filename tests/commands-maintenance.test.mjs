@@ -508,6 +508,94 @@ test("runCommandMaintenance fails stale Slack commands that never got an ack", a
   assert.equal(updated.actualExecutor, "cloud-via-slack");
 });
 
+test("runCommandMaintenance keeps uploaded Slack photo commands waiting for a cloud reply before the photo result window expires", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.slackPhotoFirstAckMs + 20 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-uploaded-awaiting-reply",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    slackThreadCreatedAt: staleIso,
+    slackThreadTs: "1712345678.9012",
+    slackChannelId: "C12345678",
+    slackPhotoUploadCompletedAt: staleIso,
+    dispatchedAt: staleIso,
+    photoAttached: true,
+    photoBytesPresent: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-photo-uploaded-awaiting-reply");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "slack-codex-cloud");
+  assert.equal(updated.status, "processing");
+  assert.equal(updated.progressStage, "waiting-slack-photo-reply");
+  assert.equal(updated.actualExecutor, "cloud-via-slack");
+  assert.equal(updated.fallbackReason, "");
+});
+
+test("runCommandMaintenance falls back uploaded Slack photo commands after the photo reply wait window expires", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.slackPhotoResultMs + 20 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-uploaded-timeout",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    slackThreadCreatedAt: staleIso,
+    slackThreadTs: "1712345678.9012",
+    slackChannelId: "C12345678",
+    slackPhotoUploadCompletedAt: staleIso,
+    dispatchedAt: staleIso,
+    photoAttached: true,
+    photoBytesPresent: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-photo-uploaded-timeout");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "fallback-to-bridge");
+  assert.equal(updated.actualExecutor, "bridge");
+  assert.equal(updated.timeoutPhase, "result-timeout");
+  assert.equal(updated.lastDiagnosticCode, "slack_photo_reply_timeout");
+  assert.equal(updated.fallbackReason, "cloud via Slack photo reply timed out after upload");
+});
+
 test("runCommandMaintenance retries queued Claude bridge commands before fallback", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - 90_000).toISOString();
