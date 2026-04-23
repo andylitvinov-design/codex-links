@@ -311,3 +311,56 @@ test("validateSlackCodexActor honors configured activity freshness window before
     global.fetch = originalFetch;
   }
 });
+
+test("validateSlackCodexActor reuses recent cached validation without running a live probe", async () => {
+  const store = new Map();
+  const nowMs = Date.parse("2026-04-23T15:20:00.000Z");
+  const env = {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    SLACK_CODEX_USER_ID: "U999",
+    LINKS_STORE: {
+      async get(key, type) {
+        if (!store.has(key)) {
+          return null;
+        }
+
+        const value = store.get(key);
+        return type === "json" ? JSON.parse(value) : value;
+      },
+      async put(key, value) {
+        store.set(key, String(value));
+      }
+    }
+  };
+
+  await env.LINKS_STORE.put("slack_actor_validation_cache:C123:U999", JSON.stringify({
+    validationStatus: "validated",
+    configuredUserId: "U999",
+    lastValidatedAt: "2026-04-23T15:18:30.000Z",
+    observedReply: {
+      user: "U999",
+      text: "Cached validation"
+    }
+  }));
+
+  const originalDateNow = Date.now;
+  const originalFetch = global.fetch;
+  Date.now = () => nowMs;
+  global.fetch = async (url) => {
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const result = await validateSlackCodexActor(env, {
+      timeoutMs: 10,
+      pollIntervalMs: 1
+    });
+    assert.equal(result.validationStatus, "validated");
+    assert.equal(result.configuredUserId, "U999");
+    assert.equal(result.observedReply?.user, "U999");
+  } finally {
+    Date.now = originalDateNow;
+    global.fetch = originalFetch;
+  }
+});
