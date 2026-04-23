@@ -39,6 +39,14 @@ async function fetchAssistantReplies(commandId) {
     : [];
 }
 
+async function fetchCommand(id) {
+  const response = await fetch(`${BASE_URL}/api/commands?id=${encodeURIComponent(id)}`, {
+    headers: { accept: "application/json" }
+  });
+  const data = await response.json().catch(() => ({}));
+  return data?.command || null;
+}
+
 async function ensureClaudeBridgeHealthy() {
   const response = await fetch(`${BASE_URL}/api/status?_=${Date.now()}`, {
     headers: { accept: "application/json" }
@@ -92,11 +100,7 @@ async function pollCommand(id) {
   const startedAt = Date.now();
 
   while ((Date.now() - startedAt) < 180000) {
-    const response = await fetch(`${BASE_URL}/api/commands?id=${encodeURIComponent(id)}`, {
-      headers: { accept: "application/json" }
-    });
-    const data = await response.json().catch(() => ({}));
-    const command = data?.command || null;
+    const command = await fetchCommand(id);
 
     if (command) {
       const status = String(command.status || "").trim().toLowerCase();
@@ -107,14 +111,18 @@ async function pollCommand(id) {
         `actualExecutor=${String(command.actualExecutor || "").trim() || "unknown"}`
       ].join(" "));
 
-      if (status === "answered") {
-        const replies = await fetchAssistantReplies(command.id);
-        const matched = replies.find((reply) => /CLAUDE_PHOTO_OK/i.test(String(reply?.text || "")));
+      const replies = await fetchAssistantReplies(command.id);
+      const matched = replies.find((reply) => /CLAUDE_PHOTO_OK/i.test(String(reply?.text || "")));
 
+      if (status === "answered") {
         if (!matched) {
           throw new Error("Claude photo smoke answered, but CLAUDE_PHOTO_OK reply was not found.");
         }
 
+        return command;
+      }
+
+      if (matched) {
         return command;
       }
 
@@ -124,6 +132,14 @@ async function pollCommand(id) {
     }
 
     await sleep(5000);
+  }
+
+  const command = await fetchCommand(id);
+  const replies = await fetchAssistantReplies(id);
+  const matched = replies.find((reply) => /CLAUDE_PHOTO_OK/i.test(String(reply?.text || "")));
+
+  if (matched && String(command?.status || "").trim().toLowerCase() !== "failed") {
+    return command || { id };
   }
 
   throw new Error("Claude photo smoke timed out waiting for a reply.");

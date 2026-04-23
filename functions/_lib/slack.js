@@ -506,17 +506,11 @@ async function validateSlackTarget(token, channel, targetUserId) {
 
   if (botUserId && normalizedTarget === botUserId) {
     return buildSlackActorValidationResult({
-      validationStatus: "validated",
-      configuredUserId: normalizedTarget,
-      lastValidatedAt: new Date().toISOString(),
-      observedReply: {
-        ts: "",
-        threadTs: "",
-        text: "Validated against the configured Slack bot sender route.",
-        user: normalizedTarget,
-        botId: normalizeText(auth.bot_id),
-        subtype: "bot_message"
-      }
+      validationStatus: "invalid",
+      code: "codex_target_user_invalid",
+      message: "Configured Slack target user points to the Codex Links bot.",
+      detail: "Set SLACK_CODEX_USER_ID to the real Codex worker user, not the app bot user.",
+      configuredUserId: normalizedTarget
     });
   }
 
@@ -593,10 +587,7 @@ export async function validateSlackCodexActor(env, options = {}) {
 
   const membershipResult = await validateSlackTarget(token, channel, targetUserId);
 
-  if (membershipResult.validationStatus === "invalid" || membershipResult.validationStatus === "validated") {
-    if (membershipResult.validationStatus === "validated") {
-      await writeSlackActorValidationCache(env, channel, targetUserId, membershipResult);
-    }
+  if (membershipResult.validationStatus === "invalid") {
     return membershipResult;
   }
 

@@ -1979,6 +1979,23 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
   const dispatchObservedAt = command.slackPostedAt || command.dispatchedAt || command.progressUpdatedAt || command.createdAt;
   const hasFirstAck = Boolean(String(command.firstExecutorAckSeenAt || command.firstAckAt || "").trim());
   const actorValidationFailed = isSlackActorValidationFailure(command);
+  const hasSlackThread = Boolean(
+    String(
+      command.slackThreadCreatedAt
+      || command.slackThreadTs
+      || command.slackMessageTs
+      || command.slackPostedAt
+      || ""
+    ).trim()
+  );
+  const hasUploadedSlackPhoto = hasPhoto
+    && hasSlackThread
+    && !String(command.slackPhotoUploadError || "").trim()
+    && Boolean(String(command.slackPhotoUploadCompletedAt || "").trim());
+  const photoReplyObservedAt = command.slackPhotoUploadCompletedAt
+    || command.slackThreadCreatedAt
+    || command.slackPostedAt
+    || dispatchObservedAt;
 
   if (
     actorValidationFailed
@@ -2008,6 +2025,63 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
   }
 
   if (!hasFirstAck) {
+    if (hasUploadedSlackPhoto) {
+      if (!isOlderThan(photoReplyObservedAt, resultTimeoutMs)) {
+        if (
+          status === "processing"
+          && String(command.progressStage || "").trim() === "waiting-slack-photo-reply"
+          && String(command.actualExecutor || "").trim() === EXECUTOR_ROUTE_CLOUD_SLACK
+        ) {
+          return command;
+        }
+
+        return {
+          ...command,
+          ...mergeCommandDebugState(command, {
+            actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
+            lastDiagnosticCode: "slack_photo_uploaded_waiting_reply",
+            lastDiagnosticDetail: "Slack thread and photo upload succeeded. Waiting for the cloud reply before bridge fallback."
+          }, DISPATCH_MODE_SLACK),
+          status: "processing",
+          progressStage: "waiting-slack-photo-reply",
+          progressUpdatedAt: command.progressUpdatedAt || photoReplyObservedAt,
+          errorMessage: normalizeErrorMessage(command.errorMessage)
+        };
+      }
+
+      const photoReplyTimeoutDetail = "Slack thread and photo upload succeeded, but no cloud acknowledgement or reply was observed within the Slack photo reply window.";
+
+      if (fallbackAllowed) {
+        return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+          progressStage: "fallback-to-bridge",
+          timeoutPhase: "result-timeout",
+          fallbackReason: "cloud via Slack photo reply timed out after upload",
+          lastDiagnosticCode: "slack_photo_reply_timeout",
+          lastDiagnosticDetail: photoReplyTimeoutDetail,
+          errorMessage: stringifyCommandError({
+            code: "fallback_to_bridge",
+            stage: "fallback-to-bridge",
+            message: "Cloud via Slack photo reply timed out after upload. Switched to local bridge.",
+            detail: photoReplyTimeoutDetail,
+            fallback: "local-bridge"
+          })
+        });
+      }
+
+      return createFailedMaintenanceState(command, nowIso, {
+        timeoutPhase: "result-timeout",
+        lastDiagnosticCode: "slack_photo_reply_timeout",
+        lastDiagnosticDetail: photoReplyTimeoutDetail,
+        actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
+        errorMessage: stringifyCommandError({
+          code: "slack_photo_reply_timeout",
+          stage: "slack-photo-reply-timeout",
+          message: "Cloud via Slack photo reply timed out after upload.",
+          detail: photoReplyTimeoutDetail
+        })
+      });
+    }
+
     if (!isOlderThan(dispatchObservedAt, firstAckTimeoutMs)) {
       return command;
     }

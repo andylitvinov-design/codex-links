@@ -157,6 +157,35 @@ Quick helpers added to this repo:
 
 If you do not want to manage Cloudflare Pages settings manually, `cloud:save-config` can store non-secret runtime settings in KV using only `LINKS_WRITE_TOKEN`. Keep `OPENAI_API_KEY` in the Pages environment; do not store it in KV.
 
+## Slack Cloud Worker Ops
+
+Operational contract for `cloud-via-slack`:
+
+- `SLACK_CODEX_USER_ID` must point to the real Slack worker user, not the `Codex Links` app bot user returned by `auth.test`
+- the local launchd agents in this repo cover only `local-bridge` and `claude-bridge`
+- the Slack/Codex cloud worker is external to this repo; if it stops replying, the route will dispatch to Slack and then fall back to bridge
+
+Recovery checklist:
+
+1. Run `node scripts/check-cloud-setup.mjs`
+2. Confirm `/api/status` shows `dispatchMode=slack-codex-cloud`
+3. Confirm `slackActor.validationStatus=validated` for the real worker user, not the app bot user
+4. Run `node scripts/smoke-cloud-photo-delivery.mjs`
+5. Treat the route as unhealthy unless final `actualExecutor=cloud-via-slack`
+
+Local process management:
+
+- local bridge: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-bridge.plist`
+- Claude bridge: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-claude-bridge.plist`
+- install or refresh launchd agents with `scripts/install-bridge-launch-agent.sh` and `scripts/install-claude-bridge-launch-agent.sh`
+
+Useful log paths:
+
+- `~/Library/Logs/codex-links-bridge.log`
+- `~/Library/Logs/codex-links-bridge.error.log`
+- `~/Library/Logs/codex-links-claude-bridge.launchd.log`
+- `~/Library/Logs/codex-links-claude-bridge.launchd.error.log`
+
 ## Local Development
 
 1. Copy `.dev.vars.example` to `.dev.vars`

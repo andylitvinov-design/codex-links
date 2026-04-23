@@ -15,7 +15,7 @@ function createSlackOkResponse(body) {
   };
 }
 
-test("validateSlackCodexActor accepts the configured bot sender route when target matches auth.test user_id", async () => {
+test("validateSlackCodexActor rejects when target points to the Codex Links bot itself", async () => {
   const env = {
     SLACK_BOT_TOKEN: "xoxb-test",
     SLACK_CODEX_CHANNEL_ID: "C123",
@@ -33,9 +33,8 @@ test("validateSlackCodexActor accepts the configured bot sender route when targe
 
   try {
     const result = await validateSlackCodexActor(env, { timeoutMs: 20, pollIntervalMs: 1 });
-    assert.equal(result.validationStatus, "validated");
-    assert.equal(result.configuredUserId, "UBOT");
-    assert.equal(result.observedReply?.user, "UBOT");
+    assert.equal(result.validationStatus, "invalid");
+    assert.equal(result.code, "codex_target_user_invalid");
   } finally {
     global.fetch = originalFetch;
   }
