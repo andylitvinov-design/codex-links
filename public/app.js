@@ -1,4 +1,5 @@
 import { sanitizeCodexErrorMessage } from "./_lib/command-error-utils.js";
+import { getReportHighlightLines, getReportSourceLinks } from "./_lib/report-ui-utils.js";
 
 const state = {
   commands: [],
@@ -35,7 +36,7 @@ const state = {
   visibleCommandUpdates: {}
 };
 
-const BUILD_VERSION = "20260422-1645";
+const BUILD_VERSION = "20260423-1225";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1492,15 +1493,6 @@ function getFallbackMessageDeliveryStatus(commandId) {
     return null;
   }
 
-  const hasAssistantMessage = state.messages.some((message) => (
-    String(message?.commandId || "").trim() === normalizedId
-    && String(message?.role || "").trim() === "assistant"
-  ));
-
-  if (hasAssistantMessage) {
-    return null;
-  }
-
   const linkedCommand = state.commands.find((entry) => String(entry?.id || "").trim() === normalizedId);
 
   if (linkedCommand) {
@@ -1525,7 +1517,19 @@ function getFallbackMessageDeliveryStatus(commandId) {
     }
   }
 
-  return null;
+  const hasAssistantMessage = state.messages.some((message) => (
+    String(message?.commandId || "").trim() === normalizedId
+    && String(message?.role || "").trim() === "assistant"
+  ));
+
+  if (hasAssistantMessage) {
+    return null;
+  }
+
+  return {
+    tone: "queued",
+    text: "Обрабатываю · жду обновление статуса"
+  };
 }
 
 function getVisibleTimelineCommands() {
@@ -2501,9 +2505,20 @@ function renderCommands() {
     if (entry.kind === "report") {
       const report = entry.report || {};
       const sourceDashboards = Array.isArray(report.source_dashboards) ? report.source_dashboards : [];
-      const sourceList = sourceDashboards.length
-        ? sourceDashboards.slice(0, 6).map((value) => `<span>${escapeHtml(value)}</span>`).join("")
+      const sourceList = getReportSourceLinks(sourceDashboards).length
+        ? getReportSourceLinks(sourceDashboards)
+            .slice(0, 6)
+            .map((source) => (
+              source.href
+                ? `<a href="${escapeHtml(source.href)}" target="_blank" rel="noopener">${escapeHtml(source.label)}</a>`
+                : `<span>${escapeHtml(source.label)}</span>`
+            ))
+            .join("")
         : "<span>источники не определены</span>";
+      const highlightRows = getReportHighlightLines(report)
+        .slice(0, 6)
+        .map((line) => `<li>${escapeHtml(line)}</li>`)
+        .join("");
       const metricRows = (entry.metricChanges || [])
         .map((change) => `<li>${escapeHtml(formatReportMetricLine(change))}</li>`)
         .join("");
@@ -2519,7 +2534,7 @@ function renderCommands() {
           <span>${escapeHtml(formatReportWindow(report))}</span>
         </div>
         <p class="report-item-title">${escapeHtml(entry.title || "Отчёт")}</p>
-        <p>${escapeHtml(entry.summary || entry.text || "No material dashboard changes")}</p>
+        ${highlightRows ? `<ul class="report-item-highlights">${highlightRows}</ul>` : `<p>${escapeHtml(entry.summary || entry.text || "No material dashboard changes")}</p>`}
         ${metricRows ? `<ul class="report-item-metric-list">${metricRows}</ul>` : ""}
         <div class="command-context">
           <span>Источники:</span>
