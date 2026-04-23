@@ -197,12 +197,17 @@ export function getExecutorRouteLabel(route) {
 }
 
 export function getSlackCodexMention(env) {
+  const raw = String(env?.SLACK_CODEX_MENTION || "@Codex").trim();
+
+  if (raw) {
+    return raw;
+  }
+
   const userId = String(env?.SLACK_CODEX_USER_ID || "").trim();
 
   if (userId) {
     return `<@${userId}>`;
   }
 
-  const raw = String(env?.SLACK_CODEX_MENTION || "@Codex").trim();
-  return raw || "@Codex";
+  return "@Codex";
 }

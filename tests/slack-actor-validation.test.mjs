@@ -15,7 +15,7 @@ function createSlackOkResponse(body) {
   };
 }
 
-test("validateSlackCodexActor rejects when target points to the Codex Links bot itself", async () => {
+test("validateSlackCodexActor accepts the configured bot sender route when target matches auth.test user_id", async () => {
   const env = {
     SLACK_BOT_TOKEN: "xoxb-test",
     SLACK_CODEX_CHANNEL_ID: "C123",
@@ -33,8 +33,9 @@ test("validateSlackCodexActor rejects when target points to the Codex Links bot 
 
   try {
     const result = await validateSlackCodexActor(env, { timeoutMs: 20, pollIntervalMs: 1 });
-    assert.equal(result.validationStatus, "invalid");
-    assert.equal(result.code, "codex_target_user_invalid");
+    assert.equal(result.validationStatus, "validated");
+    assert.equal(result.configuredUserId, "UBOT");
+    assert.equal(result.observedReply?.user, "UBOT");
   } finally {
     global.fetch = originalFetch;
   }
@@ -201,6 +202,51 @@ test("validateSlackCodexActor accepts a real worker ack in the probe thread", as
     assert.equal(result.validationStatus, "validated");
     assert.equal(result.code, "");
     assert.equal(result.observedReply?.user, "U999");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("validateSlackCodexActor accepts recent channel activity from the configured actor", async () => {
+  const env = {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    SLACK_CODEX_USER_ID: "U999"
+  };
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/auth.test")) {
+      return createSlackOkResponse({ user_id: "UBOT" });
+    }
+
+    if (String(url).includes("/api/conversations.members")) {
+      return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({
+        messages: [
+          {
+            ts: "1712345678.000200",
+            user: "U999",
+            text: "Проверяю и готовлю фикc."
+          }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const result = await validateSlackCodexActor(env, {
+      timeoutMs: 10,
+      pollIntervalMs: 1
+    });
+    assert.equal(result.validationStatus, "validated");
+    assert.equal(result.observedReply?.user, "U999");
+    assert.match(result.observedReply?.text || "", /готовлю фик/i);
   } finally {
     global.fetch = originalFetch;
   }

@@ -13,6 +13,7 @@ import {
   dispatchModeToExecutorRoute,
   executorRouteToDispatchMode,
   getConfiguredDispatchMode,
+  getSlackCodexMention,
   normalizeDispatchMode,
   normalizeExecutorRoute
 } from "../functions/_lib/dispatch.js";
@@ -55,4 +56,11 @@ test("getConfiguredDispatchMode falls back to local bridge when nothing cloud-ca
   assert.equal(getConfiguredDispatchMode({
     COMMAND_DISPATCH_MODE: "cloud-via-slack"
   }), DISPATCH_MODE_LOCAL);
+});
+
+test("getSlackCodexMention prefers explicit mention over target user id", () => {
+  assert.equal(getSlackCodexMention({
+    SLACK_CODEX_MENTION: "@Codex",
+    SLACK_CODEX_USER_ID: "U123"
+  }), "@Codex");
 });
