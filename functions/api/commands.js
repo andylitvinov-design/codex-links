@@ -109,9 +109,22 @@ export function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   if (hasPhoto) {
-    if (requestedDispatchMode === DISPATCH_MODE_CLOUD || requestedExecutor === EXECUTOR_ROUTE_DIRECT_OPENAI) {
-      return isCloudDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_CLOUD : DISPATCH_MODE_LOCAL;
+    if (requestedDispatchMode === DISPATCH_MODE_SLACK || requestedExecutor === EXECUTOR_ROUTE_CLOUD_SLACK) {
+      return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
     }
+
+    if (requestedDispatchMode === DISPATCH_MODE_CLOUD || requestedExecutor === EXECUTOR_ROUTE_DIRECT_OPENAI) {
+      if (isCloudDispatchConfigured(runtimeConfig)) {
+        return DISPATCH_MODE_CLOUD;
+      }
+
+      if (isSlackDispatchConfigured(runtimeConfig)) {
+        return DISPATCH_MODE_SLACK;
+      }
+
+      return DISPATCH_MODE_LOCAL;
+    }
+
     return DISPATCH_MODE_LOCAL;
   }
 
