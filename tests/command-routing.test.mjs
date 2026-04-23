@@ -4,36 +4,34 @@ import assert from "node:assert/strict";
 import { resolveRequestedDispatchMode } from "../functions/api/commands.js";
 
 test("resolveRequestedDispatchMode routes photo requests to local bridge even when Slack cloud was requested", () => {
-  const runtimeConfig = {
-    dispatchMode: "slack-codex-cloud",
-    slackBotToken: "xoxb-test",
-    slackChannelId: "C123",
-    openAiApiKey: "sk-test"
-  };
-
   const dispatchMode = resolveRequestedDispatchMode({
     dispatchMode: "slack-codex-cloud",
-    requestedExecutor: "cloud-via-slack",
+    targetExecutionMode: "cloud-via-slack",
     photo: {
-      dataUrl: "data:image/jpeg;base64,ZmFrZQ=="
+      contentType: "image/png",
+      fileName: "photo.png",
+      size: 128,
+      dataUrl: "data:image/png;base64,AA=="
     }
-  }, runtimeConfig);
+  }, {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    OPENAI_API_KEY: "sk-test",
+    COMMAND_DISPATCH_MODE: "cloud-via-slack"
+  });
 
   assert.equal(dispatchMode, "local-bridge");
 });
 
 test("resolveRequestedDispatchMode preserves explicit direct cloud opt-in for photo requests", () => {
-  const runtimeConfig = {
-    dispatchMode: "slack-codex-cloud",
-    OPENAI_API_KEY: "sk-test"
-  };
-
   const dispatchMode = resolveRequestedDispatchMode({
     dispatchMode: "cloud",
     photo: {
       dataUrl: "data:image/jpeg;base64,ZmFrZQ=="
     }
-  }, runtimeConfig);
+  }, {
+    OPENAI_API_KEY: "sk-test",
+  });
 
   assert.equal(dispatchMode, "cloud");
 });

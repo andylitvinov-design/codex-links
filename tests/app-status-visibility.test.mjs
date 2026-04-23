@@ -15,5 +15,6 @@ test("UI maps Slack actor validation failures to a visible diagnostic message", 
   const source = await readFile(appScriptPath, "utf8");
 
   assert.match(source, /diagnosticCode === "codex_target_actor_unverified"/);
+  assert.match(source, /задача не отправлена/i);
   assert.match(source, /diagnosticCode === "codex_target_user_invalid"/);
 });

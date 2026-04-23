@@ -67,3 +67,38 @@ test("runCommandMaintenance keeps photo Slack commands alive during the longer f
   assert.equal(updated.timeoutPhase, "");
   assert.equal(updated.lastDiagnosticCode, "bridge_claim_timeout");
 });
+
+test("runCommandMaintenance keeps text Slack commands alive before the 60 second first-ack window", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - 45_000).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-text-no-ack-yet",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Fix the dialogs",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    dispatchedAt: staleIso
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-text-no-ack-yet");
+  assert.ok(updated);
+  assert.equal(updated.status, "dispatched");
+  assert.equal(updated.progressStage, "dispatched");
+  assert.equal(updated.timeoutPhase, "");
+});

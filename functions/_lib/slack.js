@@ -9,6 +9,8 @@ const SLACK_PHOTO_UPLOAD_RETRY_DELAY_MS = 1_500;
 const DEFAULT_SLACK_ACTOR_PROBE_TIMEOUT_MS = 30_000;
 const DEFAULT_SLACK_ACTOR_PROBE_POLL_MS = 2_000;
 const DEFAULT_SLACK_ACTOR_ACTIVITY_FRESHNESS_MS = 15 * 60_000;
+const DEFAULT_SLACK_ACTOR_VALIDATION_CACHE_TTL_MS = 5 * 60_000;
+const SLACK_ACTOR_VALIDATION_CACHE_KEY_PREFIX = "slack_actor_validation_cache:";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -112,6 +114,69 @@ function getSlackActorActivityFreshnessMs(env, fallback = DEFAULT_SLACK_ACTOR_AC
   }
 
   return configured;
+}
+
+function getSlackActorValidationCacheTtlMs(env, fallback = DEFAULT_SLACK_ACTOR_VALIDATION_CACHE_TTL_MS) {
+  const configured = Number(env?.SLACK_ACTOR_VALIDATION_CACHE_TTL_MS);
+
+  if (!Number.isFinite(configured) || configured < 1_000) {
+    return fallback;
+  }
+
+  return configured;
+}
+
+function getSlackActorValidationCacheKey(channel, targetUserId) {
+  return `${SLACK_ACTOR_VALIDATION_CACHE_KEY_PREFIX}${normalizeText(channel)}:${normalizeText(targetUserId)}`;
+}
+
+async function readSlackActorValidationCache(env, channel, targetUserId) {
+  const store = env?.LINKS_STORE;
+
+  if (!store?.get) {
+    return null;
+  }
+
+  const cached = await store.get(getSlackActorValidationCacheKey(channel, targetUserId), "json").catch(() => null);
+
+  if (!cached || typeof cached !== "object") {
+    return null;
+  }
+
+  const normalized = buildSlackActorValidationResult(cached);
+
+  if (
+    normalized.validationStatus !== "validated"
+    || normalized.configuredUserId !== normalizeText(targetUserId)
+    || !normalized.lastValidatedAt
+  ) {
+    return null;
+  }
+
+  const ageMs = Date.now() - Date.parse(normalized.lastValidatedAt);
+
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > getSlackActorValidationCacheTtlMs(env)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+async function writeSlackActorValidationCache(env, channel, targetUserId, result) {
+  const store = env?.LINKS_STORE;
+
+  if (!store?.put || !result || result.validationStatus !== "validated") {
+    return;
+  }
+
+  const ttlMs = getSlackActorValidationCacheTtlMs(env);
+  const expirationTtl = Math.max(1, Math.ceil(ttlMs / 1000));
+
+  await store.put(
+    getSlackActorValidationCacheKey(channel, targetUserId),
+    JSON.stringify(buildSlackActorValidationResult(result)),
+    { expirationTtl }
+  ).catch(() => {});
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_SLACK_API_TIMEOUT_MS, label = "Slack request") {
@@ -510,9 +575,18 @@ export async function validateSlackCodexActor(env, options = {}) {
     });
   }
 
+  const cachedValidation = await readSlackActorValidationCache(env, channel, targetUserId);
+
+  if (cachedValidation) {
+    return cachedValidation;
+  }
+
   const membershipResult = await validateSlackTarget(token, channel, targetUserId);
 
   if (membershipResult.validationStatus === "invalid" || membershipResult.validationStatus === "validated") {
+    if (membershipResult.validationStatus === "validated") {
+      await writeSlackActorValidationCache(env, channel, targetUserId, membershipResult);
+    }
     return membershipResult;
   }
 
@@ -523,12 +597,14 @@ export async function validateSlackCodexActor(env, options = {}) {
   const recentActorActivity = pickValidatedChannelActivity(recentChannelActivity, targetUserId);
 
   if (recentActorActivity) {
-    return buildSlackActorValidationResult({
+    const result = buildSlackActorValidationResult({
       validationStatus: "validated",
       configuredUserId: targetUserId,
       lastValidatedAt: new Date().toISOString(),
       observedReply: recentActorActivity
     });
+    await writeSlackActorValidationCache(env, channel, targetUserId, result);
+    return result;
   }
 
   const timeoutMs = Number.isFinite(Number(options.timeoutMs))
@@ -562,7 +638,7 @@ export async function validateSlackCodexActor(env, options = {}) {
     );
 
     if (validatedReply) {
-      return buildSlackActorValidationResult({
+      const result = buildSlackActorValidationResult({
         validationStatus: "validated",
         configuredUserId: targetUserId,
         probeChannelId,
@@ -571,6 +647,8 @@ export async function validateSlackCodexActor(env, options = {}) {
         lastValidatedAt: new Date().toISOString(),
         observedReply: validatedReply
       });
+      await writeSlackActorValidationCache(env, channel, targetUserId, result);
+      return result;
     }
 
     await sleep(pollIntervalMs);

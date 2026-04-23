@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
     <script>
       (function () {
-        var build = "20260423-0842";
+        var build = "20260423-1605";
         var current = new URL(window.location.href);
         var requested = String(current.searchParams.get("v") || "").trim();
         if (requested === build) {
@@ -24,8 +24,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260423-0842" />
-    <link rel="stylesheet" href="/styles.css?v=20260423-0842" />
+    <link rel="stylesheet" href="/styles.css?v=20260423-1605" />
   </head>
   <body>
     <main class="page">
@@ -48,13 +47,19 @@
               <p id="bridge-status-text" class="bridge-status">Подключаю статус cloud execution…</p>
               <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
             </div>
+            <button class="button button-secondary refresh-button" id="delivery-reset-button" type="button">Reset</button>
           </div>
+          <p class="bridge-reset-help">Резервный запуск maintenance для зависших cloud и bridge сообщений.</p>
         </section>
 
         <section class="command-wrap">
           <form id="command-form" class="command-form">
             <div class="thread-settings-inline-row">
               <span id="thread-settings-summary" class="form-status">Показываются все репозитории.</span>
+              <label class="thread-settings-item thread-settings-item-inline thread-settings-item-inline-compact">
+                <input id="thread-settings-show-all" type="checkbox" />
+                <span>Все</span>
+              </label>
             </div>
             <section id="thread-settings-panel" class="thread-settings-panel" hidden>
               <label>
@@ -88,6 +93,9 @@
                 <span class="field-label" id="command-target-label">Проект</span>
                 <select id="command-thread-select" name="thread"></select>
               </label>
+              <div class="project-nav-actions">
+                <button class="button button-secondary menu-button" id="thread-settings-toggle" type="button" aria-expanded="false" aria-controls="thread-settings-panel">Меню</button>
+              </div>
             </section>
             <div class="command-compose-row">
               <textarea id="command-input" name="command" rows="2" placeholder="Сообщение для Codex" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true"></textarea>
@@ -145,7 +153,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260422-1704"></script>
-    <script type="module" src="/app.js?v=20260422-1704"></script>
+    <script type="module" src="/app.js?v=20260423-1605"></script>
   </body>
 </html>
