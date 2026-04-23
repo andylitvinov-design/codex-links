@@ -64,6 +64,7 @@ optional_slack_keys=(
   SLACK_CODEX_CHANNEL_ID
   SLACK_CODEX_USER_ID
   SLACK_CODEX_MENTION
+  SLACK_ACTOR_ACTIVITY_FRESHNESS_MS
 )
 
 for key in "${optional_slack_keys[@]}"; do

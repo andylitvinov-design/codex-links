@@ -56,7 +56,8 @@ async function main() {
     SLACK_SIGNING_SECRET: env.SLACK_SIGNING_SECRET || "",
     SLACK_CODEX_CHANNEL_ID: env.SLACK_CODEX_CHANNEL_ID || "",
     SLACK_CODEX_USER_ID: env.SLACK_CODEX_USER_ID || "",
-    SLACK_CODEX_MENTION: env.SLACK_CODEX_MENTION || ""
+    SLACK_CODEX_MENTION: env.SLACK_CODEX_MENTION || "",
+    SLACK_ACTOR_ACTIVITY_FRESHNESS_MS: env.SLACK_ACTOR_ACTIVITY_FRESHNESS_MS || ""
   };
 
   const response = await fetch(`${baseUrl}/api/config`, {
