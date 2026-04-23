@@ -1940,7 +1940,7 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
   }
 
   const hasPhoto = commandHasPhoto(command);
-  const fallbackAllowed = !hasPhoto && canFallbackToLocal(command, options);
+  const fallbackAllowed = canFallbackToLocal(command, options);
   const preDispatchFallbackAllowed = canFallbackToLocal(command, options);
   const status = String(command.status || "").trim().toLowerCase();
   const firstAckTimeoutMs = getSlackFirstAckTimeoutMs(command);
@@ -1986,18 +1986,28 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
       return command;
     }
 
+    const firstAckDiagnosticCode = command.slackPhotoUploadError ? "slack_photo_upload_failed" : "slack_first_ack_timeout";
+    const firstAckDiagnosticDetail = command.slackPhotoUploadError
+      ? `Slack photo upload failed before a worker acknowledgement was observed: ${String(command.slackPhotoUploadError || "").trim()}`
+      : "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.";
+    const firstAckFallbackMessage = command.slackPhotoUploadError
+      ? "Cloud via Slack photo upload failed. Switched to local bridge."
+      : "Cloud via Slack did not acknowledge in time. Switched to local bridge.";
+
     if (fallbackAllowed) {
       return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
         progressStage: "fallback-to-bridge",
         timeoutPhase: "first-ack-timeout",
-        fallbackReason: "cloud via Slack did not acknowledge in time",
-        lastDiagnosticCode: "slack_first_ack_timeout",
-        lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
+        fallbackReason: command.slackPhotoUploadError
+          ? "cloud via Slack photo upload failed"
+          : "cloud via Slack did not acknowledge in time",
+        lastDiagnosticCode: firstAckDiagnosticCode,
+        lastDiagnosticDetail: firstAckDiagnosticDetail,
         errorMessage: stringifyCommandError({
           code: "fallback_to_bridge",
           stage: "fallback-to-bridge",
-          message: "Cloud via Slack did not acknowledge in time. Switched to local bridge.",
-          detail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
+          message: firstAckFallbackMessage,
+          detail: firstAckDiagnosticDetail,
           fallback: "local-bridge"
         })
       });

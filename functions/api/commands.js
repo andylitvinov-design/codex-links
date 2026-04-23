@@ -56,7 +56,7 @@ import {
 
 const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
 const SLACK_DISPATCH_GRACE_MS = 15_000;
-const SLACK_FIRST_ACK_TIMEOUT_MS = 30_000;
+const SLACK_FIRST_ACK_TIMEOUT_MS = 60_000;
 const SLACK_RESULT_WAIT_MS = 120_000;
 const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90_000;
 const SLACK_PHOTO_RESULT_WAIT_MS = 300_000;
@@ -109,6 +109,9 @@ export function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   if (hasPhoto) {
+    if (requestedDispatchMode === DISPATCH_MODE_CLOUD || requestedExecutor === EXECUTOR_ROUTE_DIRECT_OPENAI) {
+      return isCloudDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_CLOUD : DISPATCH_MODE_LOCAL;
+    }
     return DISPATCH_MODE_LOCAL;
   }
 

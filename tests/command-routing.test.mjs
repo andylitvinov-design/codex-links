@@ -22,3 +22,16 @@ test("resolveRequestedDispatchMode routes photo requests to local bridge even wh
 
   assert.equal(dispatchMode, "local-bridge");
 });
+
+test("resolveRequestedDispatchMode preserves explicit direct cloud opt-in for photo requests", () => {
+  const dispatchMode = resolveRequestedDispatchMode({
+    dispatchMode: "cloud",
+    photo: {
+      dataUrl: "data:image/jpeg;base64,ZmFrZQ=="
+    }
+  }, {
+    OPENAI_API_KEY: "sk-test",
+  });
+
+  assert.equal(dispatchMode, "cloud");
+});

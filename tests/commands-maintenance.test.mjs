@@ -609,7 +609,7 @@ test("runCommandMaintenance fails stale Claude commands after retry window when 
   assert.equal(updated.lastDiagnosticCode, "claude_result_timeout");
 });
 
-test("runCommandMaintenance fails photo Slack commands instead of masking them with bridge fallback", async () => {
+test("runCommandMaintenance falls back photo Slack upload failures to local bridge when fallback is available", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
 
@@ -642,11 +642,12 @@ test("runCommandMaintenance fails photo Slack commands instead of masking them w
 
   const updated = result.commands.find((command) => command.id === "cmd-slack-photo-upload-error");
   assert.ok(updated);
-  assert.equal(updated.dispatchMode, "slack-codex-cloud");
-  assert.equal(updated.status, "failed");
-  assert.equal(updated.progressStage, "failed");
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "fallback-to-bridge");
   assert.equal(updated.lastDiagnosticCode, "slack_photo_upload_failed");
-  assert.equal(updated.actualExecutor, "cloud-via-slack");
+  assert.equal(updated.actualExecutor, "bridge");
+  assert.equal(updated.fallbackReason, "cloud via Slack photo upload failed");
 });
 
 test("runCommandMaintenance reroutes stale actor-validation Slack failures to local bridge", async () => {
