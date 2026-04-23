@@ -28,6 +28,7 @@ import {
   EXECUTOR_ROUTE_CLAUDE,
   EXECUTOR_ROUTE_CLOUD_SLACK,
   EXECUTOR_ROUTE_DIRECT_OPENAI,
+  dispatchModeToExecutorRoute,
   executorRouteToDispatchMode,
   getConfiguredDispatchMode,
   getDispatchModeLabel,
@@ -86,7 +87,7 @@ function getSlackResultWaitMs(command) {
   return commandHasPhoto(command) ? SLACK_PHOTO_RESULT_WAIT_MS : SLACK_RESULT_WAIT_MS;
 }
 
-function resolveRequestedDispatchMode(payload, runtimeConfig) {
+export function resolveRequestedDispatchMode(payload, runtimeConfig) {
   const hasPhoto = Boolean(payload?.photo && typeof payload.photo === "object");
   const requestedExecutor = normalizeExecutorRoute(
     payload?.targetExecutionMode
@@ -105,6 +106,10 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
 
   if (requestedDispatchMode === DISPATCH_MODE_CLAUDE || requestedExecutor === EXECUTOR_ROUTE_CLAUDE) {
     return DISPATCH_MODE_CLAUDE;
+  }
+
+  if (hasPhoto) {
+    return DISPATCH_MODE_LOCAL;
   }
 
   if (requestedDispatchMode === DISPATCH_MODE_SLACK) {
@@ -157,14 +162,6 @@ function resolveRequestedDispatchMode(payload, runtimeConfig) {
     }
 
     return DISPATCH_MODE_LOCAL;
-  }
-
-  if (hasPhoto && configuredDispatchMode === DISPATCH_MODE_CLOUD) {
-    if (isCloudDispatchConfigured(runtimeConfig)) {
-      return DISPATCH_MODE_CLOUD;
-    }
-
-    return isSlackDispatchConfigured(runtimeConfig) ? DISPATCH_MODE_SLACK : DISPATCH_MODE_LOCAL;
   }
 
   return configuredDispatchMode;
@@ -282,6 +279,13 @@ function serializeCommand(command, options = {}) {
     slackPhotoUploadThreaded: Boolean(command.slackPhotoUploadThreaded),
     slackPhotoUploadCompletedAt: String(command.slackPhotoUploadCompletedAt || "").trim(),
     slackPhotoUploadError: String(command.slackPhotoUploadError || "").trim(),
+    actorValidationStartedAt: String(command.actorValidationStartedAt || "").trim(),
+    actorValidationPassedAt: String(command.actorValidationPassedAt || "").trim(),
+    actorValidationFailedAt: String(command.actorValidationFailedAt || "").trim(),
+    actorValidationProbeChannelId: String(command.actorValidationProbeChannelId || "").trim(),
+    actorValidationProbeMessageTs: String(command.actorValidationProbeMessageTs || "").trim(),
+    actorValidationProbeThreadTs: String(command.actorValidationProbeThreadTs || "").trim(),
+    actorValidationPreDispatchFailed: Boolean(command.actorValidationPreDispatchFailed),
     slackThreadCreatedAt: String(command.slackPostedAt || "").trim(),
     slackAckObservedAt: String(command.slackAckObservedAt || "").trim(),
     projectId: String(command.projectId || "").trim(),
@@ -538,7 +542,8 @@ async function fallbackToLocalBridge(env, command, errorMessage) {
     timeoutPhase,
     fallbackReason,
     lastDiagnosticCode: typeof errorMessage === "object" && errorMessage ? errorMessage.code : "",
-    lastDiagnosticDetail: fallbackReason
+    lastDiagnosticDetail: fallbackReason,
+    ...extractActorValidationMetadata(errorMessage)
   });
 
   await refreshBridgeStatusFromCommands(env, {
@@ -579,6 +584,35 @@ function canFallbackToLocalBridge(command) {
     (String(command?.threadId || "").trim() && !String(command?.threadId || "").trim().startsWith("cloud:"))
     || String(command?.fallbackThreadId || "").trim()
   );
+}
+
+function extractActorValidationMetadata(commandError) {
+  const actorValidation = commandError?.actorValidation;
+
+  if (!actorValidation || typeof actorValidation !== "object") {
+    return {};
+  }
+
+  const nowIso = new Date().toISOString();
+  const validationStatus = String(actorValidation.validationStatus || "").trim().toLowerCase();
+
+  return {
+    actorValidationStartedAt: actorValidation.lastValidatedAt ? "" : nowIso,
+    actorValidationPassedAt: validationStatus === "validated" ? (actorValidation.lastValidatedAt || nowIso) : "",
+    actorValidationFailedAt: validationStatus && validationStatus !== "validated" ? nowIso : "",
+    actorValidationProbeChannelId: String(actorValidation.probeChannelId || "").trim(),
+    actorValidationProbeMessageTs: String(actorValidation.probeMessageTs || "").trim(),
+    actorValidationProbeThreadTs: String(actorValidation.probeThreadTs || "").trim(),
+    actorValidationPreDispatchFailed: validationStatus && validationStatus !== "validated"
+  };
+}
+
+function isSlackActorValidationFailure(commandError) {
+  const code = String(commandError?.code || "").trim().toLowerCase();
+  const stage = String(commandError?.stage || "").trim().toLowerCase();
+  return code === "codex_target_actor_unverified"
+    || code === "codex_target_user_invalid"
+    || stage === "codex-target-actor-invalid";
 }
 
 function canFallbackToCloud(command, runtimeConfig) {
@@ -622,6 +656,7 @@ async function markSlackCloudCommandFailed(env, command, commandError) {
     timeoutPhase: String(commandError?.stage || "").trim().includes("timeout") ? "result-timeout" : "",
     lastDiagnosticCode: commandError?.code || "slack_cloud_dispatch_failed",
     lastDiagnosticDetail: commandError?.detail || commandError?.message || "Cloud via Slack failed.",
+    ...extractActorValidationMetadata(commandError),
     errorMessage: normalizedError,
     resultAt: new Date().toISOString()
   });
@@ -787,6 +822,46 @@ async function executeDirectCloudCommand(env, command) {
   });
 }
 
+async function fallbackSlackActorValidationFailure(env, command, commandError) {
+  const fallbackCommand = await fallbackToLocalBridge(env, command, {
+    ...(commandError || {}),
+    code: commandError?.code || "codex_target_actor_unverified",
+    stage: "fallback-to-bridge",
+    message: "Cloud via Slack did not confirm a live actor. Switched to local bridge.",
+    detail: commandError?.detail || commandError?.message || "Cloud via Slack did not confirm a live actor before dispatch.",
+    fallback: "local-bridge",
+    ...extractActorValidationMetadata(commandError)
+  });
+
+  await refreshBridgeStatusFromCommands(env, {
+    dispatchMode: DISPATCH_MODE_LOCAL,
+    executorLabel: getDispatchModeLabel(DISPATCH_MODE_LOCAL),
+    bridgeOnline: true,
+    lastRunAt: new Date().toISOString(),
+    lastError: stringifyCommandError(commandError),
+    slackActor: commandError?.actorValidation
+      ? {
+          configuredUserId: commandError.actorValidation.configuredUserId,
+          validationStatus: commandError.actorValidation.validationStatus,
+          lastValidatedAt: commandError.actorValidation.lastValidatedAt,
+          validationError: commandError.actorValidation.detail || commandError.actorValidation.message,
+          probeChannelId: commandError.actorValidation.probeChannelId,
+          probeMessageTs: commandError.actorValidation.probeMessageTs,
+          probeThreadTs: commandError.actorValidation.probeThreadTs
+        }
+      : undefined
+  });
+
+  const redispatched = await getCommandById(env, fallbackCommand.id);
+
+  if (redispatched) {
+    const rerouted = await dispatchCommandIfNeeded(env, redispatched, await readRuntimeConfig(env));
+    return rerouted?.command || redispatched;
+  }
+
+  return fallbackCommand;
+}
+
 export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
   const config = runtimeConfig || await readRuntimeConfig(env);
   const dispatchMode = command?.dispatchMode || getConfiguredDispatchMode(config);
@@ -839,7 +914,8 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       dispatchMode,
       status: command.status || "queued",
       progressStage: "dispatching",
-      dispatchStartedAt
+      dispatchStartedAt,
+      actorValidationStartedAt: new Date().toISOString()
     });
 
     const published = await postSlackCommand(config, command, getSlackCodexMention(config));
@@ -849,6 +925,7 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
         dispatchMode,
         progressStage: "dispatched",
         dispatchStartedAt,
+        actorValidationPassedAt: new Date().toISOString(),
         slackPostedAt: new Date().toISOString(),
         slackChannelId: published.channel,
         slackMessageTs: published.ts,
@@ -873,6 +950,7 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       dispatchMode,
       progressStage: "dispatched",
       dispatchStartedAt,
+      actorValidationPassedAt: new Date().toISOString(),
       slackPostedAt: new Date().toISOString(),
       slackChannelId: published.channel,
       slackMessageTs: published.ts,
@@ -924,6 +1002,13 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
           detail: errorMessage,
           fallback: ""
         };
+
+    if (isSlackActorValidationFailure(detail) && canFallbackToLocalBridge(command)) {
+      return {
+        ok: true,
+        command: await fallbackSlackActorValidationFailure(env, command, detail)
+      };
+    }
 
     return {
       ok: true,
@@ -1537,6 +1622,7 @@ export async function onRequest(context) {
 
   const runtimeConfig = await readRuntimeConfig(env);
   const requestedDispatchMode = resolveRequestedDispatchMode(payload, runtimeConfig);
+  const resolvedTargetExecutionMode = dispatchModeToExecutorRoute(requestedDispatchMode);
   const manifestTarget = resolveProjectDispatchTarget({
     threadId: payload?.threadId,
     projectId: payload?.projectId,
@@ -1558,6 +1644,7 @@ export async function onRequest(context) {
   const created = await insertCommand(env, {
     ...(payload || {}),
     dispatchMode: requestedDispatchMode,
+    targetExecutionMode: resolvedTargetExecutionMode,
     ...initialBridgeQueueState,
     uiSubmitStartedAt: payload?.uiSubmitStartedAt,
     apiCommandsRequestStartedAt: requestStartedAt,

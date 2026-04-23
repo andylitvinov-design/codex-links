@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import { dispatchCommandIfNeeded } from "../functions/api/commands.js";
 import { getCommandById, writeCommands } from "../functions/_lib/commands.js";
-import { readBridgeStatus } from "../functions/_lib/status.js";
 
 function createMockEnv() {
   const store = new Map();
@@ -51,10 +50,12 @@ test("dispatchCommandIfNeeded falls back to local bridge when Slack actor live p
   const createdAt = new Date().toISOString();
 
   await writeCommands(env, [{
-    id: "cmd-slack-invalid-actor",
+    id: "cmd-slack-invalid-actor-fallback",
     clientId: "test-client",
     threadId: "links",
     threadLabel: "links",
+    fallbackThreadId: "links",
+    fallbackThreadLabel: "links",
     text: "fix the dialogs",
     createdAt,
     progressUpdatedAt: createdAt,
@@ -102,21 +103,86 @@ test("dispatchCommandIfNeeded falls back to local bridge when Slack actor live p
   };
 
   try {
-    const command = await getCommandById(env, "cmd-slack-invalid-actor");
+    const command = await getCommandById(env, "cmd-slack-invalid-actor-fallback");
     const result = await dispatchCommandIfNeeded(env, command, env);
 
     assert.equal(result.ok, true);
     assert.equal(result.command.status, "queued");
     assert.equal(result.command.progressStage, "queued");
-    assert.equal(result.command.lastDiagnosticCode, "codex_target_actor_unverified");
-    assert.equal(result.command.slackChannelId, "");
-    assert.equal(result.command.slackThreadTs, "");
     assert.equal(result.command.dispatchMode, "local-bridge");
     assert.equal(result.command.actualExecutor, "bridge");
+    assert.equal(result.command.fallbackApplied, true);
+    assert.equal(result.command.fallbackCount, 1);
+    assert.equal(result.command.lastDiagnosticCode, "codex_target_actor_unverified");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
 
-    const storedStatus = await readBridgeStatus(env);
-    assert.equal(storedStatus.slackActor?.validationStatus, "invalid");
-    assert.equal(storedStatus.slackActor?.configuredUserId, "U999");
+test("dispatchCommandIfNeeded fails immediately when Slack actor validation fails and local fallback is unavailable", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-invalid-actor-terminal",
+    clientId: "test-client",
+    threadId: "cloud:links",
+    threadLabel: "cloud:links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued"
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/auth.test")) {
+      return createSlackOkResponse({ user_id: "UBOT" });
+    }
+
+    if (String(url).includes("/api/conversations.members")) {
+      return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({ messages: [] });
+    }
+
+    if (String(url).includes("/api/chat.postMessage")) {
+      return createSlackOkResponse({
+        channel: "C123",
+        ts: "1712345678.000100",
+        message: {
+          ts: "1712345678.000100",
+          thread_ts: "1712345678.000100"
+        }
+      });
+    }
+
+    if (String(url).includes("/api/conversations.replies")) {
+      return createSlackOkResponse({
+        messages: [
+          { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-invalid-actor-terminal");
+    const result = await dispatchCommandIfNeeded(env, command, env);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.command.status, "failed");
+    assert.equal(result.command.progressStage, "failed");
+    assert.equal(result.command.lastDiagnosticCode, "codex_target_actor_unverified");
+    assert.equal(result.command.dispatchMode, "slack-codex-cloud");
   } finally {
     global.fetch = originalFetch;
   }

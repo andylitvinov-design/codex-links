@@ -649,6 +649,46 @@ test("runCommandMaintenance fails photo Slack commands instead of masking them w
   assert.equal(updated.actualExecutor, "cloud-via-slack");
 });
 
+test("runCommandMaintenance reroutes stale actor-validation Slack failures to local bridge", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-actor-validation-stuck",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    fallbackThreadId: "links",
+    fallbackThreadLabel: "links",
+    text: "fix the dialogs",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "processing",
+    progressStage: "dispatching",
+    lastDiagnosticCode: "codex_target_actor_unverified",
+    errorMessage: JSON.stringify({
+      code: "codex_target_actor_unverified",
+      stage: "codex-target-actor-invalid",
+      message: "Configured Slack target user did not acknowledge the live probe.",
+      detail: "Slack membership is not enough."
+    })
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-actor-validation-stuck");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "fallback-to-bridge");
+  assert.equal(updated.lastDiagnosticCode, "codex_target_actor_unverified");
+});
+
 test("updateCommandProgress ignores heartbeats for queued photo commands", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();

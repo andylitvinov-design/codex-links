@@ -37,6 +37,7 @@ const SLACK_FIRST_ACK_TIMEOUT_MS = 30 * 1000;
 const SLACK_RESULT_TIMEOUT_MS = 120 * 1000;
 const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90 * 1000;
 const SLACK_PHOTO_RESULT_TIMEOUT_MS = 300 * 1000;
+const SLACK_ACTOR_VALIDATION_RECOVERY_MS = 15 * 1000;
 const BRIDGE_CLAIM_TIMEOUT_MS = 60 * 1000;
 const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
 const BRIDGE_PHOTO_CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -643,6 +644,41 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
         : command?.slackPhotoUploadError,
       500
     ),
+    actorValidationStartedAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "actorValidationStartedAt")
+        ? input.actorValidationStartedAt
+        : command?.actorValidationStartedAt
+    ),
+    actorValidationPassedAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "actorValidationPassedAt")
+        ? input.actorValidationPassedAt
+        : command?.actorValidationPassedAt
+    ),
+    actorValidationFailedAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "actorValidationFailedAt")
+        ? input.actorValidationFailedAt
+        : command?.actorValidationFailedAt
+    ),
+    actorValidationProbeChannelId: normalizeSlackValue(
+      Object.prototype.hasOwnProperty.call(input, "actorValidationProbeChannelId")
+        ? input.actorValidationProbeChannelId
+        : command?.actorValidationProbeChannelId
+    ),
+    actorValidationProbeMessageTs: normalizeSlackValue(
+      Object.prototype.hasOwnProperty.call(input, "actorValidationProbeMessageTs")
+        ? input.actorValidationProbeMessageTs
+        : command?.actorValidationProbeMessageTs
+    ),
+    actorValidationProbeThreadTs: normalizeSlackValue(
+      Object.prototype.hasOwnProperty.call(input, "actorValidationProbeThreadTs")
+        ? input.actorValidationProbeThreadTs
+        : command?.actorValidationProbeThreadTs
+    ),
+    actorValidationPreDispatchFailed: normalizeBooleanValue(
+      Object.prototype.hasOwnProperty.call(input, "actorValidationPreDispatchFailed")
+        ? input.actorValidationPreDispatchFailed
+        : command?.actorValidationPreDispatchFailed
+    ),
     firstAckAt: normalizeDateValue(
       Object.prototype.hasOwnProperty.call(input, "firstAckAt") ? input.firstAckAt : command?.firstAckAt
     ),
@@ -807,6 +843,13 @@ function normalizeStoredCommandEntry(entry) {
     photoProcessed: normalizeBooleanValue(entry.photoProcessed),
     photoUnsupportedReason: normalizePhotoUnsupportedReason(entry.photoUnsupportedReason),
     slackPhotoUploadError: normalizeDiagnosticText(entry.slackPhotoUploadError, 500),
+    actorValidationStartedAt: normalizeDateValue(entry.actorValidationStartedAt),
+    actorValidationPassedAt: normalizeDateValue(entry.actorValidationPassedAt),
+    actorValidationFailedAt: normalizeDateValue(entry.actorValidationFailedAt),
+    actorValidationProbeChannelId: normalizeSlackValue(entry.actorValidationProbeChannelId),
+    actorValidationProbeMessageTs: normalizeSlackValue(entry.actorValidationProbeMessageTs),
+    actorValidationProbeThreadTs: normalizeSlackValue(entry.actorValidationProbeThreadTs),
+    actorValidationPreDispatchFailed: normalizeBooleanValue(entry.actorValidationPreDispatchFailed),
     firstAckAt: normalizeDateValue(entry.firstAckAt),
     slackAckObservedAt: normalizeDateValue(entry.slackAckObservedAt),
     resultAt: normalizeDateValue(entry.resultAt || entry.completedAt),
@@ -1049,6 +1092,13 @@ export function createCommandRecord(input) {
       photoSeenByBridge: false,
       photoProcessed: false,
       photoUnsupportedReason: "",
+      actorValidationStartedAt: "",
+      actorValidationPassedAt: "",
+      actorValidationFailedAt: "",
+      actorValidationProbeChannelId: "",
+      actorValidationProbeMessageTs: "",
+      actorValidationProbeThreadTs: "",
+      actorValidationPreDispatchFailed: false,
       firstAckAt: "",
       resultAt: "",
       slackChannelId: "",
@@ -1823,6 +1873,19 @@ function createFailedMaintenanceState(command, nowIso, input = {}) {
   };
 }
 
+function isSlackActorValidationFailure(command) {
+  const diagnosticCode = String(command?.lastDiagnosticCode || "").trim().toLowerCase();
+  const parsedError = parseCommandError(command?.errorMessage);
+  const errorCode = String(parsedError?.code || "").trim().toLowerCase();
+  const errorStage = String(parsedError?.stage || "").trim().toLowerCase();
+
+  return diagnosticCode === "codex_target_actor_unverified"
+    || diagnosticCode === "codex_target_user_invalid"
+    || errorCode === "codex_target_actor_unverified"
+    || errorCode === "codex_target_user_invalid"
+    || errorStage === "codex-target-actor-invalid";
+}
+
 function evaluateCloudMaintenance(command, nowIso, options = {}) {
   if (command.dispatchMode !== DISPATCH_MODE_CLOUD) {
     return command;
@@ -1878,16 +1941,45 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
 
   const hasPhoto = commandHasPhoto(command);
   const fallbackAllowed = !hasPhoto && canFallbackToLocal(command, options);
+  const preDispatchFallbackAllowed = canFallbackToLocal(command, options);
   const status = String(command.status || "").trim().toLowerCase();
   const firstAckTimeoutMs = getSlackFirstAckTimeoutMs(command);
   const resultTimeoutMs = getSlackResultTimeoutMs(command);
 
-  if (status !== "processing" && status !== "dispatched") {
+  if (status !== "processing" && status !== "dispatched" && status !== "queued") {
     return command;
   }
 
   const dispatchObservedAt = command.slackPostedAt || command.dispatchedAt || command.progressUpdatedAt || command.createdAt;
   const hasFirstAck = Boolean(String(command.firstExecutorAckSeenAt || command.firstAckAt || "").trim());
+  const actorValidationFailed = isSlackActorValidationFailure(command);
+
+  if (
+    actorValidationFailed
+    && !String(command.slackChannelId || "").trim()
+    && !hasFirstAck
+    && isOlderThan(dispatchObservedAt, SLACK_ACTOR_VALIDATION_RECOVERY_MS)
+  ) {
+    const detail = String(command.lastDiagnosticDetail || "").trim()
+      || "Cloud via Slack did not confirm a live actor before dispatch.";
+
+    if (preDispatchFallbackAllowed) {
+      return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+        progressStage: "fallback-to-bridge",
+        fallbackReason: "cloud via Slack actor validation failed before dispatch",
+        lastDiagnosticCode: String(command.lastDiagnosticCode || "").trim() || "codex_target_actor_unverified",
+        lastDiagnosticDetail: detail,
+        errorMessage: normalizeErrorMessage(command.errorMessage)
+      });
+    }
+
+    return createFailedMaintenanceState(command, nowIso, {
+      lastDiagnosticCode: String(command.lastDiagnosticCode || "").trim() || "codex_target_actor_unverified",
+      lastDiagnosticDetail: detail,
+      actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
+      errorMessage: normalizeErrorMessage(command.errorMessage)
+    });
+  }
 
   if (!hasFirstAck) {
     if (!isOlderThan(dispatchObservedAt, firstAckTimeoutMs)) {
