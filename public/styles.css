@@ -1276,6 +1276,15 @@ input[type="radio"] {
   padding: 14px 16px;
   font-weight: 700;
   background: linear-gradient(180deg, rgba(218, 244, 225, 0.98), rgba(198, 236, 210, 0.96));
+  cursor: pointer;
+  list-style: none;
+}
+
+.command-answer-summary::-webkit-details-marker {
+  display: none;
+}
+
+.command-answer[open] .command-answer-summary {
   border-bottom: 1px solid rgba(15, 118, 110, 0.12);
 }
 
@@ -1291,6 +1300,18 @@ input[type="radio"] {
   content: "●";
   font-size: 0.86em;
   line-height: 1;
+}
+
+.command-answer-title::after {
+  content: "▾";
+  margin-left: 6px;
+  font-size: 0.9em;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.command-answer[open] .command-answer-title::after {
+  transform: rotate(180deg);
 }
 
 .command-answer-body {

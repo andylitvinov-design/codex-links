@@ -43,7 +43,7 @@ const state = {
   replyContext: null
 };
 
-const BUILD_VERSION = "20260423-1605";
+const BUILD_VERSION = "20260423-1712";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -2365,10 +2365,10 @@ function renderAssistantReplyMarkup(replyEntry) {
   const replyThreadId = String(linkedCommand?.threadId || message?.threadId || "").trim();
 
   return `
-    <article class="command-answer" data-entry-id="${escapeHtml(messageId)}">
-      <div class="command-answer-summary">
+    <details class="command-answer" data-entry-id="${escapeHtml(messageId)}">
+      <summary class="command-answer-summary">
         <span class="command-answer-title">${escapeHtml(title)}</span>
-      </div>
+      </summary>
       <div class="command-answer-body">
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>
         <div class="command-answer-actions">
@@ -2380,7 +2380,7 @@ function renderAssistantReplyMarkup(replyEntry) {
           >Ответить</button>
         </div>
       </div>
-    </article>
+    </details>
   `;
 }
 

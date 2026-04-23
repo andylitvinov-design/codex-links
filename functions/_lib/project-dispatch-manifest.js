@@ -1,6 +1,6 @@
 const PROJECT_DISPATCH_MANIFEST = {
   version: 1,
-  updatedAt: "2026-04-17T00:00:00Z",
+  updatedAt: "2026-04-23T17:12:00Z",
   projects: [
     {
       id: "links",
@@ -56,6 +56,17 @@ const PROJECT_DISPATCH_MANIFEST = {
       contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
       visible: true,
       cloudReady: false
+    },
+    {
+      id: "ezohata_ads",
+      label: "ezohata ads",
+      group: "myprojects",
+      workspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/ezohata_ads",
+      targetRepo: "andylitvinov-design/ezohata_ads",
+      targetRepoUrl: "https://github.com/andylitvinov-design/ezohata_ads",
+      contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      visible: true,
+      cloudReady: true
     },
     {
       id: "management",
