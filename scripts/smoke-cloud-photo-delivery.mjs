@@ -73,6 +73,14 @@ async function fetchAssistantReplies(commandId) {
     : [];
 }
 
+async function fetchStatus() {
+  const response = await fetch(`${BASE_URL}/api/status?_=${Date.now()}`, {
+    headers: { accept: "application/json" }
+  });
+  const data = await response.json().catch(() => ({}));
+  return data?.status || null;
+}
+
 async function fetchSlackThreadReplies(channelId, threadTs) {
   if (!SLACK_BOT_TOKEN || !channelId || !threadTs) {
     return [];
@@ -161,7 +169,9 @@ async function pollCommand(id) {
         `status=${status || "unknown"}`,
         `stage=${String(command.progressStage || "").trim() || "unknown"}`,
         `dispatchMode=${String(command.dispatchMode || "").trim() || "unknown"}`,
+        `threadCreated=${String(command.slackThreadCreatedAt || command.slackThreadTs || command.slackMessageTs || "").trim() ? "yes" : "no"}`,
         `photoUploaded=${String(command.slackPhotoUploadCompletedAt || "").trim() ? "yes" : "no"}`,
+        `uploadError=${String(command.slackPhotoUploadError || "").trim() || "none"}`,
         `ackSeen=${String(command.slackAckObservedAt || command.firstExecutorAckSeenAt || "").trim() ? "yes" : "no"}`,
         `actualExecutor=${String(command.actualExecutor || "").trim() || "unknown"}`
       ].join(" "));
@@ -215,6 +225,12 @@ async function main() {
   const command = await postCommand();
   console.log(`commandId=${command.id}`);
   const answered = await pollCommand(command.id);
+  const status = await fetchStatus();
+
+  if (String(status?.slackActor?.validationStatus || "").trim() !== "validated") {
+    throw new Error(`Expected /api/status slackActor.validationStatus=validated, got ${String(status?.slackActor?.validationStatus || "").trim() || "empty"}.`);
+  }
+
   console.log(`Cloud photo smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`);
 }
 

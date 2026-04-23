@@ -13,7 +13,13 @@ export async function onRequest(context) {
   if (request.method === "GET") {
     try {
       const status = await deriveBridgeStatusFromCommands(env);
-      return json({ status });
+      return json({
+        status,
+        bridges: {
+          localBridge: status.localBridge,
+          claudeBridge: status.claudeBridge
+        }
+      });
     } catch (error) {
       return jsonStorageError(error, "Storage is rate limited. Bridge status is temporarily unavailable.");
     }
@@ -41,7 +47,14 @@ export async function onRequest(context) {
       ...current,
       ...(payload?.status || {})
     });
-    return json({ ok: true, status }, { status: 201 });
+    return json({
+      ok: true,
+      status,
+      bridges: {
+        localBridge: status.localBridge,
+        claudeBridge: status.claudeBridge
+      }
+    }, { status: 201 });
   } catch (error) {
     return jsonStorageError(error, "Storage is rate limited. Bridge status update failed.");
   }

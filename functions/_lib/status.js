@@ -14,10 +14,24 @@ import { readRuntimeConfig } from "./config.js";
 
 export const BRIDGE_HEARTBEAT_STALE_MS = 75 * 1000;
 
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function normalizeManagedBy(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized || "";
+}
+
+function isLaunchdManaged(value) {
+  return normalizeManagedBy(value) === "launchd";
+}
+
 function normalizeRunnerStatus(input) {
   if (!input || typeof input !== "object") {
     return {
       online: false,
+      managedBy: "",
       state: "unknown",
       lastRunAt: "",
       lastDispatchAt: "",
@@ -31,6 +45,7 @@ function normalizeRunnerStatus(input) {
 
   return {
     online: Boolean(input.online ?? input.bridgeOnline),
+    managedBy: normalizeManagedBy(input.managedBy || input.supervisor),
     state: String(input.state || "unknown").trim() || "unknown",
     lastRunAt: normalizeDate(input.lastRunAt),
     lastDispatchAt: normalizeDate(input.lastDispatchAt),
@@ -71,6 +86,7 @@ function normalizeStatus(input) {
       oldestPendingAt: "",
       lastDeliveredCount: 0,
       lastError: "",
+      slackActor: normalizeSlackActorStatus(),
       localBridge: normalizeRunnerStatus(),
       claudeBridge: normalizeRunnerStatus()
     };
@@ -90,7 +106,7 @@ function normalizeStatus(input) {
   const claudeBridge = normalizeRunnerStatus(input.claudeBridge);
 
   return {
-    bridgeOnline: localBridge.online,
+    bridgeOnline: Boolean(localBridge.online) && isLaunchdManaged(localBridge.managedBy),
     state: String(input.state || "unknown").trim() || "unknown",
     dispatchMode: String(input.dispatchMode || "").trim(),
     executorLabel: String(input.executorLabel || "").trim(),
@@ -101,8 +117,28 @@ function normalizeStatus(input) {
     oldestPendingAt: normalizeDate(input.oldestPendingAt),
     lastDeliveredCount: Number.isFinite(Number(input.lastDeliveredCount)) ? Number(input.lastDeliveredCount) : 0,
     lastError: String(input.lastError || "").trim(),
+    slackActor: normalizeSlackActorStatus(input.slackActor),
     localBridge,
     claudeBridge
+  };
+}
+
+function normalizeSlackActorStatus(input) {
+  const source = input && typeof input === "object" ? input : {};
+  const configuredUserId = normalizeText(source.configuredUserId || source.userId);
+  const validationStatus = normalizeText(source.validationStatus || source.status).toLowerCase();
+  const normalizedValidationStatus = validationStatus === "validated" || validationStatus === "invalid" || validationStatus === "unverified"
+    ? validationStatus
+    : (configuredUserId ? "unverified" : "invalid");
+
+  return {
+    configuredUserId,
+    validationStatus: normalizedValidationStatus,
+    lastValidatedAt: normalizeDate(source.lastValidatedAt),
+    validationError: normalizeText(source.validationError || source.detail),
+    probeChannelId: normalizeText(source.probeChannelId),
+    probeMessageTs: normalizeText(source.probeMessageTs),
+    probeThreadTs: normalizeText(source.probeThreadTs)
   };
 }
 
@@ -144,7 +180,11 @@ export async function readBridgeStatus(env) {
     status.lastError = status.lastError || "Missing OPENAI_API_KEY in Pages project.";
   }
 
-  status.bridgeOnline = Boolean(status.localBridge.online);
+  status.slackActor = normalizeSlackActorStatus({
+    ...status.slackActor,
+    configuredUserId: runtimeConfig?.SLACK_CODEX_USER_ID || status.slackActor?.configuredUserId
+  });
+  status.bridgeOnline = Boolean(status.localBridge.online) && isLaunchdManaged(status.localBridge.managedBy);
   status.lastRunAt = status.localBridge.lastRunAt || status.lastRunAt;
   status.lastDispatchAt = status.localBridge.lastDispatchAt || status.lastDispatchAt;
   status.lastSuccessAt = status.localBridge.lastSuccessAt || status.lastSuccessAt;
@@ -212,6 +252,11 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
 
   nextLocalBridge.online = Boolean(nextLocalBridge.online) && freshLocalHeartbeat;
   nextClaudeBridge.online = Boolean(nextClaudeBridge.online) && freshClaudeHeartbeat;
+  const nextSlackActor = normalizeSlackActorStatus({
+    ...current.slackActor,
+    ...(patch.slackActor || {}),
+    configuredUserId: patch.slackActor?.configuredUserId || current.slackActor?.configuredUserId || runtimeConfig?.SLACK_CODEX_USER_ID
+  });
 
   const derivedState = hasActive ? "running" : "idle";
 
@@ -228,11 +273,12 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
     lastDeliveredCount: Number.isFinite(Number(patch.lastDeliveredCount))
       ? Number(patch.lastDeliveredCount)
       : current.lastDeliveredCount,
-    bridgeOnline: nextLocalBridge.online,
+    bridgeOnline: Boolean(nextLocalBridge.online) && isLaunchdManaged(nextLocalBridge.managedBy),
     state: typeof patch.state === "string" && patch.state.trim()
       ? String(patch.state).trim()
       : derivedState,
     lastError: typeof patch.lastError === "string" ? patch.lastError : current.lastError,
+    slackActor: nextSlackActor,
     localBridge: nextLocalBridge,
     claudeBridge: nextClaudeBridge
   });

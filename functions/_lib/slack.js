@@ -6,6 +6,8 @@ const encoder = new TextEncoder();
 const DEFAULT_SLACK_API_TIMEOUT_MS = 15_000;
 const SLACK_PHOTO_UPLOAD_RETRY_COUNT = 3;
 const SLACK_PHOTO_UPLOAD_RETRY_DELAY_MS = 1_500;
+const DEFAULT_SLACK_ACTOR_PROBE_TIMEOUT_MS = 30_000;
+const DEFAULT_SLACK_ACTOR_PROBE_POLL_MS = 2_000;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -75,6 +77,26 @@ export function getSlackApiTimeoutMs(env, fallback = DEFAULT_SLACK_API_TIMEOUT_M
   const configured = Number(env?.SLACK_API_TIMEOUT_MS);
 
   if (!Number.isFinite(configured) || configured < 100) {
+    return fallback;
+  }
+
+  return configured;
+}
+
+export function getSlackActorProbeTimeoutMs(env, fallback = DEFAULT_SLACK_ACTOR_PROBE_TIMEOUT_MS) {
+  const configured = Number(env?.SLACK_ACTOR_PROBE_TIMEOUT_MS);
+
+  if (!Number.isFinite(configured) || configured < 100) {
+    return fallback;
+  }
+
+  return configured;
+}
+
+function getSlackActorProbePollMs(env, fallback = DEFAULT_SLACK_ACTOR_PROBE_POLL_MS) {
+  const configured = Number(env?.SLACK_ACTOR_PROBE_POLL_MS);
+
+  if (!Number.isFinite(configured) || configured < 1) {
     return fallback;
   }
 
@@ -167,6 +189,30 @@ async function callSlackApiForm(token, method, body = null, query = null, option
   }
 
   return data;
+}
+
+function buildSlackActorValidationResult(input = {}) {
+  return {
+    validationStatus: normalizeText(input.validationStatus).toLowerCase() || "unverified",
+    code: normalizeText(input.code),
+    message: normalizeText(input.message),
+    detail: normalizeText(input.detail),
+    configuredUserId: normalizeText(input.configuredUserId),
+    probeChannelId: normalizeText(input.probeChannelId),
+    probeMessageTs: normalizeText(input.probeMessageTs),
+    probeThreadTs: normalizeText(input.probeThreadTs || input.probeMessageTs),
+    lastValidatedAt: normalizeText(input.lastValidatedAt),
+    observedReply: input.observedReply && typeof input.observedReply === "object"
+      ? {
+          ts: normalizeText(input.observedReply.ts),
+          threadTs: normalizeText(input.observedReply.threadTs || input.observedReply.thread_ts || input.observedReply.ts),
+          text: normalizeText(input.observedReply.text),
+          user: normalizeText(input.observedReply.user),
+          botId: normalizeText(input.observedReply.botId || input.observedReply.bot_id),
+          subtype: normalizeText(input.observedReply.subtype)
+        }
+      : null
+  };
 }
 
 function decodeSlackDataUrl(dataUrl) {
@@ -361,40 +407,142 @@ async function validateSlackTarget(token, channel, targetUserId) {
   const normalizedTarget = normalizeText(targetUserId);
 
   if (!normalizedTarget) {
-    return;
+    return buildSlackActorValidationResult({
+      validationStatus: "invalid",
+      code: "codex_target_actor_unverified",
+      message: "Configured Slack target user is missing.",
+      detail: "Set SLACK_CODEX_USER_ID to the real Codex Cloud Slack actor before using cloud via Slack."
+    });
   }
 
   const auth = await callSlackApi(token, "auth.test", null, null, { env: { SLACK_API_TIMEOUT_MS: DEFAULT_SLACK_API_TIMEOUT_MS } });
   const botUserId = normalizeText(auth.user_id);
 
   if (botUserId && normalizedTarget === botUserId) {
-    throw withCommandError(
-      new Error("SLACK_CODEX_USER_ID points to the Codex Links bot itself, not a Codex worker."),
-      {
-        code: "codex_target_user_invalid",
-        stage: "codex-target-user-invalid",
-        message: "Configured Slack target user points to the Codex Links bot.",
-        detail: "Set SLACK_CODEX_USER_ID to the Codex worker user, not the app bot user.",
-        fallback: "local-bridge"
-      }
-    );
+    return buildSlackActorValidationResult({
+      validationStatus: "invalid",
+      code: "codex_target_user_invalid",
+      message: "Configured Slack target user points to the Codex Links bot.",
+      detail: "Set SLACK_CODEX_USER_ID to the Codex worker user, not the app bot user.",
+      configuredUserId: normalizedTarget
+    });
   }
 
   const members = await callSlackApi(token, "conversations.members", null, { channel }, { env: { SLACK_API_TIMEOUT_MS: DEFAULT_SLACK_API_TIMEOUT_MS } });
   const memberIds = Array.isArray(members.members) ? members.members.map((value) => normalizeText(value)) : [];
 
   if (!memberIds.includes(normalizedTarget)) {
-    throw withCommandError(
-      new Error("Configured Slack Codex user is not a member of the dispatch channel."),
-      {
-        code: "codex_target_user_invalid",
-        stage: "codex-target-user-invalid",
-        message: "Configured Slack target user is not in the dispatch channel.",
-        detail: "Invite the target Codex user to SLACK_CODEX_CHANNEL_ID or update SLACK_CODEX_USER_ID.",
-        fallback: "local-bridge"
-      }
-    );
+    return buildSlackActorValidationResult({
+      validationStatus: "invalid",
+      code: "codex_target_user_invalid",
+      message: "Configured Slack target user is not in the dispatch channel.",
+      detail: "Invite the target Codex user to SLACK_CODEX_CHANNEL_ID or update SLACK_CODEX_USER_ID.",
+      configuredUserId: normalizedTarget
+    });
   }
+
+  return buildSlackActorValidationResult({
+    validationStatus: "unverified",
+    configuredUserId: normalizedTarget
+  });
+}
+
+function buildSlackActorProbeText(targetUserId) {
+  const mention = targetUserId ? `<@${targetUserId}>` : "@Codex";
+
+  return [
+    `${mention} Codex Links actor validation probe.`,
+    "Reply in this thread with any short progress update to confirm you are the active Codex Cloud Slack worker for this route."
+  ].join(" ");
+}
+
+function pickValidatedProbeReply(replies, targetUserId) {
+  const normalizedTarget = normalizeText(targetUserId);
+  const candidates = (Array.isArray(replies) ? replies : [])
+    .filter((reply) => normalizeText(reply?.ts))
+    .filter((reply) => normalizeText(reply?.text))
+    .filter((reply) => !isIgnorableSlackReplyText(reply?.text))
+    .filter((reply) => normalizeText(reply?.user) === normalizedTarget);
+
+  return candidates.at(-1) || null;
+}
+
+export async function validateSlackCodexActor(env, options = {}) {
+  const token = normalizeText(env?.SLACK_BOT_TOKEN);
+  const channel = normalizeText(env?.SLACK_CODEX_CHANNEL_ID);
+  const targetUserId = normalizeText(env?.SLACK_CODEX_USER_ID);
+
+  if (!token || !channel) {
+    return buildSlackActorValidationResult({
+      validationStatus: "invalid",
+      code: "slack_dispatch_failed",
+      message: "Slack Codex dispatch is not configured.",
+      detail: "Missing SLACK_BOT_TOKEN or SLACK_CODEX_CHANNEL_ID.",
+      configuredUserId: targetUserId
+    });
+  }
+
+  const membershipResult = await validateSlackTarget(token, channel, targetUserId);
+
+  if (membershipResult.validationStatus === "invalid") {
+    return membershipResult;
+  }
+
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs))
+    ? Number(options.timeoutMs)
+    : getSlackActorProbeTimeoutMs(env);
+  const pollIntervalMs = Number.isFinite(Number(options.pollIntervalMs)) && Number(options.pollIntervalMs) > 0
+    ? Number(options.pollIntervalMs)
+    : getSlackActorProbePollMs(env);
+  const probeResponse = await callSlackApi(token, "chat.postMessage", {
+    channel,
+    text: buildSlackActorProbeText(targetUserId),
+    unfurl_links: false,
+    unfurl_media: false,
+    mrkdwn: true
+  }, null, {
+    env,
+    timeoutMs
+  });
+  const probeChannelId = normalizeText(probeResponse.channel) || channel;
+  const probeMessageTs = normalizeText(probeResponse.ts);
+  const probeThreadTs = normalizeText(probeResponse.message?.thread_ts || probeResponse.ts);
+  const startedAt = Date.now();
+
+  while ((Date.now() - startedAt) < timeoutMs) {
+    const replies = await fetchSlackThreadReplies(env, probeChannelId, probeThreadTs, {
+      timeoutMs
+    });
+    const validatedReply = pickValidatedProbeReply(
+      replies.filter((reply) => normalizeText(reply.ts) !== probeMessageTs),
+      targetUserId
+    );
+
+    if (validatedReply) {
+      return buildSlackActorValidationResult({
+        validationStatus: "validated",
+        configuredUserId: targetUserId,
+        probeChannelId,
+        probeMessageTs,
+        probeThreadTs,
+        lastValidatedAt: new Date().toISOString(),
+        observedReply: validatedReply
+      });
+    }
+
+    await sleep(pollIntervalMs);
+  }
+
+  return buildSlackActorValidationResult({
+    validationStatus: "invalid",
+    code: "codex_target_actor_unverified",
+    message: "Configured Slack target user did not acknowledge the live probe.",
+    detail: "Slack membership is not enough. The configured target did not reply in-thread during the actor validation probe window.",
+    configuredUserId: targetUserId,
+    probeChannelId,
+    probeMessageTs,
+    probeThreadTs
+  });
 }
 
 async function resolveStoredCodexThreadId(env, command) {
@@ -515,7 +663,21 @@ export async function postSlackCommand(env, command, mention) {
     );
   }
 
-  await validateSlackTarget(token, channel, targetUserId);
+  const actorValidation = await validateSlackCodexActor(env);
+
+  if (actorValidation.validationStatus !== "validated") {
+    throw withCommandError(
+      new Error(actorValidation.detail || actorValidation.message || "Configured Slack target actor is not validated."),
+      {
+        code: actorValidation.code || "codex_target_actor_unverified",
+        stage: "codex-target-actor-invalid",
+        message: actorValidation.message || "Configured Slack target actor is not validated.",
+        detail: actorValidation.detail || "Slack membership is not enough. A live actor probe is required before dispatch.",
+        fallback: "local-bridge",
+        actorValidation
+      }
+    );
+  }
 
   const resolvedCodexThreadId = await resolveStoredCodexThreadId(env, command);
   const text = buildSlackCommandPrompt(command, {
@@ -588,7 +750,8 @@ export async function postSlackCommand(env, command, mention) {
     channel: resolvedChannel,
     ts: normalizeText(data.ts),
     threadTs: resolvedThreadTs,
-    photoUpload: uploaded
+    photoUpload: uploaded,
+    actorValidation
   };
 }
 
@@ -758,6 +921,10 @@ export function isLikelyCodexSlackActor(runtimeConfig, event, options = {}) {
 
   if (targetUserId && userId === targetUserId) {
     return true;
+  }
+
+  if (targetUserId) {
+    return false;
   }
 
   if (botId || subtype === "bot_message") {

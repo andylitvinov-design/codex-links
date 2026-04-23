@@ -33,6 +33,14 @@ async function fetchAssistantReplies(commandId) {
     : []
 }
 
+async function fetchStatus() {
+  const response = await fetch(`${BASE_URL}/api/status?_=${Date.now()}`, {
+    headers: { accept: "application/json" }
+  })
+  const data = await response.json().catch(() => ({}))
+  return data?.status || null
+}
+
 async function fetchSlackThreadReplies(channelId, threadTs) {
   if (!SLACK_BOT_TOKEN || !channelId || !threadTs) {
     return []
@@ -224,6 +232,12 @@ async function main() {
   const created = await postCommand()
   console.log(`commandId=${created.command.id}`)
   const answered = await pollCommand(created.command.id)
+  const status = await fetchStatus()
+
+  if (CLOUD_ROUTE !== "direct" && String(status?.slackActor?.validationStatus || "").trim() !== "validated") {
+    throw new Error(`Expected /api/status slackActor.validationStatus=validated, got ${String(status?.slackActor?.validationStatus || "").trim() || "empty"}.`)
+  }
+
   const report = {
     path: "cloud",
     createAckMs: created.createAckMs,

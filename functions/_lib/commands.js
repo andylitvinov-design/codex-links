@@ -37,10 +37,15 @@ const SLACK_FIRST_ACK_TIMEOUT_MS = 30 * 1000;
 const SLACK_RESULT_TIMEOUT_MS = 120 * 1000;
 const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90 * 1000;
 const SLACK_PHOTO_RESULT_TIMEOUT_MS = 300 * 1000;
-const BRIDGE_CLAIM_TIMEOUT_MS = 20 * 1000;
+const BRIDGE_CLAIM_TIMEOUT_MS = 60 * 1000;
 const BRIDGE_RESULT_TIMEOUT_MS = 120 * 1000;
 const BRIDGE_PHOTO_CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
 const BRIDGE_PHOTO_RETRY_WINDOW_MS = 30 * 60 * 1000;
+const CLAUDE_CLAIM_TIMEOUT_MS = 60 * 1000;
+const CLAUDE_RESULT_TIMEOUT_MS = 180 * 1000;
+const CLAUDE_RETRY_WINDOW_MS = 10 * 60 * 1000;
+const DEFAULT_KV_WRITE_MAX_RETRIES = 2;
+const DEFAULT_KV_WRITE_RETRY_DELAY_MS = 100;
 
 export const COMMAND_TIMEOUTS = {
   cloudFirstAckMs: CLOUD_FIRST_ACK_TIMEOUT_MS,
@@ -52,7 +57,10 @@ export const COMMAND_TIMEOUTS = {
   bridgeClaimMs: BRIDGE_CLAIM_TIMEOUT_MS,
   bridgeResultMs: BRIDGE_RESULT_TIMEOUT_MS,
   bridgePhotoClaimMs: BRIDGE_PHOTO_CLAIM_TIMEOUT_MS,
-  bridgePhotoRetryWindowMs: BRIDGE_PHOTO_RETRY_WINDOW_MS
+  bridgePhotoRetryWindowMs: BRIDGE_PHOTO_RETRY_WINDOW_MS,
+  claudeClaimMs: CLAUDE_CLAIM_TIMEOUT_MS,
+  claudeResultMs: CLAUDE_RESULT_TIMEOUT_MS,
+  claudeRetryWindowMs: CLAUDE_RETRY_WINDOW_MS
 };
 
 function commandItemKey(id) {
@@ -75,7 +83,48 @@ function isKvRateLimitError(error) {
   const message = String(error?.message || error || "").toLowerCase();
   return message.includes("429")
     && message.includes("kv")
-    && (message.includes("limit") || message.includes("rate"));
+    && (message.includes("limit") || message.includes("rate") || message.includes("too many requests"));
+}
+
+function getKvWriteMaxRetries(env) {
+  const configured = Number(env?.KV_WRITE_MAX_RETRIES);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.floor(configured)
+    : DEFAULT_KV_WRITE_MAX_RETRIES;
+}
+
+function getKvWriteRetryDelayMs(env) {
+  const configured = Number(env?.KV_WRITE_RETRY_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_KV_WRITE_RETRY_DELAY_MS;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function putStoreValue(env, key, value) {
+  const maxRetries = getKvWriteMaxRetries(env);
+  const retryDelayMs = getKvWriteRetryDelayMs(env);
+  let attempt = 0;
+
+  while (true) {
+    try {
+      await env.LINKS_STORE.put(key, value);
+      return;
+    } catch (error) {
+      if (!isKvRateLimitError(error) || attempt >= maxRetries) {
+        if (isKvRateLimitError(error)) {
+          error.kvRateLimited = true;
+        }
+        throw error;
+      }
+
+      attempt += 1;
+      await sleep(retryDelayMs * attempt);
+    }
+  }
 }
 
 async function readIdIndex(env, key) {
@@ -91,7 +140,7 @@ async function readIdIndex(env, key) {
 }
 
 async function writeIdIndex(env, key, ids) {
-  await env.LINKS_STORE.put(key, JSON.stringify(uniqIds(ids)));
+  await putStoreValue(env, key, JSON.stringify(uniqIds(ids)));
 }
 
 async function readStoredCommand(env, id) {
@@ -185,7 +234,7 @@ async function rebuildCommandIndexes(env, commands) {
       continue;
     }
 
-    await env.LINKS_STORE.put(commandItemKey(command.id), JSON.stringify(command));
+    await putStoreValue(env, commandItemKey(command.id), JSON.stringify(command));
     recentIds.push(command.id);
 
     const clientId = normalizeClientId(command.clientId);
@@ -233,7 +282,7 @@ async function persistCommand(env, command) {
   }
 
   const normalized = compactCommandForStorage(command);
-  await env.LINKS_STORE.put(commandItemKey(normalized.id), JSON.stringify(normalized));
+  await putStoreValue(env, commandItemKey(normalized.id), JSON.stringify(normalized));
   await appendIndexedCommandId(env, COMMANDS_RECENT_STORAGE_KEY, normalized.id);
   await appendIndexedCommandId(env, commandClientIndexKey(normalized.clientId), normalized.id);
 
@@ -1638,13 +1687,6 @@ function canFallbackToLocal(command, options = {}) {
   );
 }
 
-function canFallbackToSlack(command, options = {}) {
-  return Boolean(options.preferSlack)
-    && Number(command?.fallbackCount || 0) < 1
-    && !commandHasPhoto(command)
-    && Boolean(String(command?.targetRepo || "").trim());
-}
-
 function getBridgeClaimTimeoutMs(command) {
   return commandHasPhoto(command) ? BRIDGE_PHOTO_CLAIM_TIMEOUT_MS : BRIDGE_CLAIM_TIMEOUT_MS;
 }
@@ -1726,6 +1768,42 @@ function createFallbackState(command, nextDispatchMode, nowIso, input = {}) {
   };
 }
 
+function createClaudeRetryState(command, nowIso, input = {}) {
+  return {
+    ...command,
+    ...mergeCommandDebugState(command, {
+      actualExecutor: EXECUTOR_ROUTE_CLAUDE,
+      timeoutPhase: input.timeoutPhase || command.timeoutPhase,
+      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+      firstAckAt: "",
+      resultAt: "",
+      dispatchStartedAt: "",
+      bridgeClaimedAt: "",
+      firstExecutorAckSeenAt: "",
+      firstReplySeenAt: "",
+      replyIngestedAt: ""
+    }, DISPATCH_MODE_CLAUDE),
+    dispatchMode: DISPATCH_MODE_CLAUDE,
+    status: "queued",
+    progressStage: normalizeProgressStage(input.progressStage) || "retrying-claude",
+    progressUpdatedAt: nowIso,
+    errorMessage: normalizeErrorMessage(input.errorMessage),
+    dispatchedAt: "",
+    firstAckAt: "",
+    resultAt: "",
+    processingStartedAt: "",
+    processingLeaseUntil: "",
+    processorId: "",
+    completedAt: "",
+    dispatchStartedAt: "",
+    bridgeClaimedAt: "",
+    firstExecutorAckSeenAt: "",
+    firstReplySeenAt: "",
+    replyIngestedAt: ""
+  };
+}
+
 function createFailedMaintenanceState(command, nowIso, input = {}) {
   return {
     ...command,
@@ -1798,7 +1876,8 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
     return command;
   }
 
-  const fallbackAllowed = canFallbackToLocal(command, options);
+  const hasPhoto = commandHasPhoto(command);
+  const fallbackAllowed = !hasPhoto && canFallbackToLocal(command, options);
   const status = String(command.status || "").trim().toLowerCase();
   const firstAckTimeoutMs = getSlackFirstAckTimeoutMs(command);
   const resultTimeoutMs = getSlackResultTimeoutMs(command);
@@ -1834,14 +1913,20 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
 
     return createFailedMaintenanceState(command, nowIso, {
       timeoutPhase: "first-ack-timeout",
-      lastDiagnosticCode: "slack_first_ack_timeout",
-      lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
+      lastDiagnosticCode: command.slackPhotoUploadError ? "slack_photo_upload_failed" : "slack_first_ack_timeout",
+      lastDiagnosticDetail: command.slackPhotoUploadError
+        ? `Slack photo upload failed before a worker acknowledgement was observed: ${String(command.slackPhotoUploadError || "").trim()}`
+        : "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.",
       actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
       errorMessage: stringifyCommandError({
-        code: "slack_first_ack_timeout",
-        stage: "slack-first-ack-timeout",
-        message: "Cloud via Slack did not acknowledge in time.",
-        detail: "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window."
+        code: command.slackPhotoUploadError ? "slack_photo_upload_failed" : "slack_first_ack_timeout",
+        stage: command.slackPhotoUploadError ? "slack-photo-upload-failed" : "slack-first-ack-timeout",
+        message: command.slackPhotoUploadError
+          ? "Cloud via Slack photo upload failed."
+          : "Cloud via Slack did not acknowledge in time.",
+        detail: command.slackPhotoUploadError
+          ? `Slack photo upload failed before a worker acknowledgement was observed: ${String(command.slackPhotoUploadError || "").trim()}`
+          : "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window."
       })
     });
   }
@@ -1886,7 +1971,6 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     return command;
   }
 
-  const fallbackAllowed = canFallbackToSlack(command, options);
   const freshProcessingThreadKeys = options.freshProcessingThreadKeys instanceof Set
     ? options.freshProcessingThreadKeys
     : new Set();
@@ -1896,7 +1980,24 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
 
   if (command.status === "queued") {
     if (hasFreshThreadProcessing) {
-      return command;
+      return getBridgeQueueState(command, nowIso, {
+        progressStage: "queued",
+        timeoutPhase: command.timeoutPhase,
+        lastDiagnosticCode: hasPhoto ? "bridge_waiting_photo" : "bridge_waiting_thread_turn",
+        lastDiagnosticDetail: hasPhoto
+          ? "Photo command is waiting for the current same-thread bridge task to finish."
+          : "Bridge command is waiting for the current same-thread task to finish before claim.",
+        errorMessage: stringifyCommandError({
+          code: hasPhoto ? "bridge_waiting_photo" : "bridge_waiting_thread_turn",
+          stage: hasPhoto ? "waiting-photo-bridge" : "queued",
+          message: hasPhoto
+            ? "Photo is waiting for bridge."
+            : "Bridge is waiting for the current thread turn.",
+          detail: hasPhoto
+            ? "The bridge is still processing another command in the same thread before this photo command can be claimed."
+            : "The bridge is still processing another command in the same thread before this queued command can be claimed."
+        })
+      });
     }
 
     if (!isOlderThan(command.progressUpdatedAt || command.createdAt, getBridgeClaimTimeoutMs(command))) {
@@ -1929,23 +2030,6 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
           stage: "waiting-photo-bridge",
           message: "Photo is waiting for bridge.",
           detail: "The bridge has not claimed this photo command yet. Retry is scheduled."
-        })
-      });
-    }
-
-    if (fallbackAllowed) {
-      return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
-        progressStage: "switched-to-cloud",
-        timeoutPhase: "claim-timeout",
-        fallbackReason: "local bridge did not claim the command in time",
-        lastDiagnosticCode: "bridge_claim_timeout",
-        lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
-        errorMessage: stringifyCommandError({
-          code: "fallback_to_slack",
-          stage: "switched-to-cloud",
-          message: "Local bridge did not claim the command in time. Switched to cloud via Slack.",
-          detail: "The local bridge did not claim the command before the claim timeout.",
-          fallback: "slack-codex-cloud"
         })
       });
     }
@@ -2011,23 +2095,6 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     });
   }
 
-  if (fallbackAllowed) {
-    return createFallbackState(command, DISPATCH_MODE_SLACK, nowIso, {
-      progressStage: "switched-to-cloud",
-      timeoutPhase: "result-timeout",
-      fallbackReason: "local bridge stopped heartbeating",
-      lastDiagnosticCode: "bridge_result_timeout",
-      lastDiagnosticDetail: detail,
-      errorMessage: stringifyCommandError({
-        code: "fallback_to_slack",
-        stage: "switched-to-cloud",
-        message: "Local bridge timed out. Switched to cloud via Slack.",
-        detail,
-        fallback: "slack-codex-cloud"
-      })
-    });
-  }
-
   return createFailedMaintenanceState(command, nowIso, {
     timeoutPhase: "result-timeout",
     lastDiagnosticCode: "bridge_result_timeout",
@@ -2047,21 +2114,56 @@ function evaluateClaudeMaintenance(command, nowIso) {
     return command;
   }
 
+  const fallbackAllowed = canFallbackToLocal(command, { fallbackToLocal: true });
+  const retryWindowExceeded = isOlderThan(command.createdAt, CLAUDE_RETRY_WINDOW_MS);
+
   if (command.status === "queued") {
-    if (!isOlderThan(command.progressUpdatedAt || command.createdAt, BRIDGE_CLAIM_TIMEOUT_MS)) {
+    if (!isOlderThan(command.progressUpdatedAt || command.createdAt, CLAUDE_CLAIM_TIMEOUT_MS)) {
       return command;
+    }
+
+    if (!retryWindowExceeded) {
+      return createClaudeRetryState(command, nowIso, {
+        progressStage: "retrying-claude-claim",
+        timeoutPhase: "claim-timeout",
+        lastDiagnosticCode: "claude_claim_timeout",
+        lastDiagnosticDetail: "The Claude bridge did not claim the command before the claim timeout. Retry is scheduled.",
+        errorMessage: stringifyCommandError({
+          code: "retrying_claude_claim",
+          stage: "retrying-claude-claim",
+          message: "Claude bridge did not claim the command in time. Retrying through Claude bridge.",
+          detail: "The Claude bridge did not claim the command before the claim timeout."
+        })
+      });
+    }
+
+    if (fallbackAllowed) {
+      return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+        progressStage: "fallback-to-bridge",
+        timeoutPhase: "claim-timeout",
+        fallbackReason: "Claude bridge did not claim the command in time",
+        lastDiagnosticCode: "claude_claim_timeout",
+        lastDiagnosticDetail: "The Claude bridge did not claim the command before the retry window expired.",
+        errorMessage: stringifyCommandError({
+          code: "fallback_to_bridge",
+          stage: "fallback-to-bridge",
+          message: "Claude bridge did not claim the command in time. Switched to local bridge.",
+          detail: "The Claude bridge did not claim the command before the retry window expired.",
+          fallback: "local-bridge"
+        })
+      });
     }
 
     return createFailedMaintenanceState(command, nowIso, {
       timeoutPhase: "claim-timeout",
       lastDiagnosticCode: "claude_claim_timeout",
-      lastDiagnosticDetail: "The Claude bridge did not claim the command before the claim timeout.",
+      lastDiagnosticDetail: "The Claude bridge did not claim the command before the retry window expired.",
       actualExecutor: EXECUTOR_ROUTE_CLAUDE,
       errorMessage: stringifyCommandError({
         code: "claude_claim_timeout",
         stage: "claude-claim-timeout",
         message: "Claude bridge did not claim the command in time.",
-        detail: "The Claude bridge did not claim the command before the claim timeout."
+        detail: "The Claude bridge did not claim the command before the retry window expired."
       })
     });
   }
@@ -2073,22 +2175,58 @@ function evaluateClaudeMaintenance(command, nowIso) {
   const staleSince = command.progressUpdatedAt || command.firstAckAt || command.processingStartedAt || command.createdAt;
   const leaseUntil = Date.parse(String(command.processingLeaseUntil || "").trim());
   const isLeaseExpired = !Number.isNaN(leaseUntil) && leaseUntil <= Date.now();
-  const isResultStale = isOlderThan(staleSince, BRIDGE_RESULT_TIMEOUT_MS);
+  const isResultStale = isOlderThan(staleSince, CLAUDE_RESULT_TIMEOUT_MS);
 
   if (!isLeaseExpired && !isResultStale) {
     return command;
   }
 
+  const detail = isLeaseExpired
+    ? "The Claude bridge lease expired before the command completed."
+    : "The Claude bridge stopped heartbeating before the command completed.";
+
+  if (!retryWindowExceeded) {
+    return createClaudeRetryState(command, nowIso, {
+      progressStage: "retrying-claude",
+      timeoutPhase: "result-timeout",
+      lastDiagnosticCode: "claude_result_timeout",
+      lastDiagnosticDetail: detail,
+      errorMessage: stringifyCommandError({
+        code: "retrying_claude_result",
+        stage: "retrying-claude",
+        message: "Claude bridge timed out while processing the command. Retrying through Claude bridge.",
+        detail
+      })
+    });
+  }
+
+  if (fallbackAllowed) {
+    return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
+      progressStage: "fallback-to-bridge",
+      timeoutPhase: "result-timeout",
+      fallbackReason: "Claude bridge stopped heartbeating",
+      lastDiagnosticCode: "claude_result_timeout",
+      lastDiagnosticDetail: detail,
+      errorMessage: stringifyCommandError({
+        code: "fallback_to_bridge",
+        stage: "fallback-to-bridge",
+        message: "Claude bridge timed out. Switched to local bridge.",
+        detail,
+        fallback: "local-bridge"
+      })
+    });
+  }
+
   return createFailedMaintenanceState(command, nowIso, {
     timeoutPhase: "result-timeout",
     lastDiagnosticCode: "claude_result_timeout",
-    lastDiagnosticDetail: "The Claude bridge did not finish the command in time.",
+    lastDiagnosticDetail: detail,
     actualExecutor: EXECUTOR_ROUTE_CLAUDE,
     errorMessage: stringifyCommandError({
       code: "claude_result_timeout",
       stage: "claude-result-timeout",
       message: "Claude bridge did not finish the command in time.",
-      detail: "The Claude bridge did not finish the command in time."
+      detail
     })
   });
 }

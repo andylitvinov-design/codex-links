@@ -67,7 +67,7 @@ test("syncSlackCommandReplies keeps progress-only Slack replies non-terminal", a
   const originalFetch = global.fetch;
   global.fetch = async () => createSlackResponse([
     { ts: "1000.000001", thread_ts: "1000.000001", text: "root task" },
-    { ts: "1001.000001", thread_ts: "1000.000001", text: "Проверяю и читаю файлы." }
+    { ts: "1001.000001", thread_ts: "1000.000001", user: "U123", text: "Проверяю и читаю файлы." }
   ]);
 
   try {
@@ -114,7 +114,7 @@ test("syncSlackCommandReplies ignores helper-only Slack replies and does not mar
   const originalFetch = global.fetch;
   global.fetch = async () => createSlackResponse([
     { ts: "3000.000001", thread_ts: "3000.000001", text: "root task" },
-    { ts: "3001.000001", thread_ts: "3000.000001", text: "Image uploaded in this thread. File: <https://example.test/file|photo.png>. Acknowledge in this same thread before starting the work." }
+    { ts: "3001.000001", thread_ts: "3000.000001", user: "U123", text: "Image uploaded in this thread. File: <https://example.test/file|photo.png>. Acknowledge in this same thread before starting the work." }
   ]);
 
   try {
@@ -158,7 +158,7 @@ test("syncSlackCommandReplies persists terminal Slack replies and marks them mat
   const originalFetch = global.fetch;
   global.fetch = async () => createSlackResponse([
     { ts: "2000.000001", thread_ts: "2000.000001", text: "root task" },
-    { ts: "2001.000001", thread_ts: "2000.000001", text: "Готово. PR: https://github.com/example/repo/pull/1" }
+    { ts: "2001.000001", thread_ts: "2000.000001", user: "U123", text: "Готово. PR: https://github.com/example/repo/pull/1" }
   ]);
 
   try {

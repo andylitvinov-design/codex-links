@@ -7,7 +7,9 @@ test("postSlackCommand uploads attached photos into the original Slack thread", 
   const env = {
     SLACK_BOT_TOKEN: "xoxb-test",
     SLACK_CODEX_CHANNEL_ID: "C123",
-    SLACK_CODEX_USER_ID: "U999"
+    SLACK_CODEX_USER_ID: "U999",
+    SLACK_ACTOR_PROBE_TIMEOUT_MS: "100",
+    SLACK_ACTOR_PROBE_POLL_MS: "1"
   };
   const command = {
     id: "cmd-photo-thread",
@@ -52,6 +54,21 @@ test("postSlackCommand uploads attached photos into the original Slack thread", 
         ok: true,
         async json() {
           return { ok: true, members: ["U999", "UBOT"] };
+        }
+      };
+    }
+
+    if (String(url).includes("/api/conversations.replies")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            messages: [
+              { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" },
+              { ts: "1712345678.000200", thread_ts: "1712345678.000100", user: "U999", text: "Проверяю и читаю файлы." }
+            ]
+          };
         }
       };
     }
@@ -132,7 +149,9 @@ test("postSlackCommand retries photo upload before succeeding", async () => {
     SLACK_BOT_TOKEN: "xoxb-test",
     SLACK_CODEX_CHANNEL_ID: "C123",
     SLACK_CODEX_USER_ID: "U999",
-    SLACK_API_TIMEOUT_MS: "15000"
+    SLACK_API_TIMEOUT_MS: "15000",
+    SLACK_ACTOR_PROBE_TIMEOUT_MS: "100",
+    SLACK_ACTOR_PROBE_POLL_MS: "1"
   };
   const command = {
     id: "cmd-photo-retry",
@@ -160,6 +179,21 @@ test("postSlackCommand retries photo upload before succeeding", async () => {
 
     if (String(url).includes("/api/conversations.members")) {
       return { ok: true, async json() { return { ok: true, members: ["U999", "UBOT"] }; } };
+    }
+
+    if (String(url).includes("/api/conversations.replies")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            messages: [
+              { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" },
+              { ts: "1712345678.000200", thread_ts: "1712345678.000100", user: "U999", text: "Проверяю и читаю файлы." }
+            ]
+          };
+        }
+      };
     }
 
     if (String(url).includes("/api/chat.postMessage")) {
@@ -226,7 +260,9 @@ test("postSlackCommand keeps the Slack thread alive when photo upload fails", as
     SLACK_BOT_TOKEN: "xoxb-test",
     SLACK_CODEX_CHANNEL_ID: "C123",
     SLACK_CODEX_USER_ID: "U999",
-    SLACK_API_TIMEOUT_MS: "15000"
+    SLACK_API_TIMEOUT_MS: "15000",
+    SLACK_ACTOR_PROBE_TIMEOUT_MS: "100",
+    SLACK_ACTOR_PROBE_POLL_MS: "1"
   };
   const command = {
     id: "cmd-photo-nonfatal",
@@ -253,6 +289,21 @@ test("postSlackCommand keeps the Slack thread alive when photo upload fails", as
 
     if (String(url).includes("/api/conversations.members")) {
       return { ok: true, async json() { return { ok: true, members: ["U999", "UBOT"] }; } };
+    }
+
+    if (String(url).includes("/api/conversations.replies")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            messages: [
+              { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" },
+              { ts: "1712345678.000200", thread_ts: "1712345678.000100", user: "U999", text: "Проверяю и читаю файлы." }
+            ]
+          };
+        }
+      };
     }
 
     if (String(url).includes("/api/chat.postMessage")) {

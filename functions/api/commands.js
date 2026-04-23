@@ -34,6 +34,7 @@ import {
   isCloudDispatchConfigured,
   isSlackDispatchConfigured,
   getSlackCodexMention,
+  normalizeDispatchMode,
   normalizeExecutorRoute
 } from "../_lib/dispatch.js";
 import { isAuthorized } from "../_lib/security.js";
@@ -281,6 +282,7 @@ function serializeCommand(command, options = {}) {
     slackPhotoUploadThreaded: Boolean(command.slackPhotoUploadThreaded),
     slackPhotoUploadCompletedAt: String(command.slackPhotoUploadCompletedAt || "").trim(),
     slackPhotoUploadError: String(command.slackPhotoUploadError || "").trim(),
+    slackThreadCreatedAt: String(command.slackPostedAt || "").trim(),
     slackAckObservedAt: String(command.slackAckObservedAt || "").trim(),
     projectId: String(command.projectId || "").trim(),
     projectLabel: String(command.projectLabel || "").trim(),
@@ -333,6 +335,7 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     && reply.ts !== rootTs
     && reply.text
     && !isIgnorableSlackReplyText(reply.text)
+    && isLikelyCodexSlackActor(runtimeConfig, reply, { candidateCount: replies.length })
   ));
 
   let latestReply = threadReplies.at(-1) || null;
@@ -415,7 +418,15 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     lastRunAt: new Date().toISOString(),
     lastSuccessAt: classification.status === "answered" ? new Date().toISOString() : undefined,
     lastDeliveredCount: classification.status === "answered" ? 1 : 0,
-    lastError: classification.status === "failed" ? latestReply.text : ""
+    lastError: classification.status === "failed" ? latestReply.text : "",
+    slackActor: {
+      configuredUserId: runtimeConfig?.SLACK_CODEX_USER_ID,
+      validationStatus: "validated",
+      lastValidatedAt: new Date().toISOString(),
+      validationError: "",
+      probeChannelId: channelId,
+      probeThreadTs: threadTs
+    }
   });
 
   return classification.status === "answered" || classification.status === "failed";
@@ -620,10 +631,25 @@ async function markSlackCloudCommandFailed(env, command, commandError) {
     executorLabel: getDispatchModeLabel(DISPATCH_MODE_SLACK),
     bridgeOnline: true,
     lastRunAt: new Date().toISOString(),
-    lastError: normalizedError
+    lastError: normalizedError,
+    slackActor: commandError?.actorValidation
+      ? {
+          configuredUserId: commandError.actorValidation.configuredUserId,
+          validationStatus: commandError.actorValidation.validationStatus,
+          lastValidatedAt: commandError.actorValidation.lastValidatedAt,
+          validationError: commandError.actorValidation.detail || commandError.actorValidation.message,
+          probeChannelId: commandError.actorValidation.probeChannelId,
+          probeMessageTs: commandError.actorValidation.probeMessageTs,
+          probeThreadTs: commandError.actorValidation.probeThreadTs
+        }
+      : undefined
   });
 
   return failed.value || command;
+}
+
+function isPhotoSlackDispatchFailure(command, published) {
+  return Boolean(command?.photo) && Boolean(String(published?.photoUploadError || "").trim());
 }
 
 async function answerCloudCommand(env, command, result) {
@@ -817,6 +843,31 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
     });
 
     const published = await postSlackCommand(config, command, getSlackCodexMention(config));
+    if (isPhotoSlackDispatchFailure(command, published)) {
+      const stagedFailure = await markCommandDispatched(env, {
+        id: command.id,
+        dispatchMode,
+        progressStage: "dispatched",
+        dispatchStartedAt,
+        slackPostedAt: new Date().toISOString(),
+        slackChannelId: published.channel,
+        slackMessageTs: published.ts,
+        slackThreadTs: published.threadTs,
+        slackPhotoUploadError: String(published.photoUploadError || "").trim(),
+        dispatchedAt: new Date().toISOString()
+      });
+
+      return {
+        ok: true,
+        command: await markSlackCloudCommandFailed(env, stagedFailure.value || command, {
+          code: "slack_photo_upload_failed",
+          stage: "slack-photo-upload-failed",
+          message: "Cloud via Slack photo upload failed.",
+          detail: String(published.photoUploadError || "").trim() || "Slack photo upload failed before the command could continue."
+        })
+      };
+    }
+
     const dispatched = await markCommandDispatched(env, {
       id: command.id,
       dispatchMode,
@@ -844,7 +895,18 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
       bridgeOnline: true,
       lastRunAt: new Date().toISOString(),
       lastDispatchAt: new Date().toISOString(),
-      lastError: ""
+      lastError: "",
+      slackActor: published.actorValidation
+        ? {
+            configuredUserId: published.actorValidation.configuredUserId,
+            validationStatus: published.actorValidation.validationStatus,
+            lastValidatedAt: published.actorValidation.lastValidatedAt,
+            validationError: "",
+            probeChannelId: published.actorValidation.probeChannelId,
+            probeMessageTs: published.actorValidation.probeMessageTs,
+            probeThreadTs: published.actorValidation.probeThreadTs
+          }
+        : undefined
     });
 
     return {
@@ -1108,28 +1170,6 @@ async function monitorFirstAckAndFallback(env, commandId, runtimeConfig) {
     return failed.value || command;
   }
 
-  if (canFallbackToCloud(command, runtimeConfig)) {
-    const rerouted = await rerouteCommandToSlack(env, {
-      id: command.id,
-      progressStage: "switched-to-cloud",
-      timeoutPhase: "claim-timeout",
-      fallbackReason: "local bridge did not claim the command in time",
-      lastDiagnosticCode: "bridge_claim_timeout",
-      lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout.",
-      errorMessage: stringifyCommandError({
-        code: "fallback_to_slack",
-        stage: "switched-to-cloud",
-        message: "Local bridge did not claim the command in time. Switched to cloud via Slack.",
-        detail: "The local bridge did not claim the command before the claim timeout.",
-        fallback: "slack-codex-cloud"
-      })
-    });
-
-    if (rerouted.ok && rerouted.value) {
-      return dispatchCreatedCommand(env, rerouted.value.id, runtimeConfig);
-    }
-  }
-
   const failed = await markCommandFailed(env, {
     id: command.id,
     progressStage: "failed",
@@ -1367,6 +1407,15 @@ export async function onRequest(context) {
 
     if (!claimed.value) {
       const snapshot = await readCommands(env);
+      const requestedDispatchMode = normalizeDispatchMode(payload?.dispatchMode || DISPATCH_MODE_LOCAL);
+      const queuedRequested = snapshot.filter((command) =>
+        command.dispatchMode === requestedDispatchMode && command.status === "queued"
+      );
+      const processingRequested = snapshot.filter((command) =>
+        command.dispatchMode === requestedDispatchMode && command.status === "processing"
+      );
+      const oldestQueuedRequested = [...queuedRequested]
+        .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")))[0] || null;
       const queuedLocal = snapshot.filter((command) =>
         command.dispatchMode === DISPATCH_MODE_LOCAL && command.status === "queued"
       );
@@ -1375,13 +1424,22 @@ export async function onRequest(context) {
       );
 
       claimDiagnostics = {
+        requestedDispatchMode,
+        queuedRequestedCount: queuedRequested.length,
+        processingRequestedCount: processingRequested.length,
+        queuedRequestedIds: queuedRequested.slice(0, 5).map((command) => command.id),
+        processingRequestedIds: processingRequested.slice(0, 5).map((command) => command.id),
+        oldestQueuedRequestedAt: String(oldestQueuedRequested?.createdAt || "").trim(),
+        oldestQueuedRequestedAgeMs: oldestQueuedRequested?.createdAt
+          ? Math.max(0, Date.now() - Date.parse(String(oldestQueuedRequested.createdAt || "").trim()))
+          : 0,
         queuedLocalCount: queuedLocal.length,
         processingLocalCount: processingLocal.length,
         queuedLocalIds: queuedLocal.slice(0, 5).map((command) => command.id),
         processingLocalIds: processingLocal.slice(0, 5).map((command) => command.id)
       };
 
-      if (queuedLocal.length || processingLocal.length) {
+      if (queuedRequested.length || processingRequested.length) {
         console.error("[codex-links] claim returned null", claimDiagnostics);
       }
     }

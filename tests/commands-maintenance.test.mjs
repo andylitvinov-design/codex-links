@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  COMMAND_TIMEOUTS,
   claimNextCommand,
   createCommandRecord,
   getCommandById,
@@ -192,7 +193,7 @@ test("runCommandMaintenance schedules queued cloud fallback commands for dispatc
   assert.deepEqual(result.commandsToDispatch, ["cmd-cloud-fallback"]);
 });
 
-test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", async () => {
+test("runCommandMaintenance fails stale bridge commands instead of rerouting them to Slack cloud", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
 
@@ -221,21 +222,17 @@ test("runCommandMaintenance reroutes stale bridge commands to Slack cloud", asyn
 
   assert.equal(result.changed, true);
   assert.equal(result.changedCount, 1);
-  assert.deepEqual(result.commandsToDispatch, ["cmd-bridge-timeout"]);
+  assert.deepEqual(result.commandsToDispatch, []);
 
   const updated = result.commands.find((command) => command.id === "cmd-bridge-timeout");
   assert.ok(updated);
-  assert.equal(updated.dispatchMode, "slack-codex-cloud");
-  assert.equal(updated.status, "queued");
-  assert.equal(updated.progressStage, "switched-to-cloud");
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "failed");
+  assert.equal(updated.progressStage, "failed");
   assert.equal(updated.timeoutPhase, "result-timeout");
   assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
-  assert.equal(updated.actualExecutor, "cloud-via-slack");
-  assert.equal(updated.bridgeClaimedAt, "");
-  assert.equal(updated.processingStartedAt, "");
-  assert.equal(updated.processingLeaseUntil, "");
-  assert.equal(updated.firstAckAt, "");
-  assert.match(updated.errorMessage, /fallback_to_slack/);
+  assert.equal(updated.actualExecutor, "bridge");
+  assert.match(updated.errorMessage, /bridge_result_timeout/);
 });
 
 test("runCommandMaintenance fails stale photo bridge commands instead of rerouting them", async () => {
@@ -281,9 +278,9 @@ test("runCommandMaintenance fails stale photo bridge commands instead of rerouti
   assert.match(updated.errorMessage, /retrying_photo_bridge/);
 });
 
-test("runCommandMaintenance reroutes stale queued bridge text commands even when another thread is processing", async () => {
+test("runCommandMaintenance fails stale queued bridge text commands even when another thread is processing", async () => {
   const env = createMockEnv();
-  const staleIso = new Date(Date.now() - (40 * 1000)).toISOString();
+  const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.bridgeClaimMs + 20 * 1000)).toISOString();
   const freshIso = new Date().toISOString();
 
   await writeCommands(env, [
@@ -327,15 +324,16 @@ test("runCommandMaintenance reroutes stale queued bridge text commands even when
 
   const updated = result.commands.find((command) => command.id === "cmd-queued-stale-text");
   assert.ok(updated);
-  assert.equal(updated.dispatchMode, "slack-codex-cloud");
-  assert.equal(updated.status, "queued");
-  assert.equal(updated.progressStage, "switched-to-cloud");
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "failed");
+  assert.equal(updated.progressStage, "failed");
   assert.equal(updated.lastDiagnosticCode, "bridge_claim_timeout");
+  assert.match(updated.errorMessage, /bridge_claim_timeout/);
 });
 
 test("runCommandMaintenance keeps queued bridge commands waiting when the same thread still has a fresh processing command", async () => {
   const env = createMockEnv();
-  const staleIso = new Date(Date.now() - (40 * 1000)).toISOString();
+  const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.bridgeClaimMs + 20 * 1000)).toISOString();
   const freshIso = new Date().toISOString();
 
   await writeCommands(env, [
@@ -384,6 +382,58 @@ test("runCommandMaintenance keeps queued bridge commands waiting when the same t
   assert.equal(updated.progressStage, "queued");
 });
 
+test("runCommandMaintenance refreshes queued bridge freshness while the same thread is still processing", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (40 * 1000)).toISOString();
+  const freshIso = new Date().toISOString();
+
+  await writeCommands(env, [
+    {
+      id: "cmd-processing-same-thread-refresh",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "same thread still running",
+      createdAt: freshIso,
+      progressUpdatedAt: freshIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "bridge",
+      status: "processing",
+      progressStage: "waiting-for-codex",
+      processingStartedAt: freshIso,
+      processingLeaseUntil: new Date(Date.now() + 60_000).toISOString()
+    },
+    {
+      id: "cmd-queued-same-thread-refresh",
+      clientId: "test-client",
+      threadId: "links",
+      threadLabel: "links",
+      text: "fix the dialogs",
+      createdAt: staleIso,
+      progressUpdatedAt: staleIso,
+      dispatchMode: "local-bridge",
+      requestedExecutor: "bridge",
+      actualExecutor: "",
+      status: "queued",
+      progressStage: "queued",
+      targetRepo: "andylitvinov-design/codex-links"
+    }
+  ]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-queued-same-thread-refresh");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "queued");
+  assert.ok(Date.parse(String(updated.progressUpdatedAt || "").trim()) > Date.parse(staleIso));
+});
+
 test("runCommandMaintenance fails stale Slack commands that never got an ack", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
@@ -422,6 +472,180 @@ test("runCommandMaintenance fails stale Slack commands that never got an ack", a
   assert.equal(updated.progressStage, "failed");
   assert.equal(updated.timeoutPhase, "first-ack-timeout");
   assert.equal(updated.lastDiagnosticCode, "slack_first_ack_timeout");
+  assert.equal(updated.actualExecutor, "cloud-via-slack");
+});
+
+test("runCommandMaintenance retries queued Claude bridge commands before fallback", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - 90_000).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-claude-claim-retry",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "summarize this repo state",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "claude-bridge",
+    requestedExecutor: "claude",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued"
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-claude-claim-retry");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "claude-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "retrying-claude-claim");
+  assert.equal(updated.lastDiagnosticCode, "claude_claim_timeout");
+  assert.equal(updated.actualExecutor, "claude");
+});
+
+test("runCommandMaintenance falls back stale Claude queue commands to local bridge after retry window", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (11 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-claude-claim-fallback",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "summarize this repo state",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "claude-bridge",
+    requestedExecutor: "claude",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued"
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-claude-claim-fallback");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "local-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "fallback-to-bridge");
+  assert.equal(updated.lastDiagnosticCode, "claude_claim_timeout");
+  assert.equal(updated.actualExecutor, "bridge");
+});
+
+test("runCommandMaintenance retries stale Claude processing before fallback", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (4 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-claude-result-retry",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "summarize this repo state",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "claude-bridge",
+    requestedExecutor: "claude",
+    actualExecutor: "claude",
+    status: "processing",
+    progressStage: "waiting-for-codex",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() - 1_000).toISOString(),
+    firstAckAt: staleIso
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-claude-result-retry");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "claude-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "retrying-claude");
+  assert.equal(updated.lastDiagnosticCode, "claude_result_timeout");
+  assert.equal(updated.actualExecutor, "claude");
+});
+
+test("runCommandMaintenance fails stale Claude commands after retry window when fallback is unavailable", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (11 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-claude-fail",
+    clientId: "test-client",
+    threadId: "cloud:ephemeral",
+    threadLabel: "cloud:ephemeral",
+    text: "summarize this repo state",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "claude-bridge",
+    requestedExecutor: "claude",
+    actualExecutor: "claude",
+    status: "processing",
+    progressStage: "waiting-for-codex",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() - 1_000).toISOString(),
+    firstAckAt: staleIso,
+    fallbackCount: 1
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-claude-fail");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "claude-bridge");
+  assert.equal(updated.status, "failed");
+  assert.equal(updated.progressStage, "failed");
+  assert.equal(updated.lastDiagnosticCode, "claude_result_timeout");
+});
+
+test("runCommandMaintenance fails photo Slack commands instead of masking them with bridge fallback", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-upload-error",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    dispatchedAt: staleIso,
+    photoAttached: true,
+    photoBytesPresent: true,
+    slackPhotoUploadError: "temporarily_unavailable"
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-photo-upload-error");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "slack-codex-cloud");
+  assert.equal(updated.status, "failed");
+  assert.equal(updated.progressStage, "failed");
+  assert.equal(updated.lastDiagnosticCode, "slack_photo_upload_failed");
   assert.equal(updated.actualExecutor, "cloud-via-slack");
 });
 
