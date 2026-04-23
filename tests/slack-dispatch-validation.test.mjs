@@ -75,6 +75,10 @@ test("dispatchCommandIfNeeded fails closed when Slack actor live probe is not ac
       return createSlackOkResponse({ members: ["UBOT", "U999"] });
     }
 
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({ messages: [] });
+    }
+
     if (String(url).includes("/api/chat.postMessage")) {
       return createSlackOkResponse({
         channel: "C123",

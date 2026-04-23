@@ -58,6 +58,10 @@ test("validateSlackCodexActor rejects channel members that never acknowledge the
       return createSlackOkResponse({ members: ["UBOT", "U999"] });
     }
 
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({ messages: [] });
+    }
+
     if (String(url).includes("/api/chat.postMessage")) {
       return createSlackOkResponse({
         channel: "C123",
@@ -107,6 +111,10 @@ test("validateSlackCodexActor ignores helper-only Slack replies during live prob
 
     if (String(url).includes("/api/conversations.members")) {
       return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({ messages: [] });
     }
 
     if (String(url).includes("/api/chat.postMessage")) {
@@ -164,6 +172,10 @@ test("validateSlackCodexActor accepts a real worker ack in the probe thread", as
 
     if (String(url).includes("/api/conversations.members")) {
       return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({ messages: [] });
     }
 
     if (String(url).includes("/api/chat.postMessage")) {
