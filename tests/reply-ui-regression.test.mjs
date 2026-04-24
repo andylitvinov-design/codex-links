@@ -41,3 +41,16 @@ test("timeline hides delivery note once grouped replies are present", () => {
   assert.match(appSource, /const deliveryStatus = hasReplies \? null : getCommandDeliveryStatus\(command\);/);
   assert.match(appSource, /: \(hasReplies \? null : \(getCommandDeliveryStatus\(linkedCommand\) \|\| getFallbackMessageDeliveryStatus\(message\?\.commandId\)\)\);/);
 });
+
+test("timeline tabs expose unread signals for inactive tabs", () => {
+  assert.match(appSource, /codex-links-timeline-seen-ids/);
+  assert.match(appSource, /function updateTimelineSignals\(itemsByTab\)/);
+  assert.match(appSource, /button\.classList\.toggle\("has-unread", unreadCount > 0\);/);
+  assert.match(styleSource, /\.timeline-tab-button\.has-unread:not\(\.is-active\)::after/);
+});
+
+test("new delivery items queue one reply sound per item", () => {
+  assert.match(appSource, /function queueReplySounds\(count\)/);
+  assert.match(appSource, /index \* 420/);
+  assert.match(appSource, /queueReplySounds\(newMessageSoundCount \+ newReportSoundCount\);/);
+});
