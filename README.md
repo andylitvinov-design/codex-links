@@ -2,6 +2,26 @@
 
 Cloudflare Pages inbox for links and Codex tasks, with production cloud execution routed through Slack-backed Codex Cloud by default and direct OpenAI kept as an optional path.
 
+## Codex Save
+
+This repo now also contains `codex-save`, a separate operator-facing Cloudflare Pages site under [codex-save](/Users/andriilitvinov/projects/MYPROJECTS/links/codex-save) for:
+
+- live diagnostics against `https://codex-links.pages.dev`
+- remediation orchestration through the existing `codex-links` agent command API
+- recheck and before/after reporting
+
+Local commands:
+
+```bash
+npm run save:dev
+npm run save:deploy
+```
+
+Notes:
+
+- `codex-save` is a separate Pages project and needs its own KV namespace bound as `SAVE_STORE`
+- remediation runs create real agent commands through `codex-links /api/commands`; they do not push directly to `main`
+
 ## Current Architecture
 
 - Public UI and API: Cloudflare Pages

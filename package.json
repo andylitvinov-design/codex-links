@@ -7,6 +7,8 @@
     "test": "node --test tests/*.test.mjs",
     "dev": "wrangler pages dev public",
     "deploy": "wrangler pages deploy public --project-name codex-links",
+    "save:dev": "cd codex-save && wrangler pages dev public",
+    "save:deploy": "cd codex-save && wrangler pages deploy public --project-name codex-save",
     "kv:seed": "node scripts/seed-demo.mjs",
     "cloud:check": "node scripts/check-cloud-setup.mjs",
     "cloud:preview-check": "node scripts/check-preview-cloud-status.mjs",

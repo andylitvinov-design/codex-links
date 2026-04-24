@@ -1,0 +1,12 @@
+{
+  "name": "codex-save",
+  "compatibility_date": "2026-04-23",
+  "pages_build_output_dir": "public",
+  "kv_namespaces": [
+    {
+      "binding": "SAVE_STORE",
+      "id": "50c2c4cadf884cbfa970cdbdb75324a8",
+      "preview_id": "50c2c4cadf884cbfa970cdbdb75324a8"
+    }
+  ]
+}
