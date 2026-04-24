@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { validateSlackCodexActor } from "../functions/_lib/slack.js";
+import { classifySlackReply, validateSlackCodexActor } from "../functions/_lib/slack.js";
 
 function createSlackOkResponse(body) {
   return {
@@ -35,6 +35,9 @@ test("validateSlackCodexActor rejects when target points to the Codex Links bot 
     const result = await validateSlackCodexActor(env, { timeoutMs: 20, pollIntervalMs: 1 });
     assert.equal(result.validationStatus, "invalid");
     assert.equal(result.code, "codex_target_user_invalid");
+    assert.match(result.message, /Codex Links sender app/);
+    assert.match(result.detail, /OpenAI Codex Slack app/);
+    assert.match(result.detail, /@Codex bot\/user ID/);
   } finally {
     global.fetch = originalFetch;
   }
@@ -137,6 +140,57 @@ test("validateSlackCodexActor skips the live probe by default when membership is
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test("validateSlackCodexActor does not validate the ChatGPT Codex account connection prompt", async () => {
+  const env = {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    SLACK_CODEX_USER_ID: "U999"
+  };
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/auth.test")) {
+      return createSlackOkResponse({ user_id: "UBOT" });
+    }
+
+    if (String(url).includes("/api/conversations.members")) {
+      return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({
+        messages: [{
+          ts: "1712345678.000200",
+          user: "U999",
+          text: "To use Codex in the 'super' Slack workspace, connect to your ChatGPT Codex account. After connecting, tag Codex again to continue. Connect button"
+        }]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const result = await validateSlackCodexActor(env, {
+      timeoutMs: 10,
+      pollIntervalMs: 1
+    });
+    assert.equal(result.validationStatus, "unverified");
+    assert.equal(result.code, "codex_target_actor_unverified");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("classifySlackReply marks the ChatGPT Codex account connection prompt as failed", () => {
+  const result = classifySlackReply(
+    "To use Codex in the 'super' Slack workspace, connect to your ChatGPT Codex account. After connecting, tag Codex again to continue. Connect button"
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.progressStage, "codex-account-not-connected");
 });
 
 test("validateSlackCodexActor ignores helper-only Slack replies during live probe", async () => {

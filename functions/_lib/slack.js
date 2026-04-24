@@ -508,8 +508,8 @@ async function validateSlackTarget(token, channel, targetUserId) {
     return buildSlackActorValidationResult({
       validationStatus: "invalid",
       code: "codex_target_user_invalid",
-      message: "Configured Slack target user points to the Codex Links bot.",
-      detail: "Set SLACK_CODEX_USER_ID to the real Codex worker user, not the app bot user.",
+      message: "Configured Slack target user points to the Codex Links sender app.",
+      detail: "Install the separate OpenAI Codex Slack app and set SLACK_CODEX_USER_ID to its @Codex bot/user ID, not the Codex Links sender app user returned by auth.test.",
       configuredUserId: normalizedTarget
     });
   }
@@ -1001,7 +1001,9 @@ export function isIgnorableSlackReplyText(text) {
   }
 
   return (
-    /\bimage uploaded in this thread\b/i.test(value)
+    /\bconnect to your chatgpt codex account\b/i.test(value)
+    || /\bafter connecting, tag codex again to continue\b/i.test(value)
+    || /\bimage uploaded in this thread\b/i.test(value)
     || /\battached image from codex links request\b/i.test(value)
     || /\backnowledge in this same thread before starting the work\b/i.test(value)
     || /\bfile:\s*<https:\/\/[^>]+>\b/i.test(value)
@@ -1017,6 +1019,18 @@ export function classifySlackReply(text) {
   const value = String(text || "").trim();
   const lower = value.toLowerCase();
   const prUrl = extractGithubPrUrl(value);
+
+  if (
+    /\bconnect to your chatgpt codex account\b/i.test(value)
+    || /\bafter connecting, tag codex again to continue\b/i.test(value)
+  ) {
+    return {
+      status: "failed",
+      progressStage: "codex-account-not-connected",
+      prUrl,
+      branchName: ""
+    };
+  }
 
   if (isIgnorableSlackReplyText(value)) {
     return {
