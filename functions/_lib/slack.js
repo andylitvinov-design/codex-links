@@ -977,6 +977,22 @@ function isLikelyProgressOnlySlackReply(text) {
     || /(проверяю|смотрю|изучаю|читаю|готовлю|запускаю|жду|обрабатываю|анализирую|ищу|синхронизирую|открываю|разбираю|дебажу|повторяю|в очереди|в работе|работаю)/i.test(value);
 }
 
+function isLikelyTerminalPhotoReply(text) {
+  const value = String(text || "").trim();
+  const lower = value.toLowerCase();
+
+  if (!value) {
+    return false;
+  }
+
+  return /^observed\s*:/i.test(value)
+    || /\bPHOTO_OK\b/i.test(value)
+    || /\bimage unreadable\b/i.test(value)
+    || /\b(?:on|in) (?:the )?(?:image|photo|screenshot)\b/i.test(value)
+    || /\bна (?:изображении|фото|скриншоте|скрине)\b/i.test(lower)
+    || /\bвидно\b/i.test(lower);
+}
+
 export function isIgnorableSlackReplyText(text) {
   const value = String(text || "").trim();
 
@@ -1025,6 +1041,7 @@ export function classifySlackReply(text) {
   if (
     prUrl
     || /\b(pr ready|pull request|opened pr|created pr|implemented|completed|finished|done|готово|исправил|сделал)\b/i.test(lower)
+    || isLikelyTerminalPhotoReply(value)
   ) {
     return {
       status: "answered",

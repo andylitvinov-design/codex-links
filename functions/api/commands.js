@@ -1362,7 +1362,8 @@ async function reconcileCommandsForRead(env, runtimeConfig) {
   try {
     maintenance = await runCommandMaintenance(env, {
       preferSlack: isSlackDispatchConfigured(runtimeConfig),
-      fallbackToLocal: true
+      fallbackToLocal: true,
+      fallbackToClaude: true
     });
   } catch (error) {
     logCommandError("reconcileCommandsForRead.runCommandMaintenance", error);

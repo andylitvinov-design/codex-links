@@ -116,6 +116,24 @@ test("bridge executor tolerates benign stdin warnings when Codex already produce
   assert.match(source, /if \(shouldTreatCodexExecAsUsable\(error, result, prompt\)\) \{\s*resolve\(result\);/);
 });
 
+test("bridge executor sends photos directly to Codex CLI without the script tty wrapper", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /codexArgs\.push\("-i", photoPath\);/);
+  assert.match(source, /spawnFileWithOutput\(codexBin, codexArgs,/);
+  assert.match(source, /stdio:\s*\["ignore", "pipe", "pipe"\]/);
+  assert.doesNotMatch(source, /\/usr\/bin\/script/);
+});
+
+test("bridge photo OCR skips optional Swift extraction when developer tools are unavailable", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /function isDeveloperToolsUnavailableError\(error\)/);
+  assert.match(source, /photoOcr\.skipped/);
+  assert.match(source, /invalid active developer path/);
+  assert.match(source, /missing xcrun/);
+});
+
 test("bridge executor falls back to immediate assistant text when the Codex output file is missing", async () => {
   const source = await readFile(bridgeScriptPath, "utf8");
 

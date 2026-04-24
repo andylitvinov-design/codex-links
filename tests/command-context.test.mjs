@@ -34,3 +34,23 @@ test("createCommandRecord falls back to plain user text when previous assistant 
   assert.equal(created.value.previousAssistantReply, "");
   assert.equal(created.value.effectivePrompt, "Проверь еще раз");
 });
+
+test("createCommandRecord marks photo-heavy diagnostic requests as Claude-fallback eligible", () => {
+  const created = createCommandRecord({
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: [
+      "Исследуй production routing, подготовь remediation report и rollout plan.",
+      "Сравни несколько delivery paths, проверь fallback behavior и диагностику.",
+      "Опиши, что сломано, какие несколько файлов нужно менять, и как делать merge и deploy.",
+      "Повтори этот анализ подробно для bridge, cloud и photo delivery.".repeat(12)
+    ].join("\n"),
+    previousAssistantReply: "Есть деградация cloud path и зависания bridge. Нужен подробный отчёт."
+  });
+
+  assert.equal(created.ok, true);
+  assert.equal(created.value.allowClaudeFallback, true);
+  assert.equal(created.value.complexityLevel, "high");
+  assert.ok(created.value.complexityScore >= 4);
+});

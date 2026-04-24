@@ -177,3 +177,97 @@ test("syncSlackCommandReplies persists terminal Slack replies and marks them mat
   assert.equal(messages.length, 1);
   assert.match(messages[0]?.text || "", /PR:/);
 });
+
+test("syncSlackCommandReplies treats photo observation replies as terminal", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-observed",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "processing",
+    progressStage: "processing",
+    slackChannelId: "C123",
+    slackMessageTs: "4000.000001",
+    slackThreadTs: "4000.000001",
+    dispatchedAt: createdAt,
+    firstAckAt: createdAt,
+    photoAttached: true,
+    photoBytesPresent: true
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => createSlackResponse([
+    { ts: "4000.000001", thread_ts: "4000.000001", text: "root task" },
+    { ts: "4001.000001", thread_ts: "4000.000001", user: "U123", text: "Observed: на скриншоте видна ошибка tcgetattr/ioctl." }
+  ]);
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-photo-observed");
+    await syncSlackCommandReplies(env, command, { SLACK_CODEX_USER_ID: "U123" });
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const updated = await getCommandById(env, "cmd-slack-photo-observed");
+  const messages = await readMessages(env);
+
+  assert.equal(updated?.status, "answered");
+  assert.equal(updated?.replyMatched, true);
+  assert.equal(updated?.replyMatchedBy, "thread");
+  assert.equal(messages.length, 1);
+  assert.match(messages[0]?.text || "", /^Observed:/);
+});
+
+test("syncSlackCommandReplies treats PHOTO_OK smoke replies as terminal", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-ok",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "photo cloud probe ignore",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "processing",
+    progressStage: "processing",
+    slackChannelId: "C123",
+    slackMessageTs: "5000.000001",
+    slackThreadTs: "5000.000001",
+    dispatchedAt: createdAt,
+    firstAckAt: createdAt,
+    photoAttached: true,
+    photoBytesPresent: true
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => createSlackResponse([
+    { ts: "5000.000001", thread_ts: "5000.000001", text: "root task" },
+    { ts: "5001.000001", thread_ts: "5000.000001", user: "U123", text: "PHOTO_OK" }
+  ]);
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-photo-ok");
+    await syncSlackCommandReplies(env, command, { SLACK_CODEX_USER_ID: "U123" });
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const updated = await getCommandById(env, "cmd-slack-photo-ok");
+
+  assert.equal(updated?.status, "answered");
+  assert.equal(updated?.replyMatched, true);
+});

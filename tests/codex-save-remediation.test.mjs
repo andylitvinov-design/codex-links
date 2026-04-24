@@ -27,6 +27,7 @@ function createMockEnv() {
 function createDiagnosisFixture() {
   return {
     runId: "diagnosis-1",
+    status: "completed",
     target: {
       baseUrl: "https://codex-links.pages.dev",
       threadId: "links",
@@ -34,6 +35,7 @@ function createDiagnosisFixture() {
       projectId: "links",
       targetRepo: "andylitvinov-design/codex-links",
       targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
+      targetWorkspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/links",
       targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"]
     },
     overallStatus: "fail",
@@ -49,22 +51,22 @@ function createDiagnosisFixture() {
       },
       {
         id: "text-cloud",
-        label: "Text via cloud",
+        label: "Text via Claude Code",
         status: "fail",
-        summary: "Cloud path fell back to bridge.",
+        summary: "Claude Code path fell back to bridge.",
         canAutoFix: true,
         manualRequired: false,
         fixCategory: "delivery-routing",
         details: {
           actualExecutor: "bridge",
-          expectedExecutor: "direct-openai"
+          expectedExecutor: "claude"
         }
       },
       {
-        id: "text-cloud-bridge",
-        label: "Text via Cloud bridge",
+        id: "text-direct-openai",
+        label: "Text via Direct OpenAI",
         status: "pass",
-        summary: "Claude bridge worked.",
+        summary: "Direct OpenAI worked.",
         canAutoFix: false,
         manualRequired: false,
         fixCategory: ""
@@ -80,9 +82,18 @@ function createDiagnosisFixture() {
       },
       {
         id: "photo-cloud",
-        label: "Photo via cloud",
+        label: "Photo via Claude Code",
+        status: "pass",
+        summary: "Claude Code photo worked.",
+        canAutoFix: false,
+        manualRequired: false,
+        fixCategory: ""
+      },
+      {
+        id: "photo-direct-openai",
+        label: "Photo via Direct OpenAI",
         status: "blocked",
-        summary: "Photo direct cloud did not stay on the direct executor.",
+        summary: "Photo Direct OpenAI did not stay on the direct executor.",
         canAutoFix: false,
         manualRequired: true,
         fixCategory: "platform-limitation"
@@ -119,10 +130,12 @@ test("remediation run creates an agent command when auto-fixable issues exist", 
   const env = createMockEnv();
   const diagnosis = createDiagnosisFixture();
   await saveDiagnosisRun(env, diagnosis);
+  let commandPayload = null;
 
   const run = await createRemediationRun(env, diagnosis.runId, async (url, init = {}) => {
     assert.match(String(url), /\/api\/commands$/);
     assert.equal(init.method, "POST");
+    commandPayload = JSON.parse(String(init.body || "{}"));
 
     return new Response(JSON.stringify({
       command: {
@@ -145,4 +158,52 @@ test("remediation run creates an agent command when auto-fixable issues exist", 
   assert.equal(run.actions[0].selectedTargetExecutionMode, "claude");
   assert.equal(run.recheckScope, "selective");
   assert.deepEqual(run.recheckedCheckIds.sort(), ["text-cloud", "text-codex-bridge"]);
+  assert.equal(commandPayload.targetWorkspacePath, "/Users/andriilitvinov/projects/MYPROJECTS/links");
+  assert.deepEqual(commandPayload.targetContextFiles, ["AGENTS.md", "README.md", "STATE.md"]);
+  assert.match(commandPayload.text, /branch, push it, open a PR, merge it, and deploy Cloudflare Pages/i);
+  assert.match(commandPayload.text, /Start by reading AGENTS\.md, README\.md, and STATE\.md/i);
+});
+
+test("remediation run rejects a running diagnosis before creating an agent command", async () => {
+  const env = createMockEnv();
+  const diagnosis = createDiagnosisFixture();
+  diagnosis.status = "running";
+  diagnosis.checks = [{
+    id: "text-cloud",
+    label: "Text via Claude Code",
+    kind: "delivery",
+    route: "claude-bridge",
+    channel: "Claude Code",
+    group: "text",
+    mode: "text",
+    expectedExecutor: "claude",
+    state: "running",
+    status: "unknown",
+    summary: "Still running.",
+    startedAt: new Date().toISOString(),
+    details: {
+      commandId: "cmd-running"
+    }
+  }];
+  await saveDiagnosisRun(env, diagnosis);
+
+  await assert.rejects(
+    () => createRemediationRun(env, diagnosis.runId, async (url) => {
+      assert.match(String(url), /\/api\/commands\?id=cmd-running/);
+      return new Response(JSON.stringify({
+        command: {
+          id: "cmd-running",
+          status: "processing",
+          progressStage: "waiting-for-codex",
+          actualExecutor: "claude"
+        }
+      }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    }),
+    /Diagnosis is still running/
+  );
 });

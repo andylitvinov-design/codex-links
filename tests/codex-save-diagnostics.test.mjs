@@ -35,6 +35,7 @@ function createResponse(body, init = {}) {
 test("diagnosis run marks status API as degraded when Slack actor is unverified", async () => {
   const env = createMockEnv();
   let posted = 0;
+  const postedPayloads = [];
 
   const fetchMock = async (url, init = {}) => {
     if (String(url).includes("/api/status")) {
@@ -57,6 +58,7 @@ test("diagnosis run marks status API as degraded when Slack actor is unverified"
 
     if (String(url).includes("/api/commands") && init.method === "POST") {
       posted += 1;
+      postedPayloads.push(JSON.parse(String(init.body || "{}")));
       return createResponse({
         command: {
           id: `cmd-${posted}`,
@@ -93,6 +95,11 @@ test("diagnosis run marks status API as degraded when Slack actor is unverified"
   assert.equal(next.runningCount, 6);
   assert.equal(next.completedCount, 2);
   assert.equal(next.pendingCount, 0);
+  assert.equal(postedPayloads.find((payload) => payload.clientId.includes("text-cloud"))?.dispatchMode, "claude-bridge");
+  assert.equal(postedPayloads.find((payload) => payload.clientId.includes("text-cloud"))?.targetExecutionMode, "claude");
+  assert.equal(postedPayloads.find((payload) => payload.clientId.includes("photo-cloud"))?.dispatchMode, "claude-bridge");
+  assert.equal(postedPayloads.find((payload) => payload.clientId.includes("text-direct-openai"))?.dispatchMode, "cloud");
+  assert.equal(postedPayloads.find((payload) => payload.clientId.includes("text-direct-openai"))?.targetExecutionMode, "direct-openai");
   assert.ok(recommendation);
   assert.match(recommendation.recommendation, /SLACK_CODEX_USER_ID|Slack actor/i);
 });

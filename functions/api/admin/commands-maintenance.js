@@ -80,7 +80,8 @@ export async function onRequest(context) {
 
   const maintenance = await runCommandMaintenance(env, {
     preferSlack: allowSlack,
-    fallbackToLocal: true
+    fallbackToLocal: true,
+    fallbackToClaude: true
   });
 
   const commandsById = new Map(maintenance.commands.map((command) => [command.id, command]));
