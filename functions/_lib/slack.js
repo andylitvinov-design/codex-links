@@ -50,6 +50,10 @@ function buildSlackAuthHeaders(token, headers = {}) {
   };
 }
 
+function resolveSlackDispatchToken(env) {
+  return normalizeText(env?.SLACK_CODEX_DISPATCH_TOKEN);
+}
+
 function normalizeSlackQueryTs(rawValue) {
   const value = normalizeText(rawValue);
 
@@ -785,18 +789,19 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
 }
 
 export async function postSlackCommand(env, command, mention) {
-  const token = normalizeText(env?.SLACK_BOT_TOKEN);
+  const readToken = normalizeText(env?.SLACK_BOT_TOKEN);
+  const dispatchToken = resolveSlackDispatchToken(env);
   const channel = normalizeText(env?.SLACK_CODEX_CHANNEL_ID);
   const targetUserId = normalizeText(env?.SLACK_CODEX_USER_ID);
 
-  if (!token || !channel) {
+  if (!readToken || !dispatchToken || !channel) {
     throw withCommandError(
       new Error("Slack Codex dispatch is not configured."),
       {
         code: "slack_dispatch_failed",
         stage: "slack-dispatch-failed",
         message: "Slack Codex dispatch is not configured.",
-        detail: "Missing SLACK_BOT_TOKEN or SLACK_CODEX_CHANNEL_ID.",
+        detail: "Missing SLACK_BOT_TOKEN, SLACK_CODEX_DISPATCH_TOKEN, or SLACK_CODEX_CHANNEL_ID.",
         fallback: "local-bridge"
       }
     );
@@ -825,7 +830,7 @@ export async function postSlackCommand(env, command, mention) {
   }, resolvedCodexThreadId);
   const response = await fetchWithTimeout("https://slack.com/api/chat.postMessage", {
     method: "POST",
-    headers: buildSlackHeaders(token),
+    headers: buildSlackHeaders(dispatchToken),
     body: JSON.stringify({
       channel,
       text,
@@ -855,9 +860,9 @@ export async function postSlackCommand(env, command, mention) {
 
   if (command?.photo) {
     try {
-      uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo, { env });
+      uploaded = await uploadSlackPhotoToThread(dispatchToken, resolvedChannel, resolvedThreadTs, command.photo, { env });
       await postSlackThreadNudge(
-        token,
+        dispatchToken,
         resolvedChannel,
         resolvedThreadTs,
         [
