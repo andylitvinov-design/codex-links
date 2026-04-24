@@ -173,10 +173,13 @@ function execFileWithOptionsAsync(file, args, options = {}) {
 
 function spawnFileWithOutput(file, args, options = {}) {
   return new Promise((resolve, reject) => {
+    const stdinInput = Object.prototype.hasOwnProperty.call(options, "stdin")
+      ? String(options.stdin || "")
+      : null;
     const child = spawn(file, args, {
       cwd: options.cwd || process.cwd(),
       env: options.env || process.env,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: [stdinInput === null ? "ignore" : "pipe", "pipe", "pipe"]
     });
     const maxBuffer = Number(options.maxBuffer || 10 * 1024 * 1024);
     let stdout = "";
@@ -218,6 +221,10 @@ function spawnFileWithOutput(file, args, options = {}) {
         child.kill("SIGTERM");
       }
     });
+
+    if (stdinInput !== null) {
+      child.stdin.end(stdinInput);
+    }
 
     child.on("error", (error) => {
       finish(() => reject(error));
@@ -1391,23 +1398,24 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_
       promptChars: instructions.length
     });
 
-    execFile(claudeBin, [
+    spawnFileWithOutput(claudeBin, [
       "-p",
+      "--input-format",
+      "text",
       "--output-format",
       "text",
       "--permission-mode",
       "bypassPermissions",
-      ...addDirArgs,
-      "--",
-      instructions
+      ...addDirArgs
     ], {
       cwd: cwd || process.cwd(),
       timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024,
       env: {
         ...process.env
-      }
-    }, (error, stdout, stderr) => {
+      },
+      stdin: instructions
+    }).then(({ error, stdout, stderr }) => {
       const result = {
         output: String(stdout || "").trim(),
         stdout: String(stdout || "").trim(),
@@ -1434,7 +1442,7 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_
         stderrChars: result.stderr.length
       });
       resolve(result);
-    });
+    }).catch(reject);
   });
 }
 

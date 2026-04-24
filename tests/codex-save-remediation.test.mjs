@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildRemediationPlan, createRemediationRun } from "../codex-save/functions/_lib/remediation.js";
-import { saveDiagnosisRun } from "../codex-save/functions/_lib/runs.js";
+import { saveDiagnosisRun, saveRemediationRun } from "../codex-save/functions/_lib/runs.js";
 
 function createMockEnv() {
   const store = new Map();
@@ -206,4 +206,44 @@ test("remediation run rejects a running diagnosis before creating an agent comma
     }),
     /Diagnosis is still running/
   );
+});
+
+test("remediation run reuses an active run for the same diagnosis", async () => {
+  const env = createMockEnv();
+  const diagnosis = createDiagnosisFixture();
+  await saveDiagnosisRun(env, diagnosis);
+  await saveRemediationRun(env, {
+    runId: "remediation-active",
+    kind: "remediation",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    completedAt: "",
+    sourceDiagnosisId: diagnosis.runId,
+    target: diagnosis.target,
+    plan: {
+      issueCount: 1,
+      autoFixCount: 1,
+      manualCount: 0,
+      issues: [],
+      actions: [],
+      manualActions: []
+    },
+    actions: [{
+      kind: "agent-command",
+      commandId: "active-command",
+      status: "processing"
+    }],
+    status: "in_progress",
+    recheckId: "",
+    recheckScope: "selective",
+    recheckedCheckIds: ["text-cloud"],
+    report: null
+  });
+
+  const run = await createRemediationRun(env, diagnosis.runId, async () => {
+    throw new Error("fetch should not create a duplicate command");
+  });
+
+  assert.equal(run.runId, "remediation-active");
+  assert.equal(run.actions[0].commandId, "active-command");
 });

@@ -4,6 +4,7 @@ import {
   CHECK_STATE_RUNNING,
   DEFAULT_TARGET,
   DELIVERY_CHECK_TIMEOUT_MS,
+  FETCH_TIMEOUT_MS,
   PHOTO_DATA_URL,
   RESULT_BLOCKED,
   RESULT_DEGRADED,
@@ -34,24 +35,27 @@ const CHECK_DEFINITIONS = [
     label: "Text via Codex bridge",
     kind: "delivery",
     route: "local-bridge",
+    channel: "Codex bridge",
     group: "text",
     mode: "text",
     expectedExecutor: "bridge"
   },
   {
-    id: "text-cloud-bridge",
-    label: "Text via Cloud bridge",
+    id: "text-cloud",
+    label: "Text via Claude Code",
     kind: "delivery",
     route: "claude-bridge",
+    channel: "Claude Code",
     group: "text",
     mode: "text",
     expectedExecutor: "claude"
   },
   {
-    id: "text-cloud",
-    label: "Text via cloud",
+    id: "text-direct-openai",
+    label: "Text via Direct OpenAI",
     kind: "delivery",
-    route: "cloud",
+    route: "direct-openai",
+    channel: "Direct OpenAI",
     group: "text",
     mode: "text",
     expectedExecutor: "direct-openai"
@@ -61,24 +65,27 @@ const CHECK_DEFINITIONS = [
     label: "Photo via Codex bridge",
     kind: "delivery",
     route: "local-bridge",
+    channel: "Codex bridge",
     group: "photo",
     mode: "photo",
     expectedExecutor: "bridge"
   },
   {
-    id: "photo-cloud-bridge",
-    label: "Photo via Cloud bridge",
+    id: "photo-cloud",
+    label: "Photo via Claude Code",
     kind: "delivery",
     route: "claude-bridge",
+    channel: "Claude Code",
     group: "photo",
     mode: "photo",
     expectedExecutor: "claude"
   },
   {
-    id: "photo-cloud",
-    label: "Photo via cloud",
+    id: "photo-direct-openai",
+    label: "Photo via Direct OpenAI",
     kind: "delivery",
-    route: "cloud",
+    route: "direct-openai",
+    channel: "Direct OpenAI",
     group: "photo",
     mode: "photo",
     expectedExecutor: "direct-openai"
@@ -93,6 +100,7 @@ function normalizeTarget(env, input = {}) {
     projectId: String(input.projectId || env.CODEX_SAVE_TARGET_PROJECT_ID || DEFAULT_TARGET.projectId).trim(),
     targetRepo: String(input.targetRepo || env.CODEX_SAVE_TARGET_REPO || DEFAULT_TARGET.targetRepo).trim(),
     targetRepoUrl: String(input.targetRepoUrl || env.CODEX_SAVE_TARGET_REPO_URL || DEFAULT_TARGET.targetRepoUrl).trim(),
+    targetWorkspacePath: String(input.targetWorkspacePath || env.CODEX_SAVE_TARGET_WORKSPACE_PATH || DEFAULT_TARGET.targetWorkspacePath).trim(),
     targetContextFiles: Array.isArray(input.targetContextFiles) && input.targetContextFiles.length
       ? input.targetContextFiles.map((entry) => String(entry || "").trim()).filter(Boolean)
       : [...DEFAULT_TARGET.targetContextFiles]
@@ -144,6 +152,17 @@ function buildRecommendation(check) {
     return null;
   }
 
+  if (check?.state !== CHECK_STATE_COMPLETED) {
+    return {
+      checkId: check.id,
+      severity: "info",
+      title: `Дождаться ${label}`,
+      summary: String(check?.summary || "").trim() || `${label} ещё выполняется.`,
+      recommendation: "Дождись terminal result этого check. Кнопка `Исправить` станет доступна только после завершения диагностики и появления auto-fix issues.",
+      actionType: "waiting"
+    };
+  }
+
   if (check?.id === "status-api" && String(check?.details?.slackActorStatus || "").trim() === "unverified") {
     return {
       checkId: check.id,
@@ -171,7 +190,7 @@ function buildRecommendation(check) {
       checkId: check.id,
       severity: "warning",
       title: `Зафиксировать ограничение для ${label}`,
-      summary: `${label} сейчас не удерживается на целевом cloud executor.`,
+      summary: `${label} сейчас не удерживается на целевом executor.`,
       recommendation: "Сначала подтвердить, это design/platform limitation или баг. До подтверждения не обещать автоматический fix; держать как manual review item.",
       actionType: "manual"
     };
@@ -223,9 +242,18 @@ export function summarizeOverallStatus(checks) {
 }
 
 async function fetchJson(url, init = {}, fetchImpl = fetch) {
-  const response = await fetchImpl(url, init);
-  const body = await response.json().catch(() => null);
-  return { response, body };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(url, {
+      ...init,
+      signal: init.signal || controller.signal
+    });
+    const body = await response.json().catch(() => null);
+    return { response, body };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function buildProbeText(check) {
@@ -254,9 +282,12 @@ function buildCommandPayload(target, check, run) {
   } else if (check.route === "claude-bridge") {
     base.dispatchMode = "claude-bridge";
     base.targetExecutionMode = "claude";
-  } else {
+  } else if (check.route === "direct-openai") {
     base.dispatchMode = "cloud";
     base.targetExecutionMode = "direct-openai";
+  } else {
+    base.dispatchMode = "claude-bridge";
+    base.targetExecutionMode = "claude";
   }
 
   if (check.mode === "photo") {
@@ -280,7 +311,7 @@ function getFixMetadata(check, status, details = {}) {
     };
   }
 
-  if (check.route === "cloud" && check.mode === "photo" && (status === RESULT_BLOCKED || details?.reasonCode === "unexpected_executor")) {
+  if (check.route === "direct-openai" && check.mode === "photo" && (status === RESULT_BLOCKED || details?.reasonCode === "unexpected_executor")) {
     return {
       canAutoFix: false,
       fixCategory: "platform-limitation",
@@ -447,7 +478,7 @@ function classifyDeliveryCompletion(check, command) {
     : (String(command?.photoUnsupportedReason || "").trim() ? "photo_unsupported" : "");
 
   if (status === "failed") {
-    const resultStatus = check.route === "cloud" && check.mode === "photo" ? RESULT_BLOCKED : RESULT_FAIL;
+    const resultStatus = check.route === "direct-openai" && check.mode === "photo" ? RESULT_BLOCKED : RESULT_FAIL;
     const metadata = getFixMetadata(check, resultStatus, { reasonCode });
     return {
       status: resultStatus,
@@ -455,7 +486,9 @@ function classifyDeliveryCompletion(check, command) {
       details: {
         reasonCode: reasonCode || "command_failed",
         commandId: String(command?.id || "").trim(),
+        channel: String(check.channel || "").trim(),
         actualExecutor,
+        expectedExecutor: String(check.expectedExecutor || "").trim(),
         dispatchMode,
         progressStage: String(command?.progressStage || "").trim(),
         errorMessage: String(command?.errorMessage || "").trim(),
@@ -471,7 +504,9 @@ function classifyDeliveryCompletion(check, command) {
       summary: `${check.label} completed on the expected executor.`,
       details: {
         commandId: String(command?.id || "").trim(),
+        channel: String(check.channel || "").trim(),
         actualExecutor,
+        expectedExecutor: String(check.expectedExecutor || "").trim(),
         dispatchMode,
         progressStage: String(command?.progressStage || "").trim()
       },
@@ -481,7 +516,7 @@ function classifyDeliveryCompletion(check, command) {
     };
   }
 
-  const resultStatus = check.route === "cloud" && check.mode === "photo" ? RESULT_BLOCKED : RESULT_FAIL;
+  const resultStatus = check.route === "direct-openai" && check.mode === "photo" ? RESULT_BLOCKED : RESULT_FAIL;
   const metadata = getFixMetadata(check, resultStatus, { reasonCode });
   return {
     status: resultStatus,
@@ -489,6 +524,7 @@ function classifyDeliveryCompletion(check, command) {
     details: {
       reasonCode: reasonCode || "unexpected_executor",
       commandId: String(command?.id || "").trim(),
+      channel: String(check.channel || "").trim(),
       actualExecutor,
       expectedExecutor: check.expectedExecutor,
       dispatchMode,
@@ -501,14 +537,37 @@ function classifyDeliveryCompletion(check, command) {
 
 async function startDeliveryCheck(target, check, run, fetchImpl) {
   const payload = buildCommandPayload(target, check, run);
-  const { response, body } = await fetchJson(`${target.baseUrl}/api/commands`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json"
-    },
-    body: JSON.stringify(payload)
-  }, fetchImpl);
+  let response;
+  let body;
+
+  try {
+    const result = await fetchJson(`${target.baseUrl}/api/commands`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json"
+      },
+      body: JSON.stringify(payload)
+    }, fetchImpl);
+    response = result.response;
+    body = result.body;
+  } catch (error) {
+    const metadata = getFixMetadata(check, RESULT_FAIL, { reasonCode: "fetch_timeout" });
+    return {
+      ...check,
+      state: CHECK_STATE_COMPLETED,
+      status: RESULT_FAIL,
+      summary: `Could not create probe command: ${String(error?.message || error || "request timed out").trim()}.`,
+      details: {
+        reasonCode: "fetch_timeout",
+        channel: String(check.channel || "").trim(),
+        expectedExecutor: String(check.expectedExecutor || "").trim()
+      },
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      ...metadata
+    };
+  }
 
   if (!response.ok || !body?.command?.id) {
     const metadata = getFixMetadata(check, RESULT_FAIL);
@@ -535,7 +594,9 @@ async function startDeliveryCheck(target, check, run, fetchImpl) {
     details: {
       commandId: String(body.command.id || "").trim(),
       createdDispatchMode: String(body.command.dispatchMode || "").trim(),
-      requestedRoute: check.route
+      requestedRoute: check.route,
+      channel: String(check.channel || "").trim(),
+      expectedExecutor: String(check.expectedExecutor || "").trim()
     },
     startedAt: new Date().toISOString(),
     completedAt: "",
@@ -564,7 +625,7 @@ async function pollDeliveryCheck(target, check, fetchImpl) {
 
   const startedAt = Date.parse(String(check.startedAt || "").trim());
   if (!Number.isNaN(startedAt) && (Date.now() - startedAt) > DELIVERY_CHECK_TIMEOUT_MS) {
-    const resultStatus = check.route === "cloud" && check.mode === "photo" ? RESULT_BLOCKED : RESULT_FAIL;
+    const resultStatus = check.route === "direct-openai" && check.mode === "photo" ? RESULT_BLOCKED : RESULT_FAIL;
     const metadata = getFixMetadata(check, resultStatus, { reasonCode: "timeout" });
     return {
       ...check,
@@ -573,16 +634,41 @@ async function pollDeliveryCheck(target, check, fetchImpl) {
       summary: `${check.label} timed out while waiting for a terminal command result.`,
       details: {
         reasonCode: "timeout",
-        commandId
+        commandId,
+        channel: String(check.channel || "").trim(),
+        expectedExecutor: String(check.expectedExecutor || "").trim()
       },
       completedAt: new Date().toISOString(),
       ...metadata
     };
   }
 
-  const { response, body } = await fetchJson(`${target.baseUrl}/api/commands?id=${encodeURIComponent(commandId)}`, {
-    headers: { accept: "application/json" }
-  }, fetchImpl);
+  let response;
+  let body;
+
+  try {
+    const result = await fetchJson(`${target.baseUrl}/api/commands?id=${encodeURIComponent(commandId)}`, {
+      headers: { accept: "application/json" }
+    }, fetchImpl);
+    response = result.response;
+    body = result.body;
+  } catch (error) {
+    const metadata = getFixMetadata(check, RESULT_FAIL, { reasonCode: "fetch_timeout" });
+    return {
+      ...check,
+      state: CHECK_STATE_COMPLETED,
+      status: RESULT_FAIL,
+      summary: `${check.label} could not poll command status: ${String(error?.message || error || "request timed out").trim()}.`,
+      details: {
+        reasonCode: "fetch_timeout",
+        commandId,
+        channel: String(check.channel || "").trim(),
+        expectedExecutor: String(check.expectedExecutor || "").trim()
+      },
+      completedAt: new Date().toISOString(),
+      ...metadata
+    };
+  }
 
   if (!response.ok || !body?.command) {
     return {

@@ -1,6 +1,7 @@
 const state = {
   diagnosis: null,
   remediation: null,
+  remediationError: "",
   diagnosisPoller: null,
   remediationPoller: null
 };
@@ -62,6 +63,20 @@ function getRemediationPollDelay(run) {
   return run?.status === "rechecking" ? 1000 : baseDelay;
 }
 
+function isActiveRemediation(run) {
+  return ["planning", "queued", "in_progress", "rechecking"].includes(String(run?.status || "").trim());
+}
+
+function getAutoFixChecks(run) {
+  return (Array.isArray(run?.checks) ? run.checks : [])
+    .filter((check) => check?.canAutoFix && !check?.manualRequired);
+}
+
+function getRunningChecks(run) {
+  return (Array.isArray(run?.checks) ? run.checks : [])
+    .filter((check) => check?.state === "running" || check?.state === "pending");
+}
+
 function renderDiagnosis() {
   const run = state.diagnosis;
   diagnosisStatus.textContent = run
@@ -80,11 +95,18 @@ function renderDiagnosis() {
     return;
   }
 
-  runFixButton.disabled = run.status !== "completed";
+  const autoFixChecks = getAutoFixChecks(run);
+  runFixButton.disabled = run.status !== "completed" || autoFixChecks.length === 0 || isActiveRemediation(state.remediation);
   checks.innerHTML = list.map((check) => {
     const tokens = [];
+    if (check.channel) tokens.push(`<span class="token">channel: ${escapeHtml(check.channel)}</span>`);
     if (check.route) tokens.push(`<span class="token">${escapeHtml(check.route)}</span>`);
     if (check.mode) tokens.push(`<span class="token">${escapeHtml(check.mode)}</span>`);
+    if (check.expectedExecutor) tokens.push(`<span class="token">expected: ${escapeHtml(check.expectedExecutor)}</span>`);
+    if (check.details?.actualExecutor) tokens.push(`<span class="token">actual: ${escapeHtml(check.details.actualExecutor)}</span>`);
+    if (check.details?.createdDispatchMode || check.details?.dispatchMode) {
+      tokens.push(`<span class="token">dispatch: ${escapeHtml(check.details.createdDispatchMode || check.details.dispatchMode)}</span>`);
+    }
     if (check.fixCategory) tokens.push(`<span class="token">${escapeHtml(check.fixCategory)}</span>`);
 
     return `
@@ -127,7 +149,39 @@ function renderRemediation() {
     : "План исправлений ещё не запускался.";
 
   if (!run) {
-    planSummary.innerHTML = '<div class="note"><p>Remediation run ещё не создан.</p></div>';
+    const diagnosis = state.diagnosis;
+    const autoFixChecks = getAutoFixChecks(diagnosis);
+    const runningChecks = getRunningChecks(diagnosis);
+    let message = "Диагностика ещё не запускалась. Сначала нажмите `Диагностика`.";
+    let detail = "";
+
+    if (state.remediationError) {
+      message = state.remediationError;
+      detail = "Исправьте блокирующее состояние и повторите запуск.";
+    } else if (isActiveRemediation(state.remediation)) {
+      message = "Исправление уже запущено.";
+      detail = "Дождитесь завершения agent command и selective recheck.";
+    } else if (diagnosis?.status !== "completed" && runningChecks.length) {
+      message = "Исправление пока недоступно: диагностика ещё выполняется.";
+      detail = `Блокируют: ${runningChecks.map((check) => check.label || check.id).join(", ")}.`;
+    } else if (diagnosis?.status === "completed" && autoFixChecks.length) {
+      message = "Можно запускать исправление.";
+      detail = `Auto-fix checks: ${autoFixChecks.map((check) => check.label || check.id).join(", ")}.`;
+    } else if (diagnosis?.status === "completed") {
+      message = "Автоматических исправлений нет.";
+      detail = "Оставшиеся пункты требуют ручной проверки внешней конфигурации или платформенного ограничения.";
+    }
+
+    planSummary.innerHTML = `
+      <article class="note">
+        <div class="note-head">
+          <strong>Remediation status</strong>
+          <span class="badge" data-status="${autoFixChecks.length ? "degraded" : "unknown"}">${autoFixChecks.length ? "ready" : "waiting"}</span>
+        </div>
+        <p>${escapeHtml(message)}</p>
+        ${detail ? `<p>${escapeHtml(detail)}</p>` : ""}
+      </article>
+    `;
     report.innerHTML = "";
     return;
   }
@@ -144,6 +198,11 @@ function renderRemediation() {
       </div>
       <p>Issues: ${issues.length}. Auto-fix: ${Number(plan.autoFixCount || 0)}. Manual: ${Number(plan.manualCount || 0)}.</p>
       <p>Route: ${escapeHtml(actions[0]?.selectedDispatchMode || "n/a")} / ${escapeHtml(actions[0]?.selectedTargetExecutionMode || "n/a")} (${escapeHtml(actions[0]?.selectionReason || "n/a")}).</p>
+      ${actions[0]?.commandId ? `<p>Command: ${escapeHtml(actions[0].commandId)} | Status: ${escapeHtml(actions[0]?.status || "queued")} | Actual executor: ${escapeHtml(actions[0]?.actualExecutor || "pending")}</p>` : ""}
+      ${isActiveRemediation(run) ? "<p>Agent command is running. Code changes appear only after the command returns with PR/deploy references.</p>" : ""}
+      ${actions[0]?.prUrl ? `<p>PR: <a href="${escapeHtml(actions[0].prUrl)}" target="_blank" rel="noreferrer">${escapeHtml(actions[0].prUrl)}</a></p>` : ""}
+      ${actions[0]?.deployUrl ? `<p>Deploy: <a href="${escapeHtml(actions[0].deployUrl)}" target="_blank" rel="noreferrer">${escapeHtml(actions[0].deployUrl)}</a></p>` : ""}
+      ${actions[0]?.branchName ? `<p>Branch: ${escapeHtml(actions[0].branchName)}</p>` : ""}
       <ul>
         ${issues.map((issue) => `<li>${escapeHtml(issue.label)}: ${escapeHtml(issue.summary)}</li>`).join("") || "<li>No issues.</li>"}
       </ul>
@@ -262,6 +321,7 @@ runDiagnosisButton.addEventListener("click", async () => {
   });
   state.diagnosis = run;
   state.remediation = null;
+  state.remediationError = "";
   render();
   startDiagnosisPolling(run.runId);
 });
@@ -288,19 +348,26 @@ runFixButton.addEventListener("click", async () => {
     return;
   }
 
-  const run = await readJson("/api/remediation/run", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json"
-    },
-    body: JSON.stringify({
-      sourceDiagnosisId: state.diagnosis.runId
-    })
-  });
-  state.remediation = run;
-  render();
-  startRemediationPolling(run.runId);
+  try {
+    state.remediationError = "";
+    const run = await readJson("/api/remediation/run", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json"
+      },
+      body: JSON.stringify({
+        sourceDiagnosisId: state.diagnosis.runId
+      })
+    });
+    state.remediation = run;
+    render();
+    startRemediationPolling(run.runId);
+  } catch (error) {
+    state.remediation = null;
+    state.remediationError = String(error?.message || error || "Не удалось запустить исправление.");
+    render();
+  }
 });
 
 window.addEventListener("beforeunload", stopPollers);

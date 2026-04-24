@@ -26,7 +26,14 @@ export async function onRequest(context) {
     return json({ error: "A completed diagnosis run is required before remediation." }, { status: 400 });
   }
 
-  const run = await createRemediationRun(context.env, sourceDiagnosisId);
-  const next = await advanceRemediationRun(context.env, run);
-  return json(next, { status: 201 });
+  try {
+    const run = await createRemediationRun(context.env, sourceDiagnosisId);
+    const next = await advanceRemediationRun(context.env, run);
+    return json(next, { status: 201 });
+  } catch (error) {
+    return json({
+      error: String(error?.message || error || "Could not start remediation.").trim(),
+      code: String(error?.code || "remediation_start_failed").trim()
+    }, { status: Number(error?.status || 500) });
+  }
 }

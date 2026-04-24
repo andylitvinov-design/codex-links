@@ -1,4 +1,5 @@
 import {
+  FETCH_TIMEOUT_MS,
   RESULT_BLOCKED,
   RESULT_DEGRADED,
   RESULT_FAIL,
@@ -6,7 +7,7 @@ import {
   RESULT_UNKNOWN
 } from "./constants.js";
 import { createDiagnosisRun, advanceDiagnosisRun } from "./diagnostics.js";
-import { readDiagnosisRun, readRemediationRun, saveRemediationRun } from "./runs.js";
+import { readDiagnosisRun, readLatestRemediationRun, readRemediationRun, saveRemediationRun } from "./runs.js";
 import { createRunId } from "./storage.js";
 
 function normalizeIssue(check) {
@@ -26,30 +27,30 @@ function findCheck(diagnosisRun, checkId) {
   return (Array.isArray(diagnosisRun?.checks) ? diagnosisRun.checks : []).find((check) => check?.id === checkId) || null;
 }
 
+function isActiveRemediationStatus(status) {
+  return ["planning", "queued", "in_progress", "rechecking"].includes(String(status || "").trim());
+}
+
 function isCloudRouteDegraded(diagnosisRun) {
   const textCloud = findCheck(diagnosisRun, "text-cloud");
   const photoCloud = findCheck(diagnosisRun, "photo-cloud");
+  const textDirect = findCheck(diagnosisRun, "text-direct-openai");
+  const photoDirect = findCheck(diagnosisRun, "photo-direct-openai");
   const statusApi = findCheck(diagnosisRun, "status-api");
   const degradedStatuses = new Set([RESULT_FAIL, RESULT_DEGRADED, RESULT_BLOCKED]);
 
   return degradedStatuses.has(String(textCloud?.status || "").trim())
     || [RESULT_FAIL, RESULT_BLOCKED].includes(String(photoCloud?.status || "").trim())
+    || degradedStatuses.has(String(textDirect?.status || "").trim())
+    || [RESULT_FAIL, RESULT_BLOCKED].includes(String(photoDirect?.status || "").trim())
     || String(statusApi?.details?.dispatchMode || "").trim() === "local-bridge";
 }
 
 function chooseRemediationRoute(diagnosisRun) {
-  const textClaude = findCheck(diagnosisRun, "text-cloud-bridge");
-  const photoClaude = findCheck(diagnosisRun, "photo-cloud-bridge");
+  const textClaude = findCheck(diagnosisRun, "text-cloud");
+  const photoClaude = findCheck(diagnosisRun, "photo-cloud");
   const textLocal = findCheck(diagnosisRun, "text-codex-bridge");
   const photoLocal = findCheck(diagnosisRun, "photo-codex-bridge");
-
-  if (!isCloudRouteDegraded(diagnosisRun)) {
-    return {
-      selectedDispatchMode: "cloud",
-      selectedTargetExecutionMode: "direct-openai",
-      selectionReason: "cloud-route-healthy"
-    };
-  }
 
   const claudeHealthy = String(textClaude?.status || "").trim() === RESULT_PASS
     || String(photoClaude?.status || "").trim() === RESULT_PASS;
@@ -58,7 +59,17 @@ function chooseRemediationRoute(diagnosisRun) {
     return {
       selectedDispatchMode: "claude-bridge",
       selectedTargetExecutionMode: "claude",
-      selectionReason: "cloud-route-degraded-claude-bridge-healthy"
+      selectionReason: isCloudRouteDegraded(diagnosisRun)
+        ? "delivery-route-degraded-claude-code-partially-healthy"
+        : "claude-code-route-healthy"
+    };
+  }
+
+  if (!isCloudRouteDegraded(diagnosisRun)) {
+    return {
+      selectedDispatchMode: "claude-bridge",
+      selectedTargetExecutionMode: "claude",
+      selectionReason: "default-agent-pr-flow-claude-code"
     };
   }
 
@@ -74,9 +85,9 @@ function chooseRemediationRoute(diagnosisRun) {
   }
 
   return {
-    selectedDispatchMode: "cloud",
-    selectedTargetExecutionMode: "direct-openai",
-    selectionReason: "cloud-route-degraded-no-healthy-fallback"
+    selectedDispatchMode: "claude-bridge",
+    selectedTargetExecutionMode: "claude",
+    selectionReason: "delivery-route-degraded-no-healthy-fallback"
   };
 }
 
@@ -112,9 +123,15 @@ export function buildRemediationPlan(diagnosisRun) {
 
 function buildPrompt(diagnosisRun, plan) {
   const issues = plan.issues
-    .map((issue) => `- ${issue.label}: ${issue.status} | ${issue.summary}`)
+    .map((issue) => {
+      const details = issue.details && typeof issue.details === "object"
+        ? ` | details=${JSON.stringify(issue.details).slice(0, 700)}`
+        : "";
+      return `- ${issue.label}: ${issue.status} | ${issue.summary}${details}`;
+    })
     .join("\n");
   const autoFixIds = plan.actions.map((action) => action.checkId).join(", ") || "none";
+  const target = diagnosisRun?.target || {};
 
   return [
     "Remediation task for codex-links production delivery diagnostics.",
@@ -128,19 +145,41 @@ function buildPrompt(diagnosisRun, plan) {
     `- diagnosisRunId: ${diagnosisRun.runId}`,
     `- overallStatus: ${diagnosisRun.overallStatus}`,
     `- autoFixChecks: ${autoFixIds}`,
+    `- targetRepo: ${target.targetRepo || "andylitvinov-design/codex-links"}`,
+    `- targetRepoUrl: ${target.targetRepoUrl || "https://github.com/andylitvinov-design/codex-links"}`,
+    `- targetWorkspacePath: ${target.targetWorkspacePath || "/Users/andriilitvinov/projects/MYPROJECTS/links"}`,
+    `- contextFiles: ${(target.targetContextFiles || ["AGENTS.md", "README.md", "STATE.md"]).join(", ")}`,
     "",
     "Issues:",
     issues || "- none",
     "",
     "Instructions:",
-    "- Inspect the repo first.",
+    "- Work only inside the selected project boundary.",
+    "- Start by reading AGENTS.md, README.md, and STATE.md in that order.",
     "- Fix route/config/code issues that caused the failing or degraded checks.",
     "- If a failing item is external-only, document it and do not fake a fix.",
-    "- After changes, open a PR, merge it, and deploy Cloudflare Pages in the same work session.",
-    "- Report exactly what changed, what remains manual, and any follow-up risk.",
+    "- Run the smallest relevant tests for the changed behavior.",
+    "- Create a branch, push it, open a PR, merge it, and deploy Cloudflare Pages in the same work session.",
+    "- Do not finish until the deploy status is known.",
+    "- Report exactly what changed, PR/deploy references, what remains manual, and any follow-up risk.",
     "",
     "Do not change unrelated areas."
   ].join("\n");
+}
+
+async function fetchJsonWithTimeout(fetchImpl, url, init = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(url, {
+      ...init,
+      signal: init.signal || controller.signal
+    });
+    const body = await response.json().catch(() => null);
+    return { response, body };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function postFixCommand(target, plan, diagnosisRun, routeSelection, fetchImpl) {
@@ -153,11 +192,12 @@ async function postFixCommand(target, plan, diagnosisRun, routeSelection, fetchI
     targetExecutionMode: routeSelection.selectedTargetExecutionMode,
     targetRepo: target.targetRepo,
     targetRepoUrl: target.targetRepoUrl,
+    targetWorkspacePath: target.targetWorkspacePath,
     targetContextFiles: target.targetContextFiles,
     text: buildPrompt(diagnosisRun, plan)
   };
 
-  const response = await fetchImpl(`${target.baseUrl}/api/commands`, {
+  const { response, body } = await fetchJsonWithTimeout(fetchImpl, `${target.baseUrl}/api/commands`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -165,7 +205,6 @@ async function postFixCommand(target, plan, diagnosisRun, routeSelection, fetchI
     },
     body: JSON.stringify(payload)
   });
-  const body = await response.json().catch(() => null);
 
   if (!response.ok || !body?.command?.id) {
     throw new Error(String(body?.error || `Could not create remediation command (HTTP ${response.status}).`).trim());
@@ -239,16 +278,33 @@ export async function createRemediationRun(env, sourceDiagnosisId, fetchImpl = f
     throw new Error("Diagnosis run was not found.");
   }
 
-  const plan = buildRemediationPlan(diagnosisRun);
-  const routeSelection = chooseRemediationRoute(diagnosisRun);
+  const latestRemediation = await readLatestRemediationRun(env);
+  if (
+    latestRemediation
+    && String(latestRemediation.sourceDiagnosisId || "").trim() === String(sourceDiagnosisId || "").trim()
+    && isActiveRemediationStatus(latestRemediation.status)
+  ) {
+    return latestRemediation;
+  }
+
+  const currentDiagnosisRun = await advanceDiagnosisRun(env, diagnosisRun, fetchImpl);
+  if (currentDiagnosisRun?.status !== "completed") {
+    const error = new Error("Diagnosis is still running. Wait until all checks complete before starting remediation.");
+    error.status = 409;
+    error.code = "diagnosis_running";
+    throw error;
+  }
+
+  const plan = buildRemediationPlan(currentDiagnosisRun);
+  const routeSelection = chooseRemediationRoute(currentDiagnosisRun);
   const run = {
     runId: createRunId("remediation"),
     kind: "remediation",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     completedAt: "",
-    sourceDiagnosisId: diagnosisRun.runId,
-    target: diagnosisRun.target,
+    sourceDiagnosisId: currentDiagnosisRun.runId,
+    target: currentDiagnosisRun.target,
     plan,
     actions: [],
     status: "planning",
@@ -271,7 +327,7 @@ export async function createRemediationRun(env, sourceDiagnosisId, fetchImpl = f
     return saveRemediationRun(env, run);
   }
 
-  const command = await postFixCommand(run.target, plan, diagnosisRun, routeSelection, fetchImpl);
+  const command = await postFixCommand(run.target, plan, currentDiagnosisRun, routeSelection, fetchImpl);
   run.status = "queued";
   run.actions = [{
     kind: "agent-command",
@@ -301,10 +357,9 @@ export async function advanceRemediationRun(env, inputRun, fetchImpl = fetch) {
     : null;
 
   if (agentAction && !run.recheckId) {
-    const response = await fetchImpl(`${run.target.baseUrl}/api/commands?id=${encodeURIComponent(agentAction.commandId)}`, {
+    const { body } = await fetchJsonWithTimeout(fetchImpl, `${run.target.baseUrl}/api/commands?id=${encodeURIComponent(agentAction.commandId)}`, {
       headers: { accept: "application/json" }
     });
-    const body = await response.json().catch(() => null);
     const command = body?.command || null;
 
     if (!command) {
@@ -325,7 +380,8 @@ export async function advanceRemediationRun(env, inputRun, fetchImpl = fetch) {
         status: commandStatus,
         actualExecutor: String(command.actualExecutor || "").trim(),
         branchName: String(command.branchName || "").trim(),
-        prUrl: String(command.prUrl || "").trim()
+        prUrl: String(command.prUrl || "").trim(),
+        deployUrl: String(command.deployUrl || command.deploymentUrl || "").trim()
       }],
       updatedAt: new Date().toISOString(),
       completedAt: commandStatus === "failed" ? new Date().toISOString() : ""

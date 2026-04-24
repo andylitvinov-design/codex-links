@@ -15,6 +15,7 @@ export const DEFAULT_TARGET = {
   projectId: "links",
   targetRepo: "andylitvinov-design/codex-links",
   targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
+  targetWorkspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/links",
   targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"]
 };
 
@@ -29,5 +30,6 @@ export const RESULT_BLOCKED = "blocked";
 export const RESULT_UNKNOWN = "unknown";
 
 export const DELIVERY_CHECK_TIMEOUT_MS = 10 * 60 * 1000;
+export const FETCH_TIMEOUT_MS = 8 * 1000;
 
 export const PHOTO_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sotz6QAAAAASUVORK5CYII=";

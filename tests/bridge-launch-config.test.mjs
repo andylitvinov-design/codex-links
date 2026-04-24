@@ -76,10 +76,11 @@ test("bridge loop publishes periodic runner heartbeats so status does not go sta
   assert.match(source, /void publishBridgeStatus\(buildRunnerHeartbeatStatus\(\)\)\.catch/);
 });
 
-test("Claude bridge passes prompt after -- so --add-dir does not consume it", async () => {
+test("Claude bridge does not pass prompt as an --add-dir value", async () => {
   const source = await readFile(bridgeScriptPath, "utf8");
 
-  assert.match(source, /"--",\s*instructions/);
+  assert.match(source, /"--add-dir",\s*cwd \|\| process\.cwd\(\)/);
+  assert.doesNotMatch(source, /addDirArgs,\s*instructions/);
 });
 
 test("Claude bridge grants access to the temp photo directory when a local image is attached", async () => {
@@ -123,6 +124,15 @@ test("bridge executor sends photos directly to Codex CLI without the script tty 
   assert.match(source, /spawnFileWithOutput\(codexBin, codexArgs,/);
   assert.match(source, /stdio:\s*\["ignore", "pipe", "pipe"\]/);
   assert.doesNotMatch(source, /\/usr\/bin\/script/);
+});
+
+test("Claude bridge sends prompts through stdin instead of relying on positional prompt parsing", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /"--input-format",\s*"text"/);
+  assert.match(source, /stdin:\s*instructions/);
+  assert.match(source, /stdio:\s*\[stdinInput === null \? "ignore" : "pipe", "pipe", "pipe"\]/);
+  assert.doesNotMatch(source, /"--",\s*instructions/);
 });
 
 test("bridge photo OCR skips optional Swift extraction when developer tools are unavailable", async () => {
