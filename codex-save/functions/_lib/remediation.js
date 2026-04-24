@@ -51,43 +51,40 @@ function chooseRemediationRoute(diagnosisRun) {
   const photoClaude = findCheck(diagnosisRun, "photo-cloud");
   const textLocal = findCheck(diagnosisRun, "text-codex-bridge");
   const photoLocal = findCheck(diagnosisRun, "photo-codex-bridge");
+  const statusApi = findCheck(diagnosisRun, "status-api");
+
+  const localHealthy = String(textLocal?.status || "").trim() === RESULT_PASS
+    || String(photoLocal?.status || "").trim() === RESULT_PASS
+    || Boolean(statusApi?.details?.localBridgeOnline);
+
+  if (localHealthy) {
+    return {
+      selectedDispatchMode: "local-bridge",
+      selectedTargetExecutionMode: "bridge",
+      selectionReason: isCloudRouteDegraded(diagnosisRun)
+        ? "delivery-route-degraded-codex-bridge-healthy"
+        : "default-agent-pr-flow-codex-bridge"
+    };
+  }
 
   const claudeHealthy = String(textClaude?.status || "").trim() === RESULT_PASS
-    || String(photoClaude?.status || "").trim() === RESULT_PASS;
+    || String(photoClaude?.status || "").trim() === RESULT_PASS
+    || Boolean(statusApi?.details?.claudeBridgeOnline);
 
   if (claudeHealthy) {
     return {
       selectedDispatchMode: "claude-bridge",
       selectedTargetExecutionMode: "claude",
       selectionReason: isCloudRouteDegraded(diagnosisRun)
-        ? "delivery-route-degraded-claude-code-partially-healthy"
-        : "claude-code-route-healthy"
-    };
-  }
-
-  if (!isCloudRouteDegraded(diagnosisRun)) {
-    return {
-      selectedDispatchMode: "claude-bridge",
-      selectedTargetExecutionMode: "claude",
-      selectionReason: "default-agent-pr-flow-claude-code"
-    };
-  }
-
-  const localHealthy = String(textLocal?.status || "").trim() === RESULT_PASS
-    || String(photoLocal?.status || "").trim() === RESULT_PASS;
-
-  if (localHealthy) {
-    return {
-      selectedDispatchMode: "local-bridge",
-      selectedTargetExecutionMode: "bridge",
-      selectionReason: "cloud-route-degraded-local-bridge-healthy"
+        ? "codex-bridge-unavailable-claude-code-fallback"
+        : "codex-bridge-unavailable-claude-code-healthy"
     };
   }
 
   return {
-    selectedDispatchMode: "claude-bridge",
-    selectedTargetExecutionMode: "claude",
-    selectionReason: "delivery-route-degraded-no-healthy-fallback"
+    selectedDispatchMode: "local-bridge",
+    selectedTargetExecutionMode: "bridge",
+    selectionReason: "no-healthy-fallback-try-codex-bridge"
   };
 }
 
