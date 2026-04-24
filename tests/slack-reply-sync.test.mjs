@@ -271,3 +271,58 @@ test("syncSlackCommandReplies treats PHOTO_OK smoke replies as terminal", async 
   assert.equal(updated?.status, "answered");
   assert.equal(updated?.replyMatched, true);
 });
+
+test("syncSlackCommandReplies recognizes Codex replies by bot profile user id", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-bot-profile",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "photo cloud probe ignore",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "processing",
+    progressStage: "waiting-slack-photo-reply",
+    slackChannelId: "C123",
+    slackMessageTs: "6000.000001",
+    slackThreadTs: "6000.000001",
+    dispatchedAt: createdAt,
+    photoAttached: true,
+    photoBytesPresent: true,
+    slackPhotoUploadCompletedAt: createdAt
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => createSlackResponse([
+    { ts: "6000.000001", thread_ts: "6000.000001", text: "root task" },
+    {
+      ts: "6001.000001",
+      thread_ts: "6000.000001",
+      bot_id: "B123",
+      bot_profile: { user_id: "U123" },
+      text: "PHOTO_OK"
+    }
+  ]);
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-photo-bot-profile");
+    await syncSlackCommandReplies(env, command, { SLACK_CODEX_USER_ID: "U123" });
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const updated = await getCommandById(env, "cmd-slack-photo-bot-profile");
+  const messages = await readMessages(env);
+
+  assert.equal(updated?.status, "answered");
+  assert.equal(updated?.actualExecutor, "cloud-via-slack");
+  assert.equal(updated?.replyMatched, true);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]?.text, "PHOTO_OK");
+});

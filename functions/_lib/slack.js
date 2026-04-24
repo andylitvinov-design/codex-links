@@ -458,8 +458,8 @@ export async function fetchSlackThreadReplies(env, channel, threadTs, options = 
       ts: normalizeText(message?.ts),
       threadTs: normalizeText(message?.thread_ts || message?.ts),
       text: extractSlackMessageText(message),
-      user: normalizeText(message?.user),
-      botId: normalizeText(message?.bot_id),
+      user: normalizeText(message?.user || message?.bot_profile?.user_id),
+      botId: normalizeText(message?.bot_id || message?.botId),
       subtype: normalizeText(message?.subtype)
     }));
 }
@@ -487,8 +487,8 @@ export async function fetchSlackChannelMessages(env, channel, options = {}) {
     ts: normalizeText(message?.ts),
     threadTs: normalizeText(message?.thread_ts || message?.ts),
     text: extractSlackMessageText(message),
-    user: normalizeText(message?.user),
-    botId: normalizeText(message?.bot_id),
+    user: normalizeText(message?.user || message?.bot_profile?.user_id),
+    botId: normalizeText(message?.bot_id || message?.botId),
     subtype: normalizeText(message?.subtype)
   }));
 }
@@ -1091,7 +1091,7 @@ export function isLikelyCodexSlackActor(runtimeConfig, event, options = {}) {
   const targetUserId = normalizeText(runtimeConfig?.SLACK_CODEX_USER_ID);
   const userId = normalizeText(event?.user);
   const subtype = normalizeText(event?.subtype);
-  const botId = normalizeText(event?.bot_id);
+  const botId = normalizeText(event?.bot_id || event?.botId);
   const candidateCount = Number(options.candidateCount || 0);
 
   if (targetUserId && userId === targetUserId) {

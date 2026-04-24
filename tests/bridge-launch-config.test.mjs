@@ -117,6 +117,15 @@ test("bridge executor tolerates benign stdin warnings when Codex already produce
   assert.match(source, /if \(shouldTreatCodexExecAsUsable\(error, result, prompt\)\) \{\s*resolve\(result\);/);
 });
 
+test("bridge executor starts fresh Codex threads for new text commands by default", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /const BRIDGE_CODEX_NEW_THREAD_PER_COMMAND = String\(process\.env\.BRIDGE_CODEX_NEW_THREAD_PER_COMMAND \|\| "1"\)/);
+  assert.match(source, /const useFreshCodexThread = BRIDGE_EXECUTOR === "codex" && BRIDGE_CODEX_NEW_THREAD_PER_COMMAND && !command\.photo;/);
+  assert.match(source, /useFreshCodexThread[\s\S]+runCodexExecFreshThread\(/);
+  assert.match(source, /useFreshCodexThread[\s\S]+runCodexExecFreshThread\([\s\S]+:[\s\S]+runCodexResume\(/);
+});
+
 test("bridge executor sends photos directly to Codex CLI without the script tty wrapper", async () => {
   const source = await readFile(bridgeScriptPath, "utf8");
 
