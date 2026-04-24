@@ -47,7 +47,11 @@ function createDiagnosisFixture() {
         summary: "Slack actor validation is unverified.",
         canAutoFix: false,
         manualRequired: true,
-        fixCategory: "external-auth"
+        fixCategory: "external-auth",
+        details: {
+          localBridgeOnline: true,
+          claudeBridgeOnline: true
+        }
       },
       {
         id: "text-cloud",
@@ -154,14 +158,57 @@ test("remediation run creates an agent command when auto-fixable issues exist", 
   assert.equal(run.status, "queued");
   assert.equal(run.actions[0].commandId, "fix-command-1");
   assert.equal(run.plan.autoFixCount, 2);
-  assert.equal(run.actions[0].selectedDispatchMode, "claude-bridge");
-  assert.equal(run.actions[0].selectedTargetExecutionMode, "claude");
+  assert.equal(run.actions[0].selectedDispatchMode, "local-bridge");
+  assert.equal(run.actions[0].selectedTargetExecutionMode, "bridge");
+  assert.equal(run.actions[0].selectionReason, "delivery-route-degraded-codex-bridge-healthy");
   assert.equal(run.recheckScope, "selective");
   assert.deepEqual(run.recheckedCheckIds.sort(), ["text-cloud", "text-codex-bridge"]);
   assert.equal(commandPayload.targetWorkspacePath, "/Users/andriilitvinov/projects/MYPROJECTS/links");
   assert.deepEqual(commandPayload.targetContextFiles, ["AGENTS.md", "README.md", "STATE.md"]);
   assert.match(commandPayload.text, /branch, push it, open a PR, merge it, and deploy Cloudflare Pages/i);
   assert.match(commandPayload.text, /Start by reading AGENTS\.md, README\.md, and STATE\.md/i);
+});
+
+test("remediation route falls back to Claude only when Codex bridge is unavailable", async () => {
+  const env = createMockEnv();
+  const diagnosis = createDiagnosisFixture();
+  diagnosis.checks = diagnosis.checks.map((check) => {
+    if (check.id === "status-api") {
+      return {
+        ...check,
+        details: {
+          localBridgeOnline: false,
+          claudeBridgeOnline: true
+        }
+      };
+    }
+
+    if (check.id === "text-codex-bridge" || check.id === "photo-codex-bridge") {
+      return {
+        ...check,
+        status: "fail"
+      };
+    }
+
+    return check;
+  });
+  await saveDiagnosisRun(env, diagnosis);
+
+  const run = await createRemediationRun(env, diagnosis.runId, async () => new Response(JSON.stringify({
+    command: {
+      id: "fix-command-claude-fallback",
+      status: "queued"
+    }
+  }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json"
+    }
+  }));
+
+  assert.equal(run.actions[0].selectedDispatchMode, "claude-bridge");
+  assert.equal(run.actions[0].selectedTargetExecutionMode, "claude");
+  assert.equal(run.actions[0].selectionReason, "codex-bridge-unavailable-claude-code-fallback");
 });
 
 test("remediation run rejects a running diagnosis before creating an agent command", async () => {
