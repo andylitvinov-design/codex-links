@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex Save</title>
+    <meta name="theme-color" content="#123524" />
+    <link rel="stylesheet" href="/styles.css?v=20260424-0207" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="shell">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Operator Surface</p>
+            <h1>Codex Save</h1>
+            <p class="lede">Диагностика и recovery-панель для живого <code>codex-links</code>.</p>
+          </div>
+          <div class="actions">
+            <button id="run-diagnosis" class="button button-primary" type="button">Диагностика</button>
+            <button id="run-fix" class="button button-secondary" type="button" disabled>Исправить</button>
+            <button id="run-recheck" class="button button-secondary" type="button">Полная перепроверка</button>
+          </div>
+        </header>
+
+        <section class="panel summary-panel">
+          <div>
+            <p class="panel-label">Target</p>
+            <p id="target-url" class="panel-value">https://codex-links.pages.dev</p>
+          </div>
+          <div>
+            <p class="panel-label">Last Diagnosis</p>
+            <p id="diagnosis-status" class="panel-value">Загружаю…</p>
+          </div>
+          <div>
+            <p class="panel-label">Last Remediation</p>
+            <p id="remediation-status" class="panel-value">Загружаю…</p>
+          </div>
+        </section>
+
+        <section class="layout">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Checks</h2>
+              <p id="diagnosis-meta" class="muted">Нет активного прогона.</p>
+            </div>
+            <div id="checks" class="check-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Recommendations</h2>
+              <p id="remediation-meta" class="muted">План исправлений ещё не запускался.</p>
+            </div>
+            <div id="recommendations" class="stack"></div>
+            <div id="plan-summary" class="stack"></div>
+            <div id="report" class="stack"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js?v=20260424-0207"></script>
+  </body>
+</html>
