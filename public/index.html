@@ -10,15 +10,15 @@
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
     <script>
       (function () {
-        var build = "20260423-1828";
+        var build = "20260423-2118";
         var current = new URL(window.location.href);
         var requested = String(current.searchParams.get("v") || "").trim();
         if (requested === build) {
           return;
         }
         current.searchParams.set("v", build);
-        current.searchParams.set("reload", String(Date.now()));
-        window.location.replace(current.toString());
+        current.searchParams.delete("reload");
+        window.history.replaceState({}, "", current.toString());
       })();
     </script>
     <link rel="manifest" href="/site.webmanifest" />

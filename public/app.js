@@ -40,10 +40,11 @@ const state = {
   deliverySpeedUntil: 0,
   speedModeClientId: "",
   visibleCommandUpdates: {},
-  replyContext: null
+  replyContext: null,
+  latestAvailableVersion: ""
 };
 
-const BUILD_VERSION = "20260423-1828";
+const BUILD_VERSION = "20260423-2118";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -647,7 +648,9 @@ function compareBuildVersions(left, right) {
   return String(left || "").localeCompare(String(right || ""), "en", { numeric: true });
 }
 
-async function ensureLatestClient() {
+async function ensureLatestClient(options = {}) {
+  const forceReload = Boolean(options?.forceReload);
+
   if (state.hardReloading) {
     return true;
   }
@@ -676,10 +679,21 @@ async function ensureLatestClient() {
       || latestVersion === BUILD_VERSION
       || compareBuildVersions(latestVersion, BUILD_VERSION) < 0
     ) {
+      state.latestAvailableVersion = "";
       return false;
     }
 
     if (requestedVersion && requestedVersion === latestVersion) {
+      state.latestAvailableVersion = latestVersion;
+      return false;
+    }
+
+    if (!forceReload) {
+      if (state.latestAvailableVersion !== latestVersion) {
+        state.latestAvailableVersion = latestVersion;
+        setCommandStatusMessage(`Доступна новая версия ${latestVersion}. Нажмите Refresh.`, { tone: "processing" });
+      }
+
       return false;
     }
 
@@ -3965,7 +3979,7 @@ function bindEvents() {
   });
 
   refreshButton?.addEventListener("click", async () => {
-    if (await ensureLatestClient()) {
+    if (await ensureLatestClient({ forceReload: true })) {
       return;
     }
 
@@ -4179,9 +4193,7 @@ async function boot() {
   );
   bindEvents();
 
-  if (await ensureLatestClient()) {
-    return;
-  }
+  await ensureLatestClient();
 
   await refreshAll();
   startPolling();
