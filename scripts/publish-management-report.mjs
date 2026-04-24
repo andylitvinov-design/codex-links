@@ -2,9 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const LINKS_ROOT = "/Users/andriilitvinov/projects/MYPROJECTS/links";
-const MANAGEMENT_DATA_ROOT = "/Users/andriilitvinov/projects/brain/management/dashboard-thinking/data";
+const DEFAULT_MANAGEMENT_DATA_ROOT = "/Users/andriilitvinov/projects/brain/management/dashboard-thinking/data";
 const DEFAULT_API_BASE = "https://codex-links.pages.dev";
 const DEV_VARS_PATH = path.join(LINKS_ROOT, ".dev.vars");
+const DEFAULT_TIMEZONE = "America/Toronto";
 
 function parseArgs() {
   const map = new Map();
@@ -53,6 +54,23 @@ function parseIso(value) {
 
 function nonEmpty(value) {
   return String(value || "").trim();
+}
+
+function getLocalDateInTimezone(value, timezone = DEFAULT_TIMEZONE) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function compactText(value, max = 180) {
@@ -118,23 +136,36 @@ async function main() {
   const devVars = await readDevVars(DEV_VARS_PATH);
   const apiBase = nonEmpty(args.get("api-base") || process.env.LINKS_API_BASE || devVars.LINKS_BASE_URL) || DEFAULT_API_BASE;
   const token = nonEmpty(args.get("token") || process.env.LINKS_WRITE_TOKEN || devVars.LINKS_WRITE_TOKEN);
+  const dataRoot = nonEmpty(args.get("data-root") || process.env.MANAGEMENT_DATA_ROOT) || DEFAULT_MANAGEMENT_DATA_ROOT;
+  const timezone = nonEmpty(args.get("timezone") || process.env.BRAIN_MANAGEMENT_TIMEZONE) || DEFAULT_TIMEZONE;
+  const today = getLocalDateInTimezone(process.env.BRAIN_MANAGEMENT_NOW || Date.now(), timezone);
   const reportDateOverride = nonEmpty(args.get("date"));
   const checkOnly = args.get("dry-run") === "true" || args.get("check") === "true";
+  const allowDateOverride = args.get("allow-date-override") === "true";
+  const allowStaleSourceDate = args.get("allow-stale-source-date") === "true";
 
   if (!token && !checkOnly) {
     throw new Error("Missing LINKS_WRITE_TOKEN.");
   }
 
-  const thinking = await readJson(path.join(MANAGEMENT_DATA_ROOT, "current-thinking-audit.json"));
-  const upgrade = await readJson(path.join(MANAGEMENT_DATA_ROOT, "current-daily-upgrade.json"));
-  const dailyChanges = await readJson(path.join(MANAGEMENT_DATA_ROOT, "current-daily-changes.json"));
-  const thinkingHistory = await readJson(path.join(MANAGEMENT_DATA_ROOT, "thinking-history.json")).catch(() => []);
-  const upgradeHistory = await readJson(path.join(MANAGEMENT_DATA_ROOT, "daily-upgrade-history.json")).catch(() => []);
-  const dailyChangesHistory = await readJson(path.join(MANAGEMENT_DATA_ROOT, "daily-changes-history.json")).catch(() => []);
+  const thinking = await readJson(path.join(dataRoot, "current-thinking-audit.json"));
+  const upgrade = await readJson(path.join(dataRoot, "current-daily-upgrade.json"));
+  const dailyChanges = await readJson(path.join(dataRoot, "current-daily-changes.json"));
+  const thinkingHistory = await readJson(path.join(dataRoot, "thinking-history.json")).catch(() => []);
+  const upgradeHistory = await readJson(path.join(dataRoot, "daily-upgrade-history.json")).catch(() => []);
+  const dailyChangesHistory = await readJson(path.join(dataRoot, "daily-changes-history.json")).catch(() => []);
 
   const reportDate = reportDateOverride || nonEmpty(thinking?.meta?.day || upgrade?.meta?.day || dailyChanges?.meta?.day);
   if (!reportDate) {
     throw new Error("Unable to determine report date.");
+  }
+
+  if (!today) {
+    throw new Error(`Unable to determine current date for timezone ${timezone}.`);
+  }
+
+  if (reportDate !== today && !allowDateOverride) {
+    throw new Error(`Refusing to publish report_date ${reportDate}; today in ${timezone} is ${today}. Use --allow-date-override for an explicit backfill.`);
   }
 
   const generatedAt = parseIso(
@@ -153,6 +184,12 @@ async function main() {
     { dashboard: "dashboard-execution-optimizer", day: nonEmpty(upgrade?.meta?.day), dayMatches: nonEmpty(upgrade?.meta?.day) === reportDate },
     { dashboard: "dashboard-daily-changes", day: nonEmpty(dailyChanges?.meta?.day), dayMatches: nonEmpty(dailyChanges?.meta?.day) === reportDate }
   ];
+
+  const staleParts = parts.filter((part) => !part.dayMatches);
+  if (staleParts.length && !allowStaleSourceDate) {
+    const detail = staleParts.map((part) => `${part.dashboard}=${part.day || "missing"}`).join(", ");
+    throw new Error(`Refusing to publish stale management report ${reportDate}; source dates do not match: ${detail}. Refresh dashboards first or use --allow-stale-source-date for an explicit diagnostic publish.`);
+  }
 
   const agent1Focus = compactText(thinking?.meta?.summary || thinking?.priorityRecommendations?.[0]?.title || "");
   const agent2Action = compactText(

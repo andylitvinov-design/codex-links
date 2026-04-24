@@ -963,6 +963,10 @@ input[type="radio"] {
 }
 
 .timeline-tab-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-height: 34px;
   padding: 0 14px;
   border: 1px solid transparent;
@@ -981,6 +985,22 @@ input[type="radio"] {
   background: linear-gradient(180deg, rgba(224, 245, 236, 0.98), rgba(210, 239, 225, 0.96));
   color: var(--accent-strong);
   box-shadow: 0 4px 10px rgba(15, 118, 110, 0.08);
+}
+
+.timeline-tab-button.has-unread:not(.is-active)::after {
+  content: attr(data-unread-count);
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid rgba(185, 28, 28, 0.18);
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .timeline-tab-button:hover {
