@@ -62,6 +62,7 @@ const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90_000;
 const SLACK_PHOTO_RESULT_WAIT_MS = 300_000;
 const SLACK_SYNC_POLL_MS = 2_000;
 const READ_SLACK_SYNC_BUDGET_MS = 2_500;
+const READ_SPECIFIC_SLACK_SYNC_BUDGET_MS = 8_000;
 const READ_SLACK_API_TIMEOUT_MS = 1_500;
 
 function logCommandError(context, error, extra = {}) {
@@ -1371,6 +1372,37 @@ async function reconcileCommandsForRead(env, runtimeConfig) {
   }
 }
 
+async function reconcileCommandForRead(env, runtimeConfig, commandId) {
+  const command = await getCommandById(env, commandId);
+
+  if (
+    command
+    && command.dispatchMode === DISPATCH_MODE_SLACK
+    && (String(command.status || "").trim() === "dispatched" || String(command.status || "").trim() === "processing")
+    && String(command.slackChannelId || "").trim()
+    && String(command.slackThreadTs || command.slackMessageTs || "").trim()
+  ) {
+    try {
+      await runSlackSyncWithinBudget(() => syncSpecificSlackReplies(env, runtimeConfig, [command], {
+        budgetMs: READ_SPECIFIC_SLACK_SYNC_BUDGET_MS,
+        timeoutMs: READ_SLACK_API_TIMEOUT_MS
+      }), READ_SPECIFIC_SLACK_SYNC_BUDGET_MS);
+    } catch (error) {
+      logCommandError("reconcileCommandForRead.syncSpecificSlackReplies", error, { commandId });
+    }
+  }
+
+  try {
+    await runCommandMaintenance(env, {
+      preferSlack: isSlackDispatchConfigured(runtimeConfig),
+      fallbackToLocal: true,
+      fallbackToClaude: true
+    });
+  } catch (error) {
+    logCommandError("reconcileCommandForRead.runCommandMaintenance", error, { commandId });
+  }
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const preflight = handleOptions(request);
@@ -1399,7 +1431,7 @@ export async function onRequest(context) {
     }
 
     if (commandId) {
-      await reconcileCommandsForRead(env, runtimeConfig);
+      await reconcileCommandForRead(env, runtimeConfig, commandId);
       const command = await getCommandById(env, commandId);
       return json({ command: serializeCommand(command) });
     }

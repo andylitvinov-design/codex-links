@@ -215,7 +215,8 @@ async function pollCommand(id) {
         const matched = replies.find((reply) => /PHOTO_OK/i.test(String(reply?.text || "")));
 
         if (matched) {
-          return command;
+          const synced = await fetchCommand(command.id);
+          return synced || command;
         }
       }
 
