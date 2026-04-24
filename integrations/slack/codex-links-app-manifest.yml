@@ -13,6 +13,7 @@ oauth_config:
     bot:
       - chat:write
       - files:write
+      - files:read
       - channels:history
       - groups:history
       - im:history
