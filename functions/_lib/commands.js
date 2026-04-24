@@ -50,6 +50,8 @@ const CLAUDE_RETRY_WINDOW_MS = 10 * 60 * 1000;
 const LONG_TEXT_THRESHOLD = 500;
 const DEFAULT_KV_WRITE_MAX_RETRIES = 2;
 const DEFAULT_KV_WRITE_RETRY_DELAY_MS = 100;
+const COMPLEXITY_MEDIUM_THRESHOLD = 2;
+const COMPLEXITY_HIGH_THRESHOLD = 4;
 
 export const COMMAND_TIMEOUTS = {
   cloudFirstAckMs: CLOUD_FIRST_ACK_TIMEOUT_MS,
@@ -528,6 +530,30 @@ function normalizeDiagnosticText(rawValue, max = 240) {
   return String(rawValue || "").trim().slice(0, max);
 }
 
+function normalizeRouteStrategy(rawValue) {
+  const value = String(rawValue || "").trim().toLowerCase();
+
+  if (value === "auto") {
+    return "auto";
+  }
+
+  return "manual";
+}
+
+function normalizeComplexityLevel(rawValue) {
+  const value = String(rawValue || "").trim().toLowerCase();
+
+  if (value === "high" || value === "medium" || value === "low") {
+    return value;
+  }
+
+  return "low";
+}
+
+function normalizeRouteSelectionReason(rawValue) {
+  return normalizeDiagnosticText(rawValue, 120);
+}
+
 function normalizePhotoUnsupportedReason(rawValue) {
   return normalizeDiagnosticText(rawValue, 240);
 }
@@ -561,6 +587,55 @@ function commandHasPhoto(command) {
     || Boolean(command?.photo?.hasDataUrl)
     || Boolean(command?.photoAttached)
     || Boolean(command?.photoBytesPresent);
+}
+
+export function classifyCommandComplexity(input = {}) {
+  const text = String(input?.text || "").trim();
+  const previousAssistantReply = String(input?.previousAssistantReply || "").trim();
+  const hasPhoto = Boolean(input?.photo?.dataUrl) || Boolean(input?.photoAttached);
+  let score = 0;
+
+  if (hasPhoto) {
+    score += 3;
+  }
+
+  if (text.length > 350) {
+    score += 1;
+  }
+
+  if (text.length > 900) {
+    score += 1;
+  }
+
+  if (previousAssistantReply.length > 800) {
+    score += 1;
+  }
+
+  if ((text.match(/\n/g) || []).length >= 3) {
+    score += 1;
+  }
+
+  if (
+    /refactor|architecture|investigate|исследуй|проанализ|диагност|сравни|several files|multiple files|workflow|pipeline|rollout|deploy|production|merge|pull request|pr\b|report/i.test(text)
+  ) {
+    score += 2;
+  }
+
+  if (
+    /screenshot|photo|image|скриншот|фото|изображен/i.test(text)
+  ) {
+    score += 1;
+  }
+
+  const level = score >= COMPLEXITY_HIGH_THRESHOLD
+    ? "high"
+    : (score >= COMPLEXITY_MEDIUM_THRESHOLD ? "medium" : "low");
+
+  return {
+    score,
+    level,
+    allowClaudeFallback: level === "high" || hasPhoto
+  };
 }
 
 function getSlackFirstAckTimeoutMs(command) {
@@ -840,6 +915,11 @@ function normalizeStoredCommandEntry(entry) {
     timeoutPhase: normalizeDiagnosticText(entry.timeoutPhase, 80),
     fallbackApplied: normalizeBooleanValue(entry.fallbackApplied),
     fallbackReason: normalizeDiagnosticText(entry.fallbackReason),
+    routeStrategy: normalizeRouteStrategy(entry.routeStrategy),
+    complexityScore: Number.isFinite(Number(entry.complexityScore)) ? Number(entry.complexityScore) : 0,
+    complexityLevel: normalizeComplexityLevel(entry.complexityLevel),
+    allowClaudeFallback: normalizeBooleanValue(entry.allowClaudeFallback),
+    routeSelectionReason: normalizeRouteSelectionReason(entry.routeSelectionReason),
     lastDiagnosticCode: normalizeDiagnosticText(entry.lastDiagnosticCode, 80),
     lastDiagnosticDetail: normalizeDiagnosticText(entry.lastDiagnosticDetail, 500),
     photoAttached: derivePhotoAttached(entry),
@@ -1027,6 +1107,13 @@ export function createCommandRecord(input) {
     };
   }
 
+  const complexity = classifyCommandComplexity({
+    text,
+    previousAssistantReply,
+    photo: normalizedPhoto?.value || null,
+    photoAttached: Boolean(normalizedPhoto?.value)
+  });
+
   return {
     ok: true,
     value: {
@@ -1078,6 +1165,13 @@ export function createCommandRecord(input) {
       timeoutPhase: "",
       fallbackApplied: false,
       fallbackReason: "",
+      routeStrategy: normalizeRouteStrategy(input.routeStrategy),
+      complexityScore: complexity.score,
+      complexityLevel: complexity.level,
+      allowClaudeFallback: typeof input.allowClaudeFallback === "boolean"
+        ? input.allowClaudeFallback
+        : complexity.allowClaudeFallback,
+      routeSelectionReason: normalizeRouteSelectionReason(input.routeSelectionReason),
       lastDiagnosticCode: normalizeDiagnosticText(input.lastDiagnosticCode, 80),
       lastDiagnosticDetail: normalizeDiagnosticText(input.lastDiagnosticDetail, 500),
       photoAttached: Boolean(normalizedPhoto?.value),
@@ -1735,6 +1829,13 @@ function canFallbackToLocal(command, options = {}) {
   );
 }
 
+function canFallbackToClaude(command, options = {}) {
+  return Boolean(options.fallbackToClaude)
+    && Number(command?.fallbackCount || 0) < 1
+    && Boolean(command?.allowClaudeFallback)
+    && command?.dispatchMode === DISPATCH_MODE_LOCAL;
+}
+
 function getBridgeClaimTimeoutMs(command) {
   return commandHasPhoto(command) ? BRIDGE_PHOTO_CLAIM_TIMEOUT_MS : BRIDGE_CLAIM_TIMEOUT_MS;
 }
@@ -1822,7 +1923,13 @@ function createFallbackState(command, nextDispatchMode, nowIso, input = {}) {
     }, nextDispatchMode),
     dispatchMode: nextDispatchMode,
     status: "queued",
-    progressStage: input.progressStage || (nextDispatchMode === DISPATCH_MODE_CLOUD ? "switched-to-cloud" : "switched-to-bridge"),
+    progressStage: input.progressStage || (
+      nextDispatchMode === DISPATCH_MODE_CLOUD
+        ? "switched-to-cloud"
+        : nextDispatchMode === DISPATCH_MODE_CLAUDE
+          ? "fallback-to-claude"
+          : "switched-to-bridge"
+    ),
     progressUpdatedAt: nowIso,
     errorMessage: normalizeErrorMessage(input.errorMessage),
     slackChannelId: "",
@@ -2026,7 +2133,7 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
 
   if (!hasFirstAck) {
     if (hasUploadedSlackPhoto) {
-      if (!isOlderThan(photoReplyObservedAt, resultTimeoutMs)) {
+      if (!isOlderThan(photoReplyObservedAt, firstAckTimeoutMs)) {
         if (
           status === "processing"
           && String(command.progressStage || "").trim() === "waiting-slack-photo-reply"
@@ -2049,19 +2156,19 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
         };
       }
 
-      const photoReplyTimeoutDetail = "Slack thread and photo upload succeeded, but no cloud acknowledgement or reply was observed within the Slack photo reply window.";
+      const photoReplyTimeoutDetail = "Slack thread and photo upload succeeded, but no cloud acknowledgement or reply was observed within the Slack photo first-ack window.";
 
       if (fallbackAllowed) {
         return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
           progressStage: "fallback-to-bridge",
-          timeoutPhase: "result-timeout",
-          fallbackReason: "cloud via Slack photo reply timed out after upload",
-          lastDiagnosticCode: "slack_photo_reply_timeout",
+          timeoutPhase: "first-ack-timeout",
+          fallbackReason: "cloud via Slack photo acknowledgement timed out after upload",
+          lastDiagnosticCode: "slack_photo_ack_timeout",
           lastDiagnosticDetail: photoReplyTimeoutDetail,
           errorMessage: stringifyCommandError({
             code: "fallback_to_bridge",
             stage: "fallback-to-bridge",
-            message: "Cloud via Slack photo reply timed out after upload. Switched to local bridge.",
+            message: "Cloud via Slack photo acknowledgement timed out after upload. Switched to local bridge.",
             detail: photoReplyTimeoutDetail,
             fallback: "local-bridge"
           })
@@ -2069,14 +2176,14 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
       }
 
       return createFailedMaintenanceState(command, nowIso, {
-        timeoutPhase: "result-timeout",
-        lastDiagnosticCode: "slack_photo_reply_timeout",
+        timeoutPhase: "first-ack-timeout",
+        lastDiagnosticCode: "slack_photo_ack_timeout",
         lastDiagnosticDetail: photoReplyTimeoutDetail,
         actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
         errorMessage: stringifyCommandError({
-          code: "slack_photo_reply_timeout",
-          stage: "slack-photo-reply-timeout",
-          message: "Cloud via Slack photo reply timed out after upload.",
+          code: "slack_photo_ack_timeout",
+          stage: "slack-photo-ack-timeout",
+          message: "Cloud via Slack photo acknowledgement timed out after upload.",
           detail: photoReplyTimeoutDetail
         })
       });
@@ -2180,6 +2287,7 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
   const hasFreshThreadProcessing = threadKey !== "::" && freshProcessingThreadKeys.has(threadKey);
   const hasPhoto = commandHasPhoto(command);
   const isWaitingForPhoto = String(command.progressStage || "").trim() === "waiting-for-photo";
+  const fallbackToClaudeAllowed = canFallbackToClaude(command, options);
 
   if (command.status === "queued") {
     if (hasFreshThreadProcessing) {
@@ -2208,6 +2316,23 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     }
 
     if (hasPhoto) {
+      if (fallbackToClaudeAllowed && isOlderThan(command.createdAt, BRIDGE_PHOTO_RETRY_WINDOW_MS)) {
+        return createFallbackState(command, DISPATCH_MODE_CLAUDE, nowIso, {
+          progressStage: "fallback-to-claude",
+          timeoutPhase: "claim-timeout",
+          fallbackReason: "local bridge did not claim the photo command in time",
+          lastDiagnosticCode: "bridge_photo_claim_timeout",
+          lastDiagnosticDetail: "The local bridge did not claim the photo command before the retry window expired. Switched to Claude bridge.",
+          errorMessage: stringifyCommandError({
+            code: "fallback_to_claude",
+            stage: "fallback-to-claude",
+            message: "Local bridge did not claim the photo command in time. Switched to Claude bridge.",
+            detail: "The local bridge did not claim the photo command before the retry window expired.",
+            fallback: "claude-bridge"
+          })
+        });
+      }
+
       if (isOlderThan(command.createdAt, BRIDGE_PHOTO_RETRY_WINDOW_MS)) {
         return createFailedMaintenanceState(command, nowIso, {
           timeoutPhase: "claim-timeout",
@@ -2233,6 +2358,23 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
           stage: "waiting-photo-bridge",
           message: "Photo is waiting for bridge.",
           detail: "The bridge has not claimed this photo command yet. Retry is scheduled."
+        })
+      });
+    }
+
+    if (fallbackToClaudeAllowed) {
+      return createFallbackState(command, DISPATCH_MODE_CLAUDE, nowIso, {
+        progressStage: "fallback-to-claude",
+        timeoutPhase: "claim-timeout",
+        fallbackReason: "local bridge did not claim the command in time",
+        lastDiagnosticCode: "bridge_claim_timeout",
+        lastDiagnosticDetail: "The local bridge did not claim the command before the claim timeout. Switched to Claude bridge.",
+        errorMessage: stringifyCommandError({
+          code: "fallback_to_claude",
+          stage: "fallback-to-claude",
+          message: "Local bridge did not claim the command in time. Switched to Claude bridge.",
+          detail: "The local bridge did not claim the command before the claim timeout.",
+          fallback: "claude-bridge"
         })
       });
     }
@@ -2285,6 +2427,23 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
     }
 
     if (isOlderThan(command.createdAt, BRIDGE_PHOTO_RETRY_WINDOW_MS)) {
+      if (fallbackToClaudeAllowed) {
+        return createFallbackState(command, DISPATCH_MODE_CLAUDE, nowIso, {
+          progressStage: "fallback-to-claude",
+          timeoutPhase: "result-timeout",
+          fallbackReason: "local bridge timed out while processing the photo",
+          lastDiagnosticCode: "bridge_photo_result_timeout",
+          lastDiagnosticDetail: "Photo command exceeded the maximum bridge retry window before completion. Switched to Claude bridge.",
+          errorMessage: stringifyCommandError({
+            code: "fallback_to_claude",
+            stage: "fallback-to-claude",
+            message: "Local bridge timed out while processing the photo. Switched to Claude bridge.",
+            detail: "The photo command stayed in bridge retry longer than the allowed retry window.",
+            fallback: "claude-bridge"
+          })
+        });
+      }
+
       return createFailedMaintenanceState(command, nowIso, {
         timeoutPhase: "result-timeout",
         lastDiagnosticCode: "bridge_photo_result_timeout",
@@ -2309,6 +2468,23 @@ function evaluateBridgeMaintenance(command, nowIso, options = {}) {
         stage: "retrying-photo-bridge",
         message: "Bridge timed out while processing the photo. Retrying through bridge.",
         detail
+      })
+    });
+  }
+
+  if (fallbackToClaudeAllowed) {
+    return createFallbackState(command, DISPATCH_MODE_CLAUDE, nowIso, {
+      progressStage: "fallback-to-claude",
+      timeoutPhase: "result-timeout",
+      fallbackReason: "local bridge stopped heartbeating",
+      lastDiagnosticCode: "bridge_result_timeout",
+      lastDiagnosticDetail: detail,
+      errorMessage: stringifyCommandError({
+        code: "fallback_to_claude",
+        stage: "fallback-to-claude",
+        message: "Local bridge timed out. Switched to Claude bridge.",
+        detail,
+        fallback: "claude-bridge"
       })
     });
   }

@@ -126,12 +126,13 @@ export function buildPhotoOnlyPrompt(command, ocrText = "") {
 
   return [
     "Attached image task.",
-    "Read only the attached image and answer the user request briefly.",
+    "Read only the attached image and answer the user request directly.",
     "Do not rely on previous conversation turns.",
+    "If the user asks for an exact token or exact phrase, output only that requested text.",
     ocrText
       ? "OCR helper text is included below. Verify it against the visible image before using it."
       : "",
-    "If the image is visible, state the concrete observed detail first.",
+    "If the image is visible and no exact output format was requested, state the concrete observed detail first.",
     "If the image is still not visible, say exactly that in one short sentence.",
     ocrText ? "" : "",
     ocrText ? "OCR hint:" : "",
@@ -142,8 +143,51 @@ export function buildPhotoOnlyPrompt(command, ocrText = "") {
   ].join("\n");
 }
 
+export function isPhotoObservationOnlyRequest(command) {
+  const text = sanitizeBridgeText(command?.text).toLowerCase();
+
+  if (!text) {
+    return true;
+  }
+
+  const asksAboutImage = [
+    "что на фото",
+    "что изображено",
+    "что видно",
+    "опиши фото",
+    "опиши изображение",
+    "прочитай фото",
+    "прочитай изображение",
+    "photo",
+    "image",
+    "screenshot",
+    "скрин",
+    "картин"
+  ].some((pattern) => text.includes(pattern));
+
+  if (!asksAboutImage) {
+    return false;
+  }
+
+  return ![
+    "исправ",
+    "сделай",
+    "добав",
+    "измени",
+    "реализ",
+    "почини",
+    "bug",
+    "fix",
+    "implement",
+    "change",
+    "update",
+    "create",
+    "add "
+  ].some((pattern) => text.includes(pattern));
+}
+
 export function selectPrimaryBridgePrompt(command, ocrText = "") {
-  return hasBridgeUserText(command)
+  return hasBridgeUserText(command) && !isPhotoObservationOnlyRequest(command)
     ? buildBridgePrompt(command, ocrText)
     : buildPhotoOnlyPrompt(command, ocrText);
 }

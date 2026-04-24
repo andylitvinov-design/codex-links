@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -167,6 +167,83 @@ function execFileWithOptionsAsync(file, args, options = {}) {
       }
 
       resolve({ stdout, stderr });
+    });
+  });
+}
+
+function spawnFileWithOutput(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: options.cwd || process.cwd(),
+      env: options.env || process.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const maxBuffer = Number(options.maxBuffer || 10 * 1024 * 1024);
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timeoutMs = Number(options.timeout || 0);
+    const timer = timeoutMs > 0
+      ? setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          child.kill("SIGTERM");
+        }, timeoutMs)
+      : null;
+
+    const finish = (callback) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      callback();
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (stdout.length + stderr.length > maxBuffer) {
+        child.kill("SIGTERM");
+      }
+    });
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (stdout.length + stderr.length > maxBuffer) {
+        child.kill("SIGTERM");
+      }
+    });
+
+    child.on("error", (error) => {
+      finish(() => reject(error));
+    });
+
+    child.on("close", (code, signal) => {
+      finish(() => {
+        if (stdout.length + stderr.length > maxBuffer) {
+          const error = new Error(`Command exceeded maxBuffer: ${file}`);
+          error.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+          reject(error);
+          return;
+        }
+
+        if (code || signal) {
+          const error = new Error(signal
+            ? `Command was terminated by ${signal}: ${file}`
+            : `Command failed with exit code ${code}: ${file}`);
+          error.code = code;
+          error.signal = signal;
+          resolve({ error, stdout, stderr });
+          return;
+        }
+
+        resolve({ stdout, stderr });
+      });
     });
   });
 }
@@ -600,12 +677,27 @@ async function extractPhotoOcrText(commandId, photoPath) {
     });
     return String(result?.stdout || "").trim().slice(0, 4000);
   } catch (error) {
+    if (isDeveloperToolsUnavailableError(error)) {
+      await logBridgeInfo("photoOcr.skipped", {
+        commandId,
+        reason: "developer-tools-unavailable"
+      });
+      return "";
+    }
+
     await appendBridgeErrorLog("photoOcr", error, {
       commandId,
       source
     });
     return "";
   }
+}
+
+function isDeveloperToolsUnavailableError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return message.includes("invalid active developer path")
+    || message.includes("missing xcrun")
+    || message.includes("missing developer_dir path");
 }
 
 function normalizePhotoOcrHint(rawText) {
@@ -735,17 +827,11 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_T
       codexArgs.push("-i", photoPath);
     }
 
-    const runnerBin = photoPath ? "/usr/bin/script" : codexBin;
-    const runnerArgs = photoPath
-      ? ["-q", "/dev/null", codexBin, ...codexArgs]
-      : codexArgs;
-
-    execFile(runnerBin, runnerArgs, {
+    spawnFileWithOutput(codexBin, codexArgs, {
       cwd: cwd || process.cwd(),
       timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"]
-    }, async (error, stdout, stderr) => {
+      maxBuffer: 10 * 1024 * 1024
+    }).then(async ({ error, stdout, stderr }) => {
       const result = {
         stdout: String(stdout || "").trim(),
         stderr: String(stderr || "").trim(),
@@ -767,7 +853,7 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_T
       }
 
       resolve(result);
-    });
+    }).catch(reject);
   });
 }
 

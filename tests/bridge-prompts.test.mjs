@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildBridgePrompt,
   buildPhotoOnlyPrompt,
+  isPhotoObservationOnlyRequest,
   selectPrimaryBridgePrompt
 } from "../scripts/_lib/bridge-prompts.mjs";
 
@@ -34,6 +35,19 @@ test("selectPrimaryBridgePrompt keeps photo-only mode for image-only commands", 
   assert.equal(selectPrimaryBridgePrompt(command), buildPhotoOnlyPrompt(command));
 });
 
+test("selectPrimaryBridgePrompt keeps photo-only mode for observation questions with text", () => {
+  const command = createCommand({
+    text: "Что на фото?"
+  });
+
+  const prompt = selectPrimaryBridgePrompt(command);
+
+  assert.equal(isPhotoObservationOnlyRequest(command), true);
+  assert.equal(prompt, buildPhotoOnlyPrompt(command));
+  assert.match(prompt, /answer the user request directly/);
+  assert.doesNotMatch(prompt, /Start by reading these project context files in order:/);
+});
+
 test("selectPrimaryBridgePrompt uses full bridge prompt for mixed text and photo commands", () => {
   const command = createCommand({
     text: "Исправь баг на основе этого скриншота"
@@ -41,6 +55,7 @@ test("selectPrimaryBridgePrompt uses full bridge prompt for mixed text and photo
 
   const prompt = selectPrimaryBridgePrompt(command, "OCR sample");
 
+  assert.equal(isPhotoObservationOnlyRequest(command), false);
   assert.equal(prompt, buildBridgePrompt(command, "OCR sample"));
   assert.match(prompt, /Start by reading these project context files in order:/);
   assert.match(prompt, /Use the user's text request together with visible evidence from the image\./);

@@ -235,6 +235,50 @@ test("runCommandMaintenance fails stale bridge commands instead of rerouting the
   assert.match(updated.errorMessage, /bridge_result_timeout/);
 });
 
+test("runCommandMaintenance falls back eligible stale bridge commands to Claude bridge", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-bridge-to-claude-timeout",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Исследуй routing, подготовь remediation report и проверь несколько delivery paths",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "local-bridge",
+    requestedExecutor: "bridge",
+    actualExecutor: "bridge",
+    status: "processing",
+    progressStage: "waiting-for-codex",
+    processingStartedAt: staleIso,
+    processingLeaseUntil: new Date(Date.now() - 1000).toISOString(),
+    targetRepo: "andylitvinov-design/codex-links",
+    allowClaudeFallback: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    fallbackToClaude: true,
+    preferSlack: true
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.changedCount, 1);
+
+  const updated = result.commands.find((command) => command.id === "cmd-bridge-to-claude-timeout");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "claude-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "fallback-to-claude");
+  assert.equal(updated.timeoutPhase, "result-timeout");
+  assert.equal(updated.lastDiagnosticCode, "bridge_result_timeout");
+  assert.equal(updated.actualExecutor, "claude");
+  assert.equal(updated.fallbackReason, "local bridge stopped heartbeating");
+  assert.match(updated.errorMessage, /fallback_to_claude/);
+});
+
 test("runCommandMaintenance fails stale photo bridge commands instead of rerouting them", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
@@ -510,7 +554,7 @@ test("runCommandMaintenance fails stale Slack commands that never got an ack", a
 
 test("runCommandMaintenance keeps uploaded Slack photo commands waiting for a cloud reply before the photo result window expires", async () => {
   const env = createMockEnv();
-  const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.slackPhotoFirstAckMs + 20 * 1000)).toISOString();
+  const staleIso = new Date(Date.now() - 45_000).toISOString();
 
   await writeCommands(env, [{
     id: "cmd-slack-photo-uploaded-awaiting-reply",
@@ -551,9 +595,9 @@ test("runCommandMaintenance keeps uploaded Slack photo commands waiting for a cl
   assert.equal(updated.fallbackReason, "");
 });
 
-test("runCommandMaintenance falls back uploaded Slack photo commands after the photo reply wait window expires", async () => {
+test("runCommandMaintenance falls back uploaded Slack photo commands after the photo ack wait window expires", async () => {
   const env = createMockEnv();
-  const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.slackPhotoResultMs + 20 * 1000)).toISOString();
+  const staleIso = new Date(Date.now() - (COMMAND_TIMEOUTS.slackPhotoFirstAckMs + 20 * 1000)).toISOString();
 
   await writeCommands(env, [{
     id: "cmd-slack-photo-uploaded-timeout",
@@ -591,9 +635,9 @@ test("runCommandMaintenance falls back uploaded Slack photo commands after the p
   assert.equal(updated.status, "queued");
   assert.equal(updated.progressStage, "fallback-to-bridge");
   assert.equal(updated.actualExecutor, "bridge");
-  assert.equal(updated.timeoutPhase, "result-timeout");
-  assert.equal(updated.lastDiagnosticCode, "slack_photo_reply_timeout");
-  assert.equal(updated.fallbackReason, "cloud via Slack photo reply timed out after upload");
+  assert.equal(updated.timeoutPhase, "first-ack-timeout");
+  assert.equal(updated.lastDiagnosticCode, "slack_photo_ack_timeout");
+  assert.equal(updated.fallbackReason, "cloud via Slack photo acknowledgement timed out after upload");
 });
 
 test("runCommandMaintenance retries queued Claude bridge commands before fallback", async () => {
