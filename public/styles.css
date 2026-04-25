@@ -1499,6 +1499,8 @@ input[type="radio"] {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   padding: 0 9px;
   border: 1px solid rgba(15, 118, 110, 0.14);
   border-radius: 999px;
@@ -1656,6 +1658,8 @@ code {
   .command-fallback-note,
   .command-answer summary,
   .command-answer-body {
+    overflow-wrap: anywhere;
+    word-break: break-word;
     padding-left: 13px;
     padding-right: 13px;
   }
@@ -1745,5 +1749,7 @@ code {
 
   .command-answer-badge {
     display: none;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 }

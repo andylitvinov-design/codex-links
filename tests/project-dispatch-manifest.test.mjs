@@ -6,6 +6,7 @@ import {
   listVisibleProjectTargets,
   resolveProjectDispatchTarget
 } from "../functions/_lib/project-dispatch-manifest.js";
+import { buildSlackCommandPrompt } from "../functions/_lib/prompt-builder.js";
 
 test("dispatch manifest exposes links with repo context and deploy metadata", () => {
   const project = findProjectTargetById("links");
@@ -38,6 +39,38 @@ test("command dispatch resolution keeps ezohata on its dedicated repository", ()
   assert.equal(result.ok, true);
   assert.equal(result.value.targetRepo, "andylitvinov-design/ezohata");
   assert.equal(result.value.targetRepoUrl, "https://github.com/andylitvinov-design/ezohata");
+});
+
+test("command dispatch resolution keeps links on codex-links and builds repo-aware prompt", () => {
+  const result = resolveProjectDispatchTarget({
+    threadId: "links",
+    dispatchMode: "slack-codex-cloud",
+    text: "check routing"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value.targetRepo, "andylitvinov-design/codex-links");
+  assert.match(result.value.workspacePath, /links/);
+
+  const prompt = buildSlackCommandPrompt({
+    id: "cmd-links-routing",
+    threadId: "links",
+    threadLabel: "links",
+    projectId: result.value.id,
+    projectLabel: result.value.label,
+    projectCategory: result.value.group,
+    targetRepo: result.value.targetRepo,
+    targetRepoUrl: result.value.targetRepoUrl,
+    targetWorkspacePath: result.value.workspacePath,
+    targetContextFiles: result.value.contextFiles,
+    text: "check routing"
+  }, {
+    SLACK_CODEX_MENTION: "<@U999>"
+  });
+
+  assert.match(prompt, /Repository: andylitvinov-design\/codex-links/);
+  assert.match(prompt, /Project Key: links/);
+  assert.match(prompt, /ACK repo=andylitvinov-design\/codex-links project=links command=cmd-links-routing/);
 });
 
 test("visible repos feed includes ezohata as cloud-ready", () => {

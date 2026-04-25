@@ -33,23 +33,33 @@ const IDLE_DRAIN_WINDOW_MS = 15 * 60 * 1000;
 const IDLE_DRAIN_POLL_MS = 1500;
 const MAX_IN_FLIGHT_BRIDGE_TASKS = 2;
 const PHOTO_PREP_TIMEOUT_MS = 60 * 1000;
-const LINKS_REPO_CWD = "/Users/andriilitvinov/projects/MYPROJECTS/links";
+const LINKS_REPO_CWD = process.env.LINKS_REPO_CWD || "/Users/andriilitvinov/projects/MYPROJECTS/links";
 const LOG_DIR = `${process.env.HOME || ""}/Library/Logs`;
 const BRIDGE_LOG_PATH = `${LOG_DIR}/codex-links-bridge.log`;
 const BRIDGE_ERROR_LOG_PATH = `${LOG_DIR}/codex-links-bridge.error.log`;
 const FETCH_RETRY_LIMIT = 3;
 const FETCH_RETRY_DELAY_MS = 1200;
 const OCR_TIMEOUT_MS = 20 * 1000;
+const PROCESS_FAILURE_EXIT_CODE = 1;
+const SPAWN_OUTPUT_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+const OCR_OUTPUT_MAX_BUFFER_BYTES = 2 * 1024 * 1024;
+const OCR_TEXT_LIMIT_CHARS = 4000;
+const PHOTO_RETRY_MAX_EDGE_PX = 2400;
+const STORED_THREAD_LIST_LIMIT = 100;
+const TURN_READ_POLL_MS = 1200;
+const CLAIM_RETRY_LIMIT = 3;
+const CLAIM_RETRY_DELAY_MS = 350;
+const CODEX_EPHEMERAL_ARG_INSERT_INDEX = 2;
 
 if (!token) {
   console.error("Set LINKS_WRITE_TOKEN before running bridge.");
-  process.exit(1);
+  process.exit(PROCESS_FAILURE_EXIT_CODE);
 }
 
 const bridgeRunWatchdog = setTimeout(() => {
   void appendBridgeErrorLog("bridgeRunWatchdog", new Error(`Bridge run exceeded ${BRIDGE_RUN_TIMEOUT_MS}ms and was aborted.`));
   console.error(`Bridge run exceeded ${BRIDGE_RUN_TIMEOUT_MS}ms and was aborted.`);
-  process.exit(1);
+  process.exit(PROCESS_FAILURE_EXIT_CODE);
 }, BRIDGE_RUN_TIMEOUT_MS);
 
 bridgeRunWatchdog.unref();
@@ -184,7 +194,7 @@ function spawnFileWithOutput(file, args, options = {}) {
       env: options.env || process.env,
       stdio: [stdinInput === null ? "ignore" : "pipe", "pipe", "pipe"]
     });
-    const maxBuffer = Number(options.maxBuffer || 10 * 1024 * 1024);
+    const maxBuffer = Number(options.maxBuffer || SPAWN_OUTPUT_MAX_BUFFER_BYTES);
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -527,7 +537,7 @@ async function getLegacyLinksThreadId() {
 
       while (true) {
         const result = await request("thread/list", {
-          limit: 100,
+          limit: STORED_THREAD_LIST_LIMIT,
           archived: false,
           sourceKinds: ["vscode", "cli"],
           cursor
@@ -685,7 +695,7 @@ async function createRetryPhotoVariant(commandId, photoPath) {
   const retryPath = join(tmpdir(), "codex-links-bridge", `${commandId}.retry.jpg`);
 
   try {
-    await execFileAsync("sips", ["-s", "format", "jpeg", "-Z", "2400", source, "--out", retryPath]);
+    await execFileAsync("sips", ["-s", "format", "jpeg", "-Z", String(PHOTO_RETRY_MAX_EDGE_PX), source, "--out", retryPath]);
     return retryPath;
   } catch (error) {
     await appendBridgeErrorLog("photoRetryVariant", error, {
@@ -708,9 +718,9 @@ async function extractPhotoOcrText(commandId, photoPath) {
     const result = await execFileWithOptionsAsync("xcrun", ["swift", scriptPath, source], {
       cwd: process.cwd(),
       timeout: OCR_TIMEOUT_MS,
-      maxBuffer: 2 * 1024 * 1024
+      maxBuffer: OCR_OUTPUT_MAX_BUFFER_BYTES
     });
-    return String(result?.stdout || "").trim().slice(0, 4000);
+    return String(result?.stdout || "").trim().slice(0, OCR_TEXT_LIMIT_CHARS);
   } catch (error) {
     if (isDeveloperToolsUnavailableError(error)) {
       await logBridgeInfo("photoOcr.skipped", {
@@ -801,7 +811,7 @@ function runCodexResume(threadId, prompt, photoPath, timeoutMs = BRIDGE_EXEC_TIM
     execFile(codexBin, args, {
       cwd: process.cwd(),
       timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
+      maxBuffer: SPAWN_OUTPUT_MAX_BUFFER_BYTES,
       stdio: ["ignore", "pipe", "pipe"]
     }, async (error, stdout, stderr) => {
       const result = {
@@ -862,7 +872,7 @@ function runCodexExec(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS
     ];
 
     if (options.ephemeral) {
-      codexArgs.splice(2, 0, "--ephemeral");
+      codexArgs.splice(CODEX_EPHEMERAL_ARG_INSERT_INDEX, 0, "--ephemeral");
     }
 
     if (cwd) {
@@ -876,7 +886,7 @@ function runCodexExec(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS
     spawnFileWithOutput(codexBin, codexArgs, {
       cwd: cwd || process.cwd(),
       timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: SPAWN_OUTPUT_MAX_BUFFER_BYTES
     }).then(async ({ error, stdout, stderr }) => {
       const result = {
         stdout: String(stdout || "").trim(),
@@ -932,7 +942,7 @@ async function waitForTurnCompletion(request, threadId, turnId, timeoutMs = BRID
       }
     }
 
-    await sleep(1200);
+    await sleep(TURN_READ_POLL_MS);
   }
 
   throw new Error(`Timed out waiting for turn ${turnId} in thread ${threadId}.`);
@@ -986,7 +996,7 @@ async function fetchCommandById(commandId) {
 async function claimNextCommand(options = {}) {
   const textOnly = Boolean(options.textOnly);
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < CLAIM_RETRY_LIMIT; attempt += 1) {
     const response = await fetchWithRetry(new URL("/api/commands", baseUrl), {
       method: "POST",
       headers: {
@@ -1068,7 +1078,7 @@ async function claimNextCommand(options = {}) {
         }
       }
 
-      await sleep(350);
+      await sleep(CLAIM_RETRY_DELAY_MS);
       continue;
     }
 
@@ -1475,7 +1485,7 @@ function runClaudePrint(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_
     ], {
       cwd: cwd || process.cwd(),
       timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
+      maxBuffer: SPAWN_OUTPUT_MAX_BUFFER_BYTES,
       env: {
         ...process.env
       },
@@ -2350,5 +2360,5 @@ console.log(JSON.stringify({
 clearTimeout(bridgeRunWatchdog);
 
 if (failed.length) {
-  process.exit(1);
+  process.exit(PROCESS_FAILURE_EXIT_CODE);
 }

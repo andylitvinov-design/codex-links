@@ -1,7 +1,6 @@
 import {
   acknowledgeCommands,
   claimNextCommand,
-  COMMAND_TIMEOUTS,
   fallbackCommandToLocalBridge,
   fallbackCommandToExecutor,
   markCommandAnswered,
@@ -55,17 +54,13 @@ import {
   storeSlackActiveChannelCommand,
   storeSlackThreadCommandMap
 } from "../_lib/delivery.js";
-
-const MAX_RECENT_SLACK_SYNC_COMMANDS = 20;
-const SLACK_DISPATCH_GRACE_MS = 15_000;
-const SLACK_FIRST_ACK_TIMEOUT_MS = 60_000;
-const SLACK_RESULT_WAIT_MS = 120_000;
-const SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS = 90_000;
-const SLACK_PHOTO_RESULT_WAIT_MS = 300_000;
-const SLACK_SYNC_POLL_MS = 2_000;
-const READ_SLACK_SYNC_BUDGET_MS = 2_500;
-const READ_SPECIFIC_SLACK_SYNC_BUDGET_MS = 8_000;
-const READ_SLACK_API_TIMEOUT_MS = 1_500;
+import {
+  COMMAND_TIMEOUTS, MAX_RECENT_SLACK_SYNC_COMMANDS, READ_SLACK_API_TIMEOUT_MS,
+  READ_SLACK_SYNC_BUDGET_MS, READ_SPECIFIC_SLACK_SYNC_BUDGET_MS, SLACK_DISPATCH_GRACE_MS,
+  SLACK_FIRST_ACK_TIMEOUT_MS, SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS,
+  SLACK_PHOTO_RESULT_TIMEOUT_MS as SLACK_PHOTO_RESULT_WAIT_MS,
+  SLACK_RESULT_TIMEOUT_MS as SLACK_RESULT_WAIT_MS, SLACK_SYNC_POLL_MS
+} from "../_lib/timeouts.js";
 
 function logCommandError(context, error, extra = {}) {
   const message = error instanceof Error ? error.message : String(error || "Unknown error");

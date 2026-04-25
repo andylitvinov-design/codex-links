@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { writeCommands, getCommandById } from "../functions/_lib/commands.js";
 import { readMessages } from "../functions/_lib/messages.js";
 import { syncSlackCommandReplies } from "../functions/api/commands.js";
-import { buildSlackCommandPrompt, classifySlackReply } from "../functions/_lib/slack.js";
+import { buildSlackCommandPrompt } from "../functions/_lib/prompt-builder.js";
+import { classifySlackReply } from "../functions/_lib/slack.js";
 
 function createMockEnv() {
   const store = new Map();
