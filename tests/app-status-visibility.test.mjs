@@ -31,6 +31,7 @@ test("UI blocks degraded cloud routes instead of silently sending", async () => 
 test("UI exposes route health and Slack diagnostic controls", async () => {
   const source = await readFile(appScriptPath, "utf8");
 
+  assert.match(source, /function formatTimestamp\(value\)/);
   assert.match(source, /function renderRouteHealthPanel\(status = \{\}\)/);
   assert.match(source, /function runSlackDiagnostic\(\)/);
   assert.match(source, /action:\s*"slack-diagnostic"/);

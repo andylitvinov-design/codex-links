@@ -56,7 +56,7 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260425-0952";
+const BUILD_VERSION = "20260425-1152";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -928,6 +928,30 @@ function formatRelativeTime(value) {
   }
 
   return `${diffMinutes} мин назад`;
+}
+
+function formatTimestamp(value) {
+  const rawValue = String(value || "").trim();
+
+  if (!rawValue) {
+    return "";
+  }
+
+  const slackSecondsMatch = rawValue.match(/^\d{10}(?:\.\d+)?$/);
+  const timestamp = slackSecondsMatch
+    ? Number(rawValue) * 1000
+    : Date.parse(rawValue);
+
+  if (!Number.isFinite(timestamp)) {
+    return rawValue;
+  }
+
+  return new Date(timestamp).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function escapeHtml(value) {
