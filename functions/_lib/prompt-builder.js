@@ -20,8 +20,31 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
   const contextFiles = Array.isArray(command?.targetContextFiles) && command.targetContextFiles.length
     ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
     : ["AGENTS.md", "README.md", "STATE.md"];
-  const photoNote = command?.photo
-    ? [
+
+  // Build photo note. When we have a direct private download URL (obtained after
+  // Slack file upload), inject a curl command so Codex Cloud can fetch the image
+  // using the bot token. Without this, Codex only gets a permalink that requires
+  // browser auth and cannot be downloaded — causing all photo tasks to fail with
+  // "couldn't complete".
+  const photoFileUrl = normalizeText(command?.photoFileUrl);
+  const slackBotToken = normalizeText(env?.SLACK_BOT_TOKEN);
+
+  let photoNote = "";
+
+  if (command?.photo) {
+    if (photoFileUrl && slackBotToken) {
+      photoNote = [
+        "",
+        "",
+        "An image from Codex Links is attached. Download it before starting:",
+        `curl -L -o /tmp/codex_photo.png -H "Authorization: Bearer ${slackBotToken}" "${photoFileUrl}"`,
+        "Read /tmp/codex_photo.png as the attached image for this task.",
+        "Base your answer on concrete visual evidence from the image, not on guesses.",
+        "If the download fails or the file is unreadable, say so clearly in-thread instead of pretending you saw it.",
+        "The final answer must start with one short sentence describing what you observed in the image."
+      ].join("\n");
+    } else {
+      photoNote = [
         "",
         "",
         "An image from Codex Links is attached in a file reply inside this same Slack thread.",
@@ -29,8 +52,10 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
         "Base your answer on concrete visual evidence from the image, not on guesses.",
         "If the task is about what is shown in the image, explicitly mention the relevant visible detail you observed before giving the fix or conclusion.",
         "If the image is missing or unreadable, say that clearly in-thread instead of pretending you saw it."
-      ].join("\n")
-    : "";
+      ].join("\n");
+    }
+  }
+
   const repoUrlLine = targetRepoUrl ? `Repository URL: ${targetRepoUrl}` : "";
   const workspacePathLine = targetWorkspacePath ? `Workspace path: ${targetWorkspacePath}` : "";
   const contextLine = contextFiles.length
