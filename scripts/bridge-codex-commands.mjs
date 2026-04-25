@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
@@ -606,6 +606,31 @@ async function materializePhoto(command) {
   }
 }
 
+async function assertPreparedPhoto(commandId, photoPath) {
+  const normalizedPath = String(photoPath || "").trim();
+
+  if (!normalizedPath) {
+    throw new Error(`Photo payload for command ${commandId} did not resolve to a local file path.`);
+  }
+
+  let info;
+
+  try {
+    info = await stat(normalizedPath);
+  } catch (error) {
+    throw new Error(`Photo payload for command ${commandId} is not readable at ${normalizedPath}: ${error.message}`);
+  }
+
+  if (!info.isFile() || info.size <= 0) {
+    throw new Error(`Photo payload for command ${commandId} resolved to an empty or invalid file at ${normalizedPath}.`);
+  }
+
+  return {
+    path: normalizedPath,
+    bytes: info.size
+  };
+}
+
 function isPhotoVisibilityFailure(text) {
   const value = String(text || "").trim().toLowerCase();
 
@@ -1176,6 +1201,10 @@ async function markFailed(commandId, errorMessage, completedAt, processorId = ""
       completedAt,
       actualDispatchMode: BRIDGE_EXECUTOR === "claude" ? "claude" : "bridge",
       errorMessage,
+      lastDiagnosticCode: errorMessage && String(errorMessage).includes("claude_photo_not_visible")
+        ? "claude_photo_not_visible"
+        : undefined,
+      lastDiagnosticDetail: errorMessage,
       resultAt: completedAt
     })
   }, WRITE_TIMEOUT_MS, "markFailed");
@@ -1827,6 +1856,24 @@ async function processClaimedCommand(command) {
 
       photoPath = photoPrep?.photoPath || null;
       photoOcrText = String(photoPrep?.photoOcrText || "").trim();
+
+      if (BRIDGE_EXECUTOR === "claude") {
+        const preparedPhoto = await assertPreparedPhoto(command.id, photoPath);
+        photoPath = preparedPhoto.path;
+        await updateProgress(command.id, "photo-prepared", {
+          photoAttached: true,
+          photoBytesPresent: true,
+          photoSeenByBridge: true,
+          photoProcessed: false,
+          photoPreparedAt: new Date().toISOString(),
+          photoTempPath: photoPath,
+          photoBytes: preparedPhoto.bytes,
+          photoPassedToExecutor: false,
+          photoExecutorArg: photoPath,
+          lastDiagnosticCode: "",
+          lastDiagnosticDetail: ""
+        }, command.processorId);
+      }
     } else {
       await updateProgress(command.id, "preparing-input", {}, command.processorId);
     }
@@ -1854,6 +1901,12 @@ async function processClaimedCommand(command) {
           photoBytesPresent: true,
           photoSeenByBridge: true,
           photoProcessed: true,
+          ...(BRIDGE_EXECUTOR === "claude"
+            ? {
+                photoPassedToExecutor: true,
+                photoExecutorArg: photoPath
+              }
+            : {}),
           lastDiagnosticCode: "",
           lastDiagnosticDetail: "",
           photoUnsupportedReason: ""
@@ -2008,16 +2061,23 @@ async function processClaimedCommand(command) {
     const photoUnsupportedReason = photoPath ? getPhotoUnsupportedReason(assistantText) : "";
 
     if (photoUnsupportedReason) {
+      const diagnosticCode = BRIDGE_EXECUTOR === "claude" && isPhotoVisibilityFailure(assistantText)
+        ? "claude_photo_not_visible"
+        : "bridge_photo_unreadable";
       await updateProgress(command.id, "failed", {
         photoAttached: true,
         photoBytesPresent: true,
         photoSeenByBridge: true,
         photoProcessed: false,
         photoUnsupportedReason,
-        lastDiagnosticCode: "bridge_photo_unreadable",
+        photoPassedToExecutor: BRIDGE_EXECUTOR === "claude" ? true : undefined,
+        photoExecutorArg: BRIDGE_EXECUTOR === "claude" ? photoPath : undefined,
+        lastDiagnosticCode: diagnosticCode,
         lastDiagnosticDetail: photoUnsupportedReason
       }, command.processorId);
-      throw new Error(photoUnsupportedReason);
+      throw new Error(diagnosticCode === "claude_photo_not_visible"
+        ? `claude_photo_not_visible: ${photoUnsupportedReason}`
+        : photoUnsupportedReason);
     }
 
     if (!assistantText) {
@@ -2050,13 +2110,17 @@ async function processClaimedCommand(command) {
 
     if (photoUnsupportedReason) {
       try {
+        const diagnosticCode = BRIDGE_EXECUTOR === "claude" && isPhotoVisibilityFailure(error?.message || "")
+          ? "claude_photo_not_visible"
+          : "bridge_photo_unreadable";
         await updateProgress(command.id, "failed", {
           photoAttached: true,
           photoBytesPresent: Boolean(command.photo?.hasDataUrl || command.photo?.dataUrl || command.photoBytesPresent),
           photoSeenByBridge: true,
           photoProcessed: false,
           photoUnsupportedReason,
-          lastDiagnosticCode: "bridge_photo_unreadable",
+          photoPassedToExecutor: BRIDGE_EXECUTOR === "claude" ? true : undefined,
+          lastDiagnosticCode: diagnosticCode,
           lastDiagnosticDetail: photoUnsupportedReason
         }, command.processorId);
       } catch {}

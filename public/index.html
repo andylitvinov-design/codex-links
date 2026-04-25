@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
     <script>
       (function () {
-        var build = "20260425-0837";
+        var build = "20260425-0952";
         var current = new URL(window.location.href);
         var requested = String(current.searchParams.get("v") || "").trim();
         if (requested === build) {
@@ -24,7 +24,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260425-0929" />
+    <link rel="stylesheet" href="/styles.css?v=20260425-0952" />
   </head>
   <body>
     <main class="page">
@@ -47,8 +47,12 @@
               <p id="bridge-status-text" class="bridge-status">Подключаю статус cloud execution…</p>
               <p id="bridge-watchdog-text" class="bridge-watchdog">Watchdog: загружаю состояние исполнителя…</p>
             </div>
-            <button class="button button-secondary refresh-button" id="delivery-reset-button" type="button">Reset</button>
+            <div class="bridge-status-actions">
+              <button class="button button-secondary refresh-button" id="slack-diagnostic-button" type="button">Run Slack diagnostic</button>
+              <button class="button button-secondary refresh-button" id="delivery-reset-button" type="button">Reset</button>
+            </div>
           </div>
+          <div id="route-health-panel" class="route-health-panel" aria-live="polite"></div>
           <p class="bridge-reset-help">Резервный запуск maintenance для зависших cloud и bridge сообщений.</p>
         </section>
 
@@ -156,6 +160,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260425-0929"></script>
+    <script type="module" src="/app.js?v=20260425-0952"></script>
   </body>
 </html>

@@ -311,6 +311,11 @@ function serializeCommand(command, options = {}) {
     photoBytesPresent: Boolean(command.photoBytesPresent),
     photoSeenByBridge: Boolean(command.photoSeenByBridge),
     photoProcessed: Boolean(command.photoProcessed),
+    photoPreparedAt: String(command.photoPreparedAt || "").trim(),
+    photoTempPath: String(command.photoTempPath || "").trim(),
+    photoBytes: Number(command.photoBytes || 0),
+    photoPassedToExecutor: Boolean(command.photoPassedToExecutor),
+    photoExecutorArg: String(command.photoExecutorArg || "").trim(),
     photoUnsupportedReason: String(command.photoUnsupportedReason || "").trim(),
     slackPhotoFileId: String(command.slackPhotoFileId || "").trim(),
     slackPhotoPermalink: String(command.slackPhotoPermalink || "").trim(),
@@ -1635,6 +1640,11 @@ export async function onRequest(context) {
       firstReplySeenAt: payload?.firstReplySeenAt,
       replyIngestedAt: payload?.replyIngestedAt,
       resultAt: payload?.resultAt,
+      photoPreparedAt: payload?.photoPreparedAt,
+      photoTempPath: payload?.photoTempPath,
+      photoBytes: payload?.photoBytes,
+      photoPassedToExecutor: payload?.photoPassedToExecutor,
+      photoExecutorArg: payload?.photoExecutorArg,
       prUrl: payload?.prUrl,
       branchName: payload?.branchName,
       mergeCommit: payload?.mergeCommit,
@@ -1748,7 +1758,14 @@ export async function onRequest(context) {
       resultAt: payload?.resultAt,
       timeoutPhase: payload?.timeoutPhase,
       lastDiagnosticCode: payload?.lastDiagnosticCode,
-      lastDiagnosticDetail: payload?.lastDiagnosticDetail
+      lastDiagnosticDetail: payload?.lastDiagnosticDetail,
+      photoPreparedAt: payload?.photoPreparedAt,
+      photoTempPath: payload?.photoTempPath,
+      photoBytes: payload?.photoBytes,
+      photoPassedToExecutor: payload?.photoPassedToExecutor,
+      photoExecutorArg: payload?.photoExecutorArg,
+      photoProcessed: payload?.photoProcessed,
+      photoUnsupportedReason: payload?.photoUnsupportedReason
     });
 
     if (!failed.ok) {
@@ -1840,6 +1857,11 @@ export async function onRequest(context) {
       photoBytesPresent: payload?.photoBytesPresent,
       photoSeenByBridge: payload?.photoSeenByBridge,
       photoProcessed: payload?.photoProcessed,
+      photoPreparedAt: payload?.photoPreparedAt,
+      photoTempPath: payload?.photoTempPath,
+      photoBytes: payload?.photoBytes,
+      photoPassedToExecutor: payload?.photoPassedToExecutor,
+      photoExecutorArg: payload?.photoExecutorArg,
       photoUnsupportedReason: payload?.photoUnsupportedReason,
       lastDiagnosticCode: payload?.lastDiagnosticCode,
       lastDiagnosticDetail: payload?.lastDiagnosticDetail

@@ -56,7 +56,7 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260425-0929";
+const BUILD_VERSION = "20260425-0952";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -316,6 +316,8 @@ const storage = {
 
 const refreshButton = document.querySelector("#refresh-button");
 const deliveryResetButton = document.querySelector("#delivery-reset-button");
+const slackDiagnosticButton = document.querySelector("#slack-diagnostic-button");
+const routeHealthPanel = document.querySelector("#route-health-panel");
 const dispatchModeBridgeButton = document.querySelector("#dispatch-mode-bridge");
 const dispatchModeCloudButton = document.querySelector("#dispatch-mode-cloud");
 const dispatchModeClaudeButton = document.querySelector("#dispatch-mode-claude");
@@ -564,6 +566,90 @@ function formatRouteState(route, label) {
   }
 
   return parts.join(" · ");
+}
+
+function getSlackActorWatchdog(status = {}) {
+  const actor = status?.slackActor || {};
+  const validation = String(actor.validationStatus || "unverified").trim().toLowerCase();
+  const route = status?.routes?.cloudViaSlack || {};
+  const routeReason = String(route.degradedReason || "").trim();
+  const probe = actor.lastProbeResult || null;
+  const probeBits = [];
+
+  if (probe?.completedAt || actor.lastProbeAt) {
+    probeBits.push(`last probe ${formatTimestamp(probe?.completedAt || actor.lastProbeAt)}`);
+  }
+
+  if (probe?.probeMessageTs || actor.probeMessageTs) {
+    probeBits.push(`probe ts ${probe?.probeMessageTs || actor.probeMessageTs}`);
+  }
+
+  if (probe?.probeReplyTs) {
+    probeBits.push(`reply ts ${probe.probeReplyTs}`);
+  }
+
+  const reason = routeReason || String(actor.validationError || actor.lastProbeError || "").trim();
+  return `Slack actor: ${validation}${reason ? ` · ${reason}` : ""}${probeBits.length ? ` · ${probeBits.join(" · ")}` : ""}`;
+}
+
+function formatWatchdogStatus(status = {}) {
+  const bridge = status?.routes?.localBridge || {};
+  const claude = status?.routes?.claudeBridge || {};
+  const pending = Number(status?.pendingCount || 0);
+  const oldest = String(status?.oldestPendingAt || "").trim();
+  const parts = [
+    getSlackActorWatchdog(status),
+    `Bridge: ${String(bridge.state || "unknown").trim() || "unknown"}`,
+    `Claude: ${String(claude.state || "unknown").trim() || "unknown"}`,
+    `pending ${pending}`
+  ];
+
+  if (oldest) {
+    parts.push(`oldest ${formatTimestamp(oldest)}`);
+  }
+
+  const lastError = formatWatchdogMessage(status.lastError);
+
+  if (lastError !== "ошибок нет") {
+    parts.push(lastError);
+  }
+
+  return parts.join(" · ");
+}
+
+function renderRouteHealthPanel(status = {}) {
+  if (!routeHealthPanel) {
+    return;
+  }
+
+  const items = [
+    ["cloud-via-slack", "Cloud", "repo checkout"],
+    ["bridge", "Bridge", "repo access"],
+    ["claude", "Claude", "fallback/photo"],
+    ["direct-openai", "Direct OpenAI", "text only"]
+  ];
+
+  routeHealthPanel.innerHTML = items.map(([route, label, capability]) => {
+    const health = getRouteHealth(route) || {};
+    const stateText = String(health.state || "unknown").trim() || "unknown";
+    const reason = String(health.degradedReason || "").trim();
+    const pending = Number(health.pendingCount || 0);
+    const oldest = String(health.oldestPendingAt || "").trim();
+    const detail = [
+      capability,
+      stateText,
+      pending ? `pending ${pending}` : "",
+      oldest ? `oldest ${formatTimestamp(oldest)}` : "",
+      reason && stateText !== "healthy" ? reason : ""
+    ].filter(Boolean).join(" · ");
+
+    return `<div class="route-health-item" data-state="${escapeHtml(stateText)}" title="${escapeHtml(detail)}"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(detail)}</span></div>`;
+  }).join("");
+
+  const warnings = getActiveRepoAckWarnings();
+  if (warnings.length) {
+    routeHealthPanel.insertAdjacentHTML("beforeend", `<div class="route-health-item" data-state="degraded" title="Repo ACK warning"><strong>Repo ACK</strong><span>${warnings.length} active warning</span></div>`);
+  }
 }
 
 function getActiveRepoAckWarnings() {
@@ -1315,6 +1401,10 @@ function getCommandDiagnosticMessage(command) {
     return "Bridge не смог корректно прочитать фото после повторной попытки.";
   }
 
+  if (diagnosticCode === "claude_photo_not_visible") {
+    return "Claude Bridge получил фото, но executor не увидел изображение в контексте.";
+  }
+
   if (status === "failed" && fallbackReason === "local bridge stopped heartbeating") {
     return "Bridge перестал heartbeat'ить во время обработки.";
   }
@@ -1852,6 +1942,7 @@ function renderCommandContextMarkup(command) {
   const requestedExecutor = getCommandRequestedExecutor(command);
   const actualExecutor = getCommandActualExecutor(command);
   const fallbackReason = String(command?.fallbackReason || "").trim();
+  const diagnosticReason = String(command?.lastDiagnosticDetail || command?.lastDiagnosticCode || "").trim();
   const parts = [
     projectPath ? `<span>${escapeHtml(projectPath)}</span>` : "",
     `<span class="command-context-badge" data-status="${escapeHtml(statusLabel)}">${escapeHtml(statusLabel)}</span>`,
@@ -1859,7 +1950,9 @@ function renderCommandContextMarkup(command) {
     `<span>requested: ${escapeHtml(requestedExecutor)}</span>`,
     `<span>actual: ${escapeHtml(actualExecutor)}</span>`,
     `<span>stage: ${escapeHtml(String(command?.deliveryStage || getCommandLifecycleState(command) || "created"))}</span>`,
-    fallbackReason ? `<span>fallback: ${escapeHtml(fallbackReason)}</span>` : ""
+    `<span>owner: ${escapeHtml(String(command?.processorId || command?.actualExecutor || command?.actualDispatchMode || command?.dispatchMode || "pending"))}</span>`,
+    fallbackReason ? `<span>fallback: ${escapeHtml(fallbackReason)}</span>` : "",
+    diagnosticReason ? `<span>reason: ${escapeHtml(diagnosticReason)}</span>` : ""
   ].filter(Boolean);
 
   return parts.length ? `<div class="command-context">${parts.join("")}</div>` : "";
@@ -2132,6 +2225,28 @@ function getLikelyStuckDeliveryCommands() {
   });
 }
 
+function formatMaintenanceSummary(summary = {}) {
+  const routes = summary?.routes || {};
+  const routeParts = [
+    ["Cloud", routes.cloudViaSlack],
+    ["Bridge", routes.localBridge],
+    ["Claude", routes.claudeBridge],
+    ["Direct", routes.directOpenai]
+  ].map(([label, route]) => {
+    const queued = Number(route?.queued || 0);
+    const processing = Number(route?.processing || 0);
+    const fallbackApplied = Number(route?.fallbackApplied || 0);
+    const failed = Number(route?.failed || 0);
+    const unchanged = Number(route?.unchanged || 0);
+    return `${label} q${queued}/p${processing}/fb${fallbackApplied}/fail${failed}/same${unchanged}`;
+  });
+  const remaining = Array.isArray(summary?.remaining) && summary.remaining.length
+    ? ` Остались: ${summary.remaining.slice(0, 3).map((entry) => `${entry.id || "cmd"} ${entry.owner || entry.route || "unknown"}: ${entry.reason || "unchanged"}`).join("; ")}.`
+    : "";
+
+  return `${routeParts.join(" · ")}.${remaining}`;
+}
+
 async function runDeliveryMaintenanceFromRefresh() {
   const token = storage.adminWriteToken;
 
@@ -2165,7 +2280,7 @@ async function runDeliveryMaintenanceFromRefresh() {
 
   const changedCount = Number(result?.summary?.changedCount || 0);
   const dispatchedCount = Number(result?.summary?.dispatchedCount || 0);
-  setCommandStatusMessage(`Refresh: проверил зависшие delivery-сообщения. changed ${changedCount}, dispatched ${dispatchedCount}.`, { tone: "processing" });
+  setCommandStatusMessage(`Refresh: maintenance changed ${changedCount}, dispatched ${dispatchedCount}. ${formatMaintenanceSummary(result?.summary)}`, { tone: "processing" });
   return true;
 }
 
@@ -2227,13 +2342,62 @@ async function runDeliveryReset() {
 
     const changedCount = Number(result?.summary?.changedCount || 0);
     const dispatchedCount = Number(result?.summary?.dispatchedCount || 0);
-    setCommandStatusMessage(`Reset выполнен: changed ${changedCount}, dispatched ${dispatchedCount}.`, { tone: "processing" });
+    setCommandStatusMessage(`Reset выполнен: changed ${changedCount}, dispatched ${dispatchedCount}. ${formatMaintenanceSummary(result?.summary)}`, { tone: "processing" });
     await refreshAll();
   } catch (error) {
     setCommandStatusMessage(String(error?.message || "Reset maintenance не выполнился."), { tone: "error" });
   } finally {
     state.resetInFlight = false;
     setResetButtonBusy(false);
+  }
+}
+
+async function runSlackDiagnostic() {
+  const token = await requestAdminWriteToken(false);
+
+  if (!token) {
+    setCommandStatusMessage("Slack diagnostic отменён: нет admin token.", { tone: "error" });
+    return;
+  }
+
+  slackDiagnosticButton?.setAttribute("disabled", "disabled");
+  setCommandStatusMessage("Запускаю Slack actor diagnostic…", { tone: "processing" });
+
+  try {
+    const response = await fetch("/api/admin/commands-maintenance", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        "x-write-token": token
+      },
+      body: JSON.stringify({
+        action: "slack-diagnostic",
+        timeoutMs: 10000,
+        pollIntervalMs: 1000
+      })
+    });
+    const result = await parseJsonResponse(response);
+
+    if (response.status === 401) {
+      storage.adminWriteToken = "";
+      throw new Error("Slack diagnostic не авторизован: обновите admin token.");
+    }
+
+    if (!response.ok) {
+      throw new Error(String(result?.error || "").trim() || `Slack diagnostic failed (HTTP ${response.status}).`);
+    }
+
+    const diagnostic = result?.slackActorDiagnostic || {};
+    const stateText = String(diagnostic.validationStatus || "unknown").trim() || "unknown";
+    const probeText = diagnostic.probeMessageTs ? ` probe ${diagnostic.probeMessageTs}` : "";
+    const replyText = diagnostic.probeReplyTs ? ` reply ${diagnostic.probeReplyTs}` : " no reply";
+    setCommandStatusMessage(`Slack diagnostic: ${stateText}.${probeText}${replyText}`, { tone: diagnostic.ok ? "success" : "processing" });
+    await refreshAll();
+  } catch (error) {
+    setCommandStatusMessage(String(error?.message || "Slack diagnostic failed."), { tone: "error" });
+  } finally {
+    slackDiagnosticButton?.removeAttribute("disabled");
   }
 }
 
@@ -3924,8 +4088,10 @@ function applyDeliverySnapshot(snapshot) {
   }
 
   if (bridgeWatchdogText) {
-    bridgeWatchdogText.textContent = `Watchdog: ${formatWatchdogMessage(status.lastError)}`;
+    bridgeWatchdogText.textContent = `Watchdog: ${formatWatchdogStatus(status)}`;
   }
+
+  renderRouteHealthPanel(status);
 }
 
 function markCommandVisibleLocally(commandId, uiVisibleAt) {
@@ -4289,6 +4455,12 @@ function bindEvents() {
   deliveryResetButton?.addEventListener("click", () => {
     runDeliveryReset().catch((error) => {
       setCommandStatusMessage(String(error?.message || "Reset maintenance не выполнился."), { tone: "error" });
+    });
+  });
+
+  slackDiagnosticButton?.addEventListener("click", () => {
+    runSlackDiagnostic().catch((error) => {
+      setCommandStatusMessage(String(error?.message || "Slack diagnostic failed."), { tone: "error" });
     });
   });
 

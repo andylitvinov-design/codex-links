@@ -118,3 +118,67 @@ test("deriveBridgeStatusFromCommands exposes stable route health", async () => {
   assert.equal(status.routes.localBridge.state, "healthy");
   assert.equal(status.routes.claudeBridge.state, "healthy");
 });
+
+test("readBridgeStatus preserves Slack probe diagnostics and maintenance summary", async () => {
+  const env = {
+    ...createMockEnv(),
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    SLACK_CODEX_USER_ID: "U999"
+  };
+  const now = new Date().toISOString();
+
+  await writeBridgeStatus(env, {
+    dispatchMode: "slack-codex-cloud",
+    slackActor: {
+      configuredUserId: "U999",
+      validationStatus: "unverified",
+      lastProbeAt: now,
+      lastProbeError: "no probe reply",
+      lastProbeResult: {
+        ok: false,
+        validationStatus: "unverified",
+        code: "codex_target_actor_unverified",
+        detail: "no probe reply",
+        authTestOk: true,
+        channelMembershipOk: true,
+        targetUserId: "U999",
+        channelId: "C123",
+        probeMessageTs: "1710000000.000100",
+        probeThreadTs: "1710000000.000100",
+        probeReplyTs: "",
+        completedAt: now
+      }
+    },
+    maintenanceSummary: {
+      updatedAt: now,
+      changedCount: 2,
+      dispatchedCount: 1,
+      routes: {
+        cloudViaSlack: {
+          queued: 1,
+          processing: 1,
+          fallbackApplied: 1,
+          failed: 0,
+          unchanged: 1,
+          oldestPendingAt: now
+        }
+      },
+      remaining: [{
+        id: "cmd-stuck",
+        status: "processing",
+        route: "cloudViaSlack",
+        owner: "slack-codex-cloud",
+        reason: "actor unverified"
+      }]
+    }
+  });
+
+  const status = await readBridgeStatus(env);
+  assert.equal(status.slackActor.lastProbeResult.authTestOk, true);
+  assert.equal(status.slackActor.lastProbeResult.channelMembershipOk, true);
+  assert.equal(status.slackActor.lastProbeResult.probeMessageTs, "1710000000.000100");
+  assert.equal(status.slackActor.lastProbeError, "no probe reply");
+  assert.equal(status.maintenanceSummary.routes.cloudViaSlack.unchanged, 1);
+  assert.equal(status.maintenanceSummary.remaining[0].reason, "actor unverified");
+});

@@ -359,6 +359,9 @@ function buildSlackActorValidationResult(input = {}) {
     code: normalizeText(input.code),
     message: normalizeText(input.message),
     detail: normalizeText(input.detail),
+    authTestOk: Boolean(input.authTestOk),
+    channelMembershipOk: Boolean(input.channelMembershipOk),
+    botUserId: normalizeText(input.botUserId),
     configuredUserId: normalizeText(input.configuredUserId),
     probeChannelId: normalizeText(input.probeChannelId),
     probeMessageTs: normalizeText(input.probeMessageTs),
@@ -586,7 +589,9 @@ async function validateSlackTarget(token, channel, targetUserId) {
       code: "codex_target_user_invalid",
       message: "Configured Slack target user points to the Codex Links sender app.",
       detail: "Install the separate OpenAI Codex Slack app and set SLACK_CODEX_USER_ID to its @Codex bot/user ID, not the Codex Links sender app user returned by auth.test.",
-      configuredUserId: normalizedTarget
+      configuredUserId: normalizedTarget,
+      authTestOk: true,
+      botUserId
     });
   }
 
@@ -599,13 +604,19 @@ async function validateSlackTarget(token, channel, targetUserId) {
       code: "codex_target_user_invalid",
       message: "Configured Slack target user is not in the dispatch channel.",
       detail: "Invite the target Codex user to SLACK_CODEX_CHANNEL_ID or update SLACK_CODEX_USER_ID.",
-      configuredUserId: normalizedTarget
+      configuredUserId: normalizedTarget,
+      authTestOk: true,
+      channelMembershipOk: false,
+      botUserId
     });
   }
 
   return buildSlackActorValidationResult({
     validationStatus: "unverified",
-    configuredUserId: normalizedTarget
+    configuredUserId: normalizedTarget,
+    authTestOk: true,
+    channelMembershipOk: true,
+    botUserId
   });
 }
 
@@ -713,6 +724,7 @@ export async function validateSlackCodexActor(env, options = {}) {
   const token = normalizeText(env?.SLACK_BOT_TOKEN);
   const channel = normalizeText(env?.SLACK_CODEX_CHANNEL_ID);
   const targetUserId = normalizeText(env?.SLACK_CODEX_USER_ID);
+  const forceProbe = Boolean(options.forceProbe);
 
   if (!token || !channel) {
     return buildSlackActorValidationResult({
@@ -726,7 +738,7 @@ export async function validateSlackCodexActor(env, options = {}) {
 
   const cachedValidation = await readSlackActorValidationCache(env, channel, targetUserId);
 
-  if (cachedValidation?.validationStatus === "validated") {
+  if (cachedValidation?.validationStatus === "validated" && !forceProbe) {
     return cachedValidation;
   }
 
@@ -766,13 +778,13 @@ export async function validateSlackCodexActor(env, options = {}) {
     return result;
   }
 
-  const probeCooldown = await readSlackActorProbeCooldown(env, channel, targetUserId);
+  const probeCooldown = forceProbe ? null : await readSlackActorProbeCooldown(env, channel, targetUserId);
 
   if (probeCooldown) {
     return probeCooldown;
   }
 
-  if (cachedValidation) {
+  if (cachedValidation && !forceProbe) {
     return cachedValidation;
   }
 
@@ -845,6 +857,56 @@ export async function validateSlackCodexActor(env, options = {}) {
 
   await writeSlackActorValidationCache(env, channel, targetUserId, result);
   return result;
+}
+
+export async function runSlackActorDiagnostic(env, options = {}) {
+  const startedAt = new Date().toISOString();
+  try {
+    const result = await validateSlackCodexActor(env, {
+      ...options,
+      liveProbe: true,
+      forceProbe: true,
+      timeoutMs: Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 10_000,
+      pollIntervalMs: Number.isFinite(Number(options.pollIntervalMs)) ? Number(options.pollIntervalMs) : 1_000
+    });
+    const completedAt = new Date().toISOString();
+    return {
+      ok: result.validationStatus === "validated",
+      startedAt,
+      completedAt,
+      validationStatus: result.validationStatus,
+      code: result.code,
+      message: result.message,
+      detail: result.detail,
+      authTestOk: Boolean(result.authTestOk || result.validationStatus !== "invalid"),
+      channelMembershipOk: Boolean(result.channelMembershipOk || result.validationStatus !== "invalid"),
+      botUserId: result.botUserId || "",
+      targetUserId: result.configuredUserId || normalizeText(env?.SLACK_CODEX_USER_ID),
+      channelId: normalizeText(env?.SLACK_CODEX_CHANNEL_ID),
+      probeMessageTs: result.probeMessageTs || "",
+      probeThreadTs: result.probeThreadTs || "",
+      probeReplyTs: result.observedReply?.ts || "",
+      observedReplyUser: result.observedReply?.user || ""
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      validationStatus: "invalid",
+      code: "slack_actor_diagnostic_failed",
+      message: "Slack actor diagnostic failed.",
+      detail: error instanceof Error ? error.message : String(error || "Unknown Slack diagnostic error."),
+      authTestOk: false,
+      channelMembershipOk: false,
+      targetUserId: normalizeText(env?.SLACK_CODEX_USER_ID),
+      channelId: normalizeText(env?.SLACK_CODEX_CHANNEL_ID),
+      probeMessageTs: "",
+      probeThreadTs: "",
+      probeReplyTs: "",
+      observedReplyUser: ""
+    };
+  }
 }
 
 async function resolveStoredCodexThreadId(env, command) {

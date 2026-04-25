@@ -88,7 +88,8 @@ function normalizeStatus(input) {
       lastError: "",
       slackActor: normalizeSlackActorStatus(),
       localBridge: normalizeRunnerStatus(),
-      claudeBridge: normalizeRunnerStatus()
+      claudeBridge: normalizeRunnerStatus(),
+      maintenanceSummary: normalizeMaintenanceSummary()
     };
   }
 
@@ -120,6 +121,7 @@ function normalizeStatus(input) {
     slackActor: normalizeSlackActorStatus(input.slackActor),
     localBridge,
     claudeBridge,
+    maintenanceSummary: normalizeMaintenanceSummary(input.maintenanceSummary),
     routes: input.routes && typeof input.routes === "object" ? input.routes : undefined
   };
 }
@@ -226,7 +228,62 @@ function normalizeSlackActorStatus(input) {
     validationError: normalizeText(source.validationError || source.detail),
     probeChannelId: normalizeText(source.probeChannelId),
     probeMessageTs: normalizeText(source.probeMessageTs),
-    probeThreadTs: normalizeText(source.probeThreadTs)
+    probeThreadTs: normalizeText(source.probeThreadTs),
+    lastProbeAt: normalizeDate(source.lastProbeAt),
+    lastProbeError: normalizeText(source.lastProbeError),
+    lastProbeResult: source.lastProbeResult && typeof source.lastProbeResult === "object"
+      ? {
+          ok: Boolean(source.lastProbeResult.ok),
+          validationStatus: normalizeText(source.lastProbeResult.validationStatus).toLowerCase(),
+          code: normalizeText(source.lastProbeResult.code),
+          message: normalizeText(source.lastProbeResult.message),
+          detail: normalizeText(source.lastProbeResult.detail),
+          authTestOk: Boolean(source.lastProbeResult.authTestOk),
+          channelMembershipOk: Boolean(source.lastProbeResult.channelMembershipOk),
+          targetUserId: normalizeText(source.lastProbeResult.targetUserId),
+          channelId: normalizeText(source.lastProbeResult.channelId),
+          probeMessageTs: normalizeText(source.lastProbeResult.probeMessageTs),
+          probeThreadTs: normalizeText(source.lastProbeResult.probeThreadTs),
+          probeReplyTs: normalizeText(source.lastProbeResult.probeReplyTs),
+          completedAt: normalizeDate(source.lastProbeResult.completedAt)
+        }
+      : null
+  };
+}
+
+function normalizeRouteMaintenanceSummary(input) {
+  const source = input && typeof input === "object" ? input : {};
+  return {
+    queued: Number.isFinite(Number(source.queued)) ? Number(source.queued) : 0,
+    processing: Number.isFinite(Number(source.processing)) ? Number(source.processing) : 0,
+    fallbackApplied: Number.isFinite(Number(source.fallbackApplied)) ? Number(source.fallbackApplied) : 0,
+    failed: Number.isFinite(Number(source.failed)) ? Number(source.failed) : 0,
+    unchanged: Number.isFinite(Number(source.unchanged)) ? Number(source.unchanged) : 0,
+    oldestPendingAt: normalizeDate(source.oldestPendingAt)
+  };
+}
+
+function normalizeMaintenanceSummary(input = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  return {
+    updatedAt: normalizeDate(source.updatedAt),
+    changedCount: Number.isFinite(Number(source.changedCount)) ? Number(source.changedCount) : 0,
+    dispatchedCount: Number.isFinite(Number(source.dispatchedCount)) ? Number(source.dispatchedCount) : 0,
+    routes: {
+      cloudViaSlack: normalizeRouteMaintenanceSummary(source.routes?.cloudViaSlack),
+      directOpenai: normalizeRouteMaintenanceSummary(source.routes?.directOpenai),
+      localBridge: normalizeRouteMaintenanceSummary(source.routes?.localBridge),
+      claudeBridge: normalizeRouteMaintenanceSummary(source.routes?.claudeBridge)
+    },
+    remaining: Array.isArray(source.remaining)
+      ? source.remaining.slice(0, 20).map((entry) => ({
+          id: normalizeText(entry?.id),
+          status: normalizeText(entry?.status),
+          route: normalizeText(entry?.route),
+          owner: normalizeText(entry?.owner),
+          reason: normalizeText(entry?.reason)
+        }))
+      : []
   };
 }
 
@@ -376,7 +433,8 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
       localBridge: nextLocalBridge,
       claudeBridge: nextClaudeBridge,
       lastSuccessAt: patch.lastSuccessAt || current.lastSuccessAt
-    }, runtimeConfig, active)
+    }, runtimeConfig, active),
+    maintenanceSummary: patch.maintenanceSummary || current.maintenanceSummary
   });
 }
 
