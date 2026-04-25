@@ -146,6 +146,7 @@ function routeHealth(input = {}) {
   return {
     state: normalizedState,
     enabled: Boolean(input.enabled),
+    optional: Boolean(input.optional),
     degradedReason: normalizeText(input.degradedReason),
     pendingCount: Number.isFinite(Number(input.pendingCount)) ? Number(input.pendingCount) : 0,
     oldestPendingAt: normalizeDate(input.oldestPendingAt),
@@ -189,7 +190,8 @@ export function buildRouteHealth(status, runtimeConfig = {}, activeCommands = []
     directOpenai: routeHealth({
       state: directConfigured ? "healthy" : "unavailable",
       enabled: directConfigured,
-      degradedReason: directConfigured ? "" : "Missing OPENAI_API_KEY.",
+      optional: true,
+      degradedReason: directConfigured ? "" : "Optional direct OpenAI API route is disabled; cloud-via-slack does not require OPENAI_API_KEY.",
       pendingCount: directActive.length,
       oldestPendingAt: getOldestActiveAt(directActive),
       lastSuccessAt: source.lastSuccessAt

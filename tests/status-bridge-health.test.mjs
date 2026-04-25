@@ -119,6 +119,40 @@ test("deriveBridgeStatusFromCommands exposes stable route health", async () => {
   assert.equal(status.routes.claudeBridge.state, "healthy");
 });
 
+test("direct OpenAI is reported as optional when cloud-via-slack is configured", async () => {
+  const env = {
+    ...createMockEnv(),
+    COMMAND_DISPATCH_MODE: "cloud-via-slack",
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    SLACK_CODEX_USER_ID: "U999"
+  };
+  const now = new Date().toISOString();
+
+  await writeBridgeStatus(env, {
+    dispatchMode: "slack-codex-cloud",
+    slackActor: {
+      configuredUserId: "U999",
+      validationStatus: "validated",
+      lastValidatedAt: now
+    },
+    localBridge: {
+      online: true,
+      managedBy: "launchd",
+      lastRunAt: now,
+      state: "idle"
+    }
+  });
+
+  const status = await deriveBridgeStatusFromCommands(env);
+  assert.equal(status.dispatchMode, "slack-codex-cloud");
+  assert.equal(status.routes.cloudViaSlack.state, "healthy");
+  assert.equal(status.routes.directOpenai.state, "unavailable");
+  assert.equal(status.routes.directOpenai.enabled, false);
+  assert.equal(status.routes.directOpenai.optional, true);
+  assert.match(status.routes.directOpenai.degradedReason, /does not require OPENAI_API_KEY/);
+});
+
 test("readBridgeStatus preserves Slack probe diagnostics and maintenance summary", async () => {
   const env = {
     ...createMockEnv(),
