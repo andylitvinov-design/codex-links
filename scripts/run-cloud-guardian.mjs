@@ -65,7 +65,7 @@ async function updateCommand(baseUrl, writeToken, update) {
       "x-write-token": writeToken
     },
     body: JSON.stringify({
-      action: "delivery-update",
+      action: update.action || "delivery-update",
       ...update
     })
   });
@@ -215,7 +215,10 @@ async function main() {
       continue;
     }
 
-    const updated = await updateCommand(baseUrl, writeToken, decision.update);
+    const updated = await updateCommand(baseUrl, writeToken, {
+      ...(decision.update || {}),
+      action: decision.action === "fallback" ? "fallback-local" : "delivery-update"
+    });
     let mirrorThreadId = "";
 
     if (decision.report) {

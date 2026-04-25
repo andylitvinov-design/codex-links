@@ -10,6 +10,7 @@ function createMockEnv() {
 
   return {
     SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_DISPATCH_TOKEN: "xoxp-human",
     SLACK_CODEX_CHANNEL_ID: "C123",
     SLACK_CODEX_USER_ID: "U999",
     SLACK_ACTOR_PROBE_TIMEOUT_MS: "100",
@@ -46,9 +47,41 @@ function createSlackOkResponse(body) {
   };
 }
 
+test("dispatchCommandIfNeeded falls back when the human Slack dispatch token is missing", async () => {
+  const env = createMockEnv();
+  delete env.SLACK_CODEX_DISPATCH_TOKEN;
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-missing-human-token",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued"
+  }]);
+
+  const command = await getCommandById(env, "cmd-slack-missing-human-token");
+  const result = await dispatchCommandIfNeeded(env, command, env);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.command.status, "failed");
+  assert.equal(result.command.dispatchMode, "slack-codex-cloud");
+  assert.equal(result.command.actualExecutor, "cloud-via-slack");
+  assert.equal(result.command.slackDispatchAttempted, false);
+  assert.match(result.command.errorMessage, /SLACK_CODEX_DISPATCH_TOKEN/);
+});
+
 test("dispatchCommandIfNeeded falls back when the actor probe is unacknowledged", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();
+  const authByMethod = new Map();
 
   await writeCommands(env, [{
     id: "cmd-slack-invalid-actor",
@@ -66,7 +99,11 @@ test("dispatchCommandIfNeeded falls back when the actor probe is unacknowledged"
   }]);
 
   const originalFetch = global.fetch;
-  global.fetch = async (url) => {
+  global.fetch = async (url, options = {}) => {
+    const method = String(url).split("/api/").at(1) || String(url);
+    const authorization = String(options?.headers?.authorization || options?.headers?.Authorization || "");
+    authByMethod.set(method, authorization);
+
     if (String(url).includes("/api/auth.test")) {
       return createSlackOkResponse({ user_id: "UBOT" });
     }

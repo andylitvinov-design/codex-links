@@ -146,6 +146,7 @@ Slack cloud secrets:
 
 ```bash
 npx wrangler pages secret put SLACK_BOT_TOKEN --project-name codex-links
+npx wrangler pages secret put SLACK_CODEX_DISPATCH_TOKEN --project-name codex-links
 npx wrangler pages secret put SLACK_SIGNING_SECRET --project-name codex-links
 npx wrangler pages secret put SLACK_CODEX_CHANNEL_ID --project-name codex-links
 npx wrangler pages secret put SLACK_CODEX_USER_ID --project-name codex-links
@@ -157,6 +158,7 @@ Recommended values:
 - `COMMAND_DISPATCH_MODE=direct-openai` only when you explicitly want direct OpenAI as default
 - Keep `OPENAI_API_KEY` only in the Pages environment when direct mode is needed
 - Slack variables are the default production route
+- `SLACK_CODEX_DISPATCH_TOKEN` should be a Slack user token for the linked ChatGPT/Codex user. OpenAI Codex does not accept Codex tasks sent by the `Codex Links` bot actor, so the route uses this token for outgoing `@Codex` messages and photo uploads while keeping `SLACK_BOT_TOKEN` for reads/events.
 
 ## Cloud Setup
 
@@ -184,6 +186,7 @@ Operational contract for `cloud-via-slack`:
 - `SLACK_CODEX_USER_ID` must point to the real Slack worker user, not the `Codex Links` app bot user returned by `auth.test`
 - When `SLACK_CODEX_USER_ID` is set, dispatch mentions that exact user as `<@SLACK_CODEX_USER_ID>`; `SLACK_CODEX_MENTION` is only a fallback for legacy installs.
 - For the Slack cloud route, install the separate [OpenAI Codex Slack app](https://slack.com/marketplace/A09F5C369E3-openai-codex) in the target workspace first. After installation, use that app's `@Codex` bot/user ID for `SLACK_CODEX_USER_ID`; do not use the `Codex Links` sender app ID.
+- Set `SLACK_CODEX_DISPATCH_TOKEN` to a Slack user token for the human ChatGPT/Codex account linked to that workspace; bot-originated messages from `Codex Links` trigger the OpenAI Codex "connect your ChatGPT Codex account" prompt instead of starting work.
 - Optional: set `SLACK_ACTOR_PROBE_COOLDOWN_MS=30000` to suppress repeated live actor probes during temporary Slack/Codex disconnects.
 - the local launchd agents in this repo cover only `local-bridge` and `claude-bridge`
 - the Slack/Codex cloud worker is external to this repo; if it stops replying, the route will dispatch to Slack and then fall back to bridge

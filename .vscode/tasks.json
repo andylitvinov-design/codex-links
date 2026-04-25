@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Cloud Sync (github)",
+      "type": "shell",
+      "command": "npm run cloud:sync -- \"${input:syncMessage}\"",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "syncMessage",
+      "type": "promptString",
+      "description": "Commit message for Cloud Sync",
+      "default": "chore: sync from Cloud Code"
+    }
+  ]
+}

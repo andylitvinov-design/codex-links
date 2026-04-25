@@ -9,6 +9,7 @@ function createMockEnv() {
 
   return {
     SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_DISPATCH_TOKEN: "xoxp-human",
     SLACK_CODEX_CHANNEL_ID: "C123",
     SLACK_CODEX_USER_ID: "U999",
     SLACK_ACTOR_PROBE_TIMEOUT_MS: "100",

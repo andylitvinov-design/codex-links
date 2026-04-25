@@ -10,6 +10,11 @@ features:
 
 oauth_config:
   scopes:
+    user:
+      - chat:write
+      - files:write
+      - channels:read
+      - groups:read
     bot:
       - chat:write
       - files:write

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { computeMetricChanges, extractDashboardSnapshots, buildReportPayload, formatReportDateInToronoto } from "./lib/dashboard-diff.mjs";
+import { computeMetricChanges, extractDashboardSnapshots, buildReportPayload, formatReportDateInToronto } from "./lib/dashboard-diff.mjs";
 
 const defaultDir = "./dashboard-snapshots";
 const endpointDefault = "https://codex-links.pages.dev";
@@ -34,14 +34,14 @@ function readNumeric(value, fallback = 0) {
 function parseReportDateArg(rawValue) {
   const value = String(rawValue || "").trim();
   if (!value) {
-    return formatReportDateInToronoto(new Date());
+    return formatReportDateInToronto(new Date());
   }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return value;
   }
 
-  return formatReportDateInToronoto(new Date(value));
+  return formatReportDateInToronto(new Date(value));
 }
 
 async function loadDashboardSnapshots(snapshotDir) {

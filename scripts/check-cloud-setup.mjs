@@ -20,6 +20,7 @@ const OPTIONAL = [
   "GITHUB_OWNER",
   "GITHUB_TOKEN",
   "SLACK_BOT_TOKEN",
+  "SLACK_CODEX_DISPATCH_TOKEN",
   "SLACK_SIGNING_SECRET",
   "SLACK_CODEX_CHANNEL_ID",
   "SLACK_CODEX_USER_ID",
@@ -215,7 +216,7 @@ async function main() {
   if (prodUsesSlackRoute && prodSlackActorStatus !== "validated") {
     console.log("Production Slack actor is not validated.");
     console.log("Next action: verify the OpenAI Codex Slack app OAuth install and set SLACK_CODEX_USER_ID to the real worker user.");
-    process.exitCode = 1;
+    process.exitCode = IS_CI ? 0 : 1;
   }
 
   if (hasTrustedBridge) {

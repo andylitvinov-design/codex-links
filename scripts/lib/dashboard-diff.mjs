@@ -30,7 +30,7 @@ function formatWindow(dateObj) {
     : "";
 }
 
-export function formatReportDateInToronoto(date = new Date()) {
+export function formatReportDateInToronto(date = new Date()) {
   try {
     return new Intl.DateTimeFormat("en-CA", {
       timeZone: TARGET_TIMEZONE,
@@ -42,6 +42,8 @@ export function formatReportDateInToronoto(date = new Date()) {
     return formatDateKey(date);
   }
 }
+
+export const formatReportDateInToronoto = formatReportDateInToronto;
 
 export function formatDateKey(date = new Date()) {
   return `${date.toISOString().slice(0, 4)}-${date.toISOString().slice(5, 7)}-${date.toISOString().slice(8, 10)}`;

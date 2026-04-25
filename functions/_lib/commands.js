@@ -2244,7 +2244,7 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
 
   if (!hasFirstAck) {
     if (hasUploadedSlackPhoto) {
-      if (!isOlderThan(photoReplyObservedAt, firstAckTimeoutMs)) {
+      if (!isOlderThan(photoReplyObservedAt, resultTimeoutMs)) {
         if (
           status === "processing"
           && String(command.progressStage || "").trim() === "waiting-slack-photo-reply"
@@ -2267,19 +2267,19 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
         };
       }
 
-      const photoReplyTimeoutDetail = "Slack thread and photo upload succeeded, but no cloud acknowledgement or reply was observed within the Slack photo first-ack window.";
+      const photoReplyTimeoutDetail = "Slack thread and photo upload succeeded, but no cloud acknowledgement or reply was observed within the Slack photo result window.";
 
       if (fallbackAllowed) {
         return createFallbackState(command, fallbackDispatchMode, nowIso, {
           progressStage: fallbackStage,
-          timeoutPhase: "first-ack-timeout",
-          fallbackReason: "cloud via Slack photo acknowledgement timed out after upload",
-          lastDiagnosticCode: "slack_photo_ack_timeout",
+          timeoutPhase: "result-timeout",
+          fallbackReason: "cloud via Slack photo reply timed out after upload",
+          lastDiagnosticCode: "slack_photo_reply_timeout",
           lastDiagnosticDetail: photoReplyTimeoutDetail,
           errorMessage: stringifyCommandError({
             code: fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback_to_claude" : "fallback_to_bridge",
             stage: fallbackStage,
-            message: `Cloud via Slack photo acknowledgement timed out after upload. Switched to ${fallbackLabel}.`,
+            message: `Cloud via Slack photo reply timed out after upload. Switched to ${fallbackLabel}.`,
             detail: photoReplyTimeoutDetail,
             fallback: fallbackRoute
           })
@@ -2287,14 +2287,14 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
       }
 
       return createFailedMaintenanceState(command, nowIso, {
-        timeoutPhase: "first-ack-timeout",
-        lastDiagnosticCode: "slack_photo_ack_timeout",
+        timeoutPhase: "result-timeout",
+        lastDiagnosticCode: "slack_photo_reply_timeout",
         lastDiagnosticDetail: photoReplyTimeoutDetail,
         actualExecutor: EXECUTOR_ROUTE_CLOUD_SLACK,
         errorMessage: stringifyCommandError({
-          code: "slack_photo_ack_timeout",
-          stage: "slack-photo-ack-timeout",
-          message: "Cloud via Slack photo acknowledgement timed out after upload.",
+          code: "slack_photo_reply_timeout",
+          stage: "slack-photo-reply-timeout",
+          message: "Cloud via Slack photo reply timed out after upload.",
           detail: photoReplyTimeoutDetail
         })
       });

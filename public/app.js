@@ -25,6 +25,17 @@ const state = {
   answerCloseTimer: null,
   hardReloading: false,
   hasLoadedMessagesOnce: false,
+  timelineSignalsInitialized: false,
+  timelineSeenIds: {
+    dialog: [],
+    notifications: [],
+    reports: []
+  },
+  timelineUnreadCounts: {
+    dialog: 0,
+    notifications: 0,
+    reports: 0
+  },
   audioUnlocked: false,
   audioContext: null,
   replySoundGain: null,
@@ -129,6 +140,22 @@ function removeCookie(name) {
   document.cookie = cookie.join("; ");
 }
 
+function normalizeTimelineSeenIds(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalizeList = (items) => [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .slice(-300)
+  )];
+
+  return {
+    dialog: normalizeList(source.dialog),
+    notifications: normalizeList(source.notifications),
+    reports: normalizeList(source.reports)
+  };
+}
+
 const storage = {
   get clientId() {
     let value = safeLocalStorageGet("codex-links-client-id");
@@ -206,6 +233,24 @@ const storage = {
     const normalized = value === "notifications" || value === "reports" ? value : "dialog";
     safeLocalStorageSet("codex-links-active-timeline-tab", normalized);
     writeCookie("codex-links-active-timeline-tab", normalized);
+  },
+
+  get timelineSeenIds() {
+    const raw = safeLocalStorageGet("codex-links-timeline-seen-ids") ?? readCookie("codex-links-timeline-seen-ids");
+
+    try {
+      const parsed = JSON.parse(raw || "{}");
+      return normalizeTimelineSeenIds(parsed);
+    } catch {
+      return normalizeTimelineSeenIds({});
+    }
+  },
+
+  set timelineSeenIds(value) {
+    const normalized = normalizeTimelineSeenIds(value);
+    const serialized = JSON.stringify(normalized);
+    safeLocalStorageSet("codex-links-timeline-seen-ids", serialized);
+    writeCookie("codex-links-timeline-seen-ids", serialized);
   },
 
   get dispatchModePreference() {
@@ -1522,6 +1567,60 @@ function getCommandLifecycleState(command) {
 
 function getCommandDeliveryStatus(command) {
   const status = String(command?.status || "").trim().toLowerCase();
+  const deliveryStatus = String(command?.deliveryStatus || "").trim().toLowerCase();
+  const productionUrl = String(command?.productionUrl || command?.deploy?.productionUrl || "").trim();
+  const prUrl = String(command?.prUrl || "").trim();
+
+  if (deliveryStatus === "production-verified") {
+    return {
+      tone: "success",
+      text: productionUrl ? `Production verified · ${productionUrl}` : "Production verified"
+    };
+  }
+
+  if (deliveryStatus === "mirrored") {
+    return {
+      tone: "success",
+      text: "Отчёт Cloud сохранён в Codex Desktop"
+    };
+  }
+
+  if (deliveryStatus === "blocked" || deliveryStatus === "setup-needed") {
+    return {
+      tone: "error",
+      text: deliveryStatus === "setup-needed"
+        ? "Нужны deploy metadata перед production cloud-задачей"
+        : (getCommandDiagnosticMessage(command) || "Cloud delivery заблокирован, нужен ручной контроль")
+    };
+  }
+
+  if (deliveryStatus === "fallback-running") {
+    return {
+      tone: "queued",
+      text: "Cloud delivery завис, local bridge fallback запущен"
+    };
+  }
+
+  if (deliveryStatus === "merged") {
+    return {
+      tone: "delivery",
+      text: "PR merged, проверяю production"
+    };
+  }
+
+  if (deliveryStatus === "pr-ready") {
+    return {
+      tone: "delivery",
+      text: prUrl ? `PR готов, жду merge/deploy · ${prUrl}` : "PR готов, жду merge/deploy"
+    };
+  }
+
+  if (deliveryStatus === "cloud-running") {
+    return {
+      tone: "delivery",
+      text: "Cloud выполняет production delivery"
+    };
+  }
 
   if (status === "answered" || status === "acked" || hasTerminalAssistantReply(command?.id, command)) {
     return null;
@@ -2433,10 +2532,69 @@ function getReleaseNotificationEntry() {
   };
 }
 
+function setTimelineTabUnreadSignal(button, count) {
+  if (!button) {
+    return;
+  }
+
+  const unreadCount = Math.max(0, Number(count) || 0);
+  button.classList.toggle("has-unread", unreadCount > 0);
+
+  if (unreadCount > 0) {
+    button.dataset.unreadCount = unreadCount > 99 ? "99+" : String(unreadCount);
+    button.setAttribute("aria-label", `${button.textContent.trim()}: ${unreadCount} новых`);
+    return;
+  }
+
+  delete button.dataset.unreadCount;
+  button.removeAttribute("aria-label");
+}
+
 function renderTimelineTabButtons() {
   timelineTabDialog?.classList.toggle("is-active", state.activeTimelineTab === "dialog");
   timelineTabNotifications?.classList.toggle("is-active", state.activeTimelineTab === "notifications");
   timelineTabReports?.classList.toggle("is-active", state.activeTimelineTab === "reports");
+  setTimelineTabUnreadSignal(timelineTabDialog, state.timelineUnreadCounts.dialog);
+  setTimelineTabUnreadSignal(timelineTabNotifications, state.timelineUnreadCounts.notifications);
+  setTimelineTabUnreadSignal(timelineTabReports, state.timelineUnreadCounts.reports);
+}
+
+function getTimelineItemIds(items) {
+  return [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item?.id || "").trim())
+      .filter(Boolean)
+  )];
+}
+
+function updateTimelineSignals(itemsByTab) {
+  const tabs = ["dialog", "notifications", "reports"];
+  const nextSeen = normalizeTimelineSeenIds(state.timelineSeenIds);
+  const nextUnread = { dialog: 0, notifications: 0, reports: 0 };
+
+  tabs.forEach((tab) => {
+    const ids = getTimelineItemIds(itemsByTab?.[tab]);
+    const seenSet = new Set(nextSeen[tab]);
+
+    if (!state.timelineSignalsInitialized && seenSet.size === 0) {
+      ids.forEach((id) => seenSet.add(id));
+    }
+
+    if (state.activeTimelineTab === tab) {
+      ids.forEach((id) => seenSet.add(id));
+      nextUnread[tab] = 0;
+    } else {
+      nextUnread[tab] = ids.filter((id) => !seenSet.has(id)).length;
+    }
+
+    nextSeen[tab] = [...seenSet].slice(-300);
+  });
+
+  state.timelineSignalsInitialized = true;
+  state.timelineSeenIds = nextSeen;
+  state.timelineUnreadCounts = nextUnread;
+  storage.timelineSeenIds = nextSeen;
+  renderTimelineTabButtons();
 }
 
 function renderAssistantReplyMarkup(replyEntry) {
@@ -2756,6 +2914,13 @@ function renderCommands() {
       })
       .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || ""))
   )];
+
+  updateTimelineSignals({
+    dialog: timelineItems,
+    notifications: notificationItems,
+    reports: reportItems
+  });
+
   const activeItems = state.activeTimelineTab === "notifications"
     ? notificationItems
     : state.activeTimelineTab === "reports"
@@ -2863,7 +3028,7 @@ function renderCommands() {
       const text = String(command?.text || "").trim() || (command?.photo ? "Фото" : "Сообщение без текста");
       const hasPhoto = Boolean(command?.photo);
       const hasReplies = Array.isArray(entry.replies) && entry.replies.length > 0;
-      const deliveryStatus = hasReplies ? null : getCommandDeliveryStatus(command);
+      const deliveryStatus = getCommandDeliveryStatus(command);
       const failureMessage = getCommandFailureMessage(command);
       const repliesMarkup = (entry.replies || []).map((replyEntry) => renderAssistantReplyMarkup(replyEntry)).join("");
 
@@ -2891,7 +3056,7 @@ function renderCommands() {
     const hasReplies = Array.isArray(entry.replies) && entry.replies.length > 0;
     const deliveryStatus = isAssistant
       ? null
-      : (hasReplies ? null : (getCommandDeliveryStatus(linkedCommand) || getFallbackMessageDeliveryStatus(message?.commandId)));
+      : (getCommandDeliveryStatus(linkedCommand) || (hasReplies ? null : getFallbackMessageDeliveryStatus(message?.commandId)));
     const failureMessage = isAssistant ? "" : getCommandFailureMessage(linkedCommand);
     const body = isAssistant
       ? renderAssistantReplyMarkup(entry)
@@ -3282,6 +3447,16 @@ function playReplySound() {
   }
 }
 
+function queueReplySounds(count) {
+  const soundCount = Math.max(0, Number(count) || 0);
+
+  for (let index = 0; index < soundCount; index += 1) {
+    window.setTimeout(() => {
+      playReplySound();
+    }, index * 420);
+  }
+}
+
 function renderDispatchModeUi() {
   const activeDispatchMode = getActiveDispatchMode();
   const isCloud = activeDispatchMode === "cloud";
@@ -3663,20 +3838,29 @@ function buildOptimisticUserMessage(command) {
   };
 }
 
-function noteNewMessages(previousMessages, nextMessages) {
-  const previousCodexReplyIds = new Set(
+function noteNewDeliveryItems(previousMessages, nextMessages, previousReports, nextReports) {
+  const previousSoundMessageIds = new Set(
     previousMessages
-      .filter((message) => isCodexDialogMessage(message))
+      .filter((message) => isCodexDialogMessage(message) || isNotificationEntry(message))
       .map((message) => String(message.id || "").trim())
       .filter(Boolean)
   );
+  const previousReportIds = new Set(
+    (Array.isArray(previousReports) ? previousReports : [])
+      .map((report) => String(report?.report_id || "").trim())
+      .filter(Boolean)
+  );
 
-  const hasNewCodexReply = state.hasLoadedMessagesOnce && nextMessages.some((message) => (
-    isCodexDialogMessage(message) && !previousCodexReplyIds.has(String(message.id || "").trim())
-  ));
+  const newMessageSoundCount = (Array.isArray(nextMessages) ? nextMessages : []).filter((message) => (
+    (isCodexDialogMessage(message) || isNotificationEntry(message))
+    && !previousSoundMessageIds.has(String(message.id || "").trim())
+  )).length;
+  const newReportSoundCount = (Array.isArray(nextReports) ? nextReports : []).filter((report) => (
+    !previousReportIds.has(String(report?.report_id || "").trim())
+  )).length;
 
-  if (hasNewCodexReply) {
-    playReplySound();
+  if (state.hasLoadedMessagesOnce) {
+    queueReplySounds(newMessageSoundCount + newReportSoundCount);
   }
 
   state.hasLoadedMessagesOnce = true;
@@ -3708,11 +3892,12 @@ async function fetchDeliverySnapshot(options = {}) {
 
 function applyDeliverySnapshot(snapshot) {
   const previousMessages = [...state.messages];
+  const previousReports = [...state.reports];
 
   mergeCommandCollection(snapshot?.commands);
   mergeMessageCollection(snapshot?.messages);
   mergeReportCollection(snapshot?.reports);
-  noteNewMessages(previousMessages, state.messages);
+  noteNewDeliveryItems(previousMessages, state.messages, previousReports, state.reports);
 
   const status = snapshot?.status || {};
   state.deliveryStatus = status && typeof status === "object" ? status : null;
@@ -4257,6 +4442,7 @@ async function boot() {
   state.dispatchMode = storage.dispatchModePreference;
   state.cloudRoute = storage.cloudRoutePreference;
   state.activeTimelineTab = storage.activeTimelineTab;
+  state.timelineSeenIds = storage.timelineSeenIds;
   renderTimelineTabButtons();
 
   if (commandInput) {

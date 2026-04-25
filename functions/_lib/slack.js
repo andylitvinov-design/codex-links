@@ -52,6 +52,10 @@ function buildSlackAuthHeaders(token, headers = {}) {
   };
 }
 
+function resolveSlackDispatchToken(env) {
+  return normalizeText(env?.SLACK_CODEX_DISPATCH_TOKEN);
+}
+
 function normalizeSlackQueryTs(rawValue) {
   const value = normalizeText(rawValue);
 
@@ -526,8 +530,8 @@ export async function fetchSlackThreadReplies(env, channel, threadTs, options = 
       ts: normalizeText(message?.ts),
       threadTs: normalizeText(message?.thread_ts || message?.ts),
       text: extractSlackMessageText(message),
-      user: normalizeText(message?.user),
-      botId: normalizeText(message?.bot_id),
+      user: normalizeText(message?.user || message?.bot_profile?.user_id),
+      botId: normalizeText(message?.bot_id || message?.botId),
       subtype: normalizeText(message?.subtype)
     }));
 }
@@ -555,8 +559,8 @@ export async function fetchSlackChannelMessages(env, channel, options = {}) {
     ts: normalizeText(message?.ts),
     threadTs: normalizeText(message?.thread_ts || message?.ts),
     text: extractSlackMessageText(message),
-    user: normalizeText(message?.user),
-    botId: normalizeText(message?.bot_id),
+    user: normalizeText(message?.user || message?.bot_profile?.user_id),
+    botId: normalizeText(message?.bot_id || message?.botId),
     subtype: normalizeText(message?.subtype)
   }));
 }
@@ -894,18 +898,19 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
 }
 
 export async function postSlackCommand(env, command, mention) {
-  const token = normalizeText(env?.SLACK_BOT_TOKEN);
+  const readToken = normalizeText(env?.SLACK_BOT_TOKEN);
+  const dispatchToken = resolveSlackDispatchToken(env);
   const channel = normalizeText(env?.SLACK_CODEX_CHANNEL_ID);
   const targetUserId = normalizeText(env?.SLACK_CODEX_USER_ID);
 
-  if (!token || !channel) {
+  if (!readToken || !dispatchToken || !channel) {
     throw withCommandError(
       new Error("Slack Codex dispatch is not configured."),
       {
         code: "slack_dispatch_failed",
         stage: "slack-dispatch-failed",
         message: "Slack Codex dispatch is not configured.",
-        detail: "Missing SLACK_BOT_TOKEN or SLACK_CODEX_CHANNEL_ID.",
+        detail: "Missing SLACK_BOT_TOKEN, SLACK_CODEX_DISPATCH_TOKEN, or SLACK_CODEX_CHANNEL_ID.",
         fallback: "local-bridge"
       }
     );
@@ -934,7 +939,7 @@ export async function postSlackCommand(env, command, mention) {
   }, resolvedCodexThreadId);
   const response = await fetchWithTimeout("https://slack.com/api/chat.postMessage", {
     method: "POST",
-    headers: buildSlackHeaders(token),
+    headers: buildSlackHeaders(dispatchToken),
     body: JSON.stringify({
       channel,
       text,
@@ -964,9 +969,9 @@ export async function postSlackCommand(env, command, mention) {
 
   if (command?.photo) {
     try {
-      uploaded = await uploadSlackPhotoToThread(token, resolvedChannel, resolvedThreadTs, command.photo, { env });
+      uploaded = await uploadSlackPhotoToThread(dispatchToken, resolvedChannel, resolvedThreadTs, command.photo, { env });
       await postSlackThreadNudge(
-        token,
+        dispatchToken,
         resolvedChannel,
         resolvedThreadTs,
         [
@@ -1188,6 +1193,18 @@ export function classifySlackReply(text) {
     };
   }
 
+  if (
+    /\bconnect to your chatgpt codex account\b/i.test(value)
+    || /\bafter connecting, tag codex again to continue\b/i.test(value)
+  ) {
+    return {
+      status: "failed",
+      progressStage: "codex-account-not-connected",
+      prUrl,
+      branchName: ""
+    };
+  }
+
   if (isIgnorableSlackReplyText(value)) {
     return {
       status: "processing",
@@ -1257,7 +1274,7 @@ export function isLikelyCodexSlackActor(runtimeConfig, event, options = {}) {
   const targetUserId = normalizeText(runtimeConfig?.SLACK_CODEX_USER_ID);
   const userId = normalizeText(event?.user);
   const subtype = normalizeText(event?.subtype);
-  const botId = normalizeText(event?.bot_id);
+  const botId = normalizeText(event?.bot_id || event?.botId);
   const candidateCount = Number(options.candidateCount || 0);
 
   if (targetUserId && userId === targetUserId) {

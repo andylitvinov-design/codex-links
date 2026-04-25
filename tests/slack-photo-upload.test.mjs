@@ -6,6 +6,7 @@ import { postSlackCommand } from "../functions/_lib/slack.js";
 test("postSlackCommand uploads attached photos into the original Slack thread", async () => {
   const env = {
     SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_DISPATCH_TOKEN: "xoxp-human",
     SLACK_CODEX_CHANNEL_ID: "C123",
     SLACK_CODEX_USER_ID: "U999",
     SLACK_ACTOR_PROBE_TIMEOUT_MS: "100",
@@ -37,7 +38,8 @@ test("postSlackCommand uploads attached photos into the original Slack thread", 
     requests.push({
       url: String(url),
       method: String(options.method || "GET"),
-      body: options.body
+      body: options.body,
+      authorization: String(options?.headers?.authorization || options?.headers?.Authorization || "")
     });
 
     if (String(url).includes("/api/auth.test")) {
@@ -152,6 +154,12 @@ test("postSlackCommand uploads attached photos into the original Slack thread", 
 
   const completeUploadRequest = requests.find((request) => request.url.includes("/api/files.completeUploadExternal"));
   assert.ok(completeUploadRequest, "expected files.completeUploadExternal request");
+  const dispatchRequest = requests.find((request) => request.url.includes("/api/chat.postMessage"));
+  const uploadUrlRequest = requests.find((request) => request.url.includes("/api/files.getUploadURLExternal"));
+  const binaryUploadRequest = requests.find((request) => request.url === "https://files.slack.test/upload");
+  assert.equal(dispatchRequest?.authorization, "Bearer xoxp-human");
+  assert.equal(uploadUrlRequest?.authorization, "Bearer xoxp-human");
+  assert.equal(binaryUploadRequest?.authorization, "Bearer xoxp-human");
 
   const body = new URLSearchParams(String(completeUploadRequest.body || ""));
   assert.equal(body.get("channel_id"), "C123");
@@ -161,6 +169,7 @@ test("postSlackCommand uploads attached photos into the original Slack thread", 
 test("postSlackCommand retries photo upload before succeeding", async () => {
   const env = {
     SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_DISPATCH_TOKEN: "xoxp-human",
     SLACK_CODEX_CHANNEL_ID: "C123",
     SLACK_CODEX_USER_ID: "U999",
     SLACK_API_TIMEOUT_MS: "15000",
@@ -276,6 +285,7 @@ test("postSlackCommand retries photo upload before succeeding", async () => {
 test("postSlackCommand keeps the Slack thread alive when photo upload fails", async () => {
   const env = {
     SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_DISPATCH_TOKEN: "xoxp-human",
     SLACK_CODEX_CHANNEL_ID: "C123",
     SLACK_CODEX_USER_ID: "U999",
     SLACK_API_TIMEOUT_MS: "15000",

@@ -65,3 +65,28 @@ test("command dispatch resolution keeps ezohata_ads on its dedicated repository"
   assert.equal(result.value.targetRepo, "andylitvinov-design/ezohata_ads");
   assert.equal(result.value.targetRepoUrl, "https://github.com/andylitvinov-design/ezohata_ads");
 });
+
+test("links exposes deploy metadata for production-verifiable cloud tasks", () => {
+  const result = resolveProjectDispatchTarget({
+    threadId: "links",
+    dispatchMode: "slack-codex-cloud",
+    text: "fix the production site"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value.productionVerifiable, true);
+  assert.equal(result.value.deploy.productionUrl, "https://codex-links.pages.dev/");
+  assert.equal(result.value.deploy.productionBranch, "main");
+});
+
+test("production-changing cloud tasks require deploy metadata", () => {
+  const result = resolveProjectDispatchTarget({
+    threadId: "ezohata_ads",
+    dispatchMode: "slack-codex-cloud",
+    text: "fix the production site and deploy it"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "setup-needed");
+  assert.match(result.error, /needs deploy metadata/);
+});
