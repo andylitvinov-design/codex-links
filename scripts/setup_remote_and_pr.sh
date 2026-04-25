@@ -185,6 +185,16 @@ EOF
   printf '%s\n' "$pr_url"
 }
 
+commit_deployment_log_if_needed() {
+  local branch="$1"
+
+  if ! git diff --quiet -- "$DEPLOYMENTS_LOG"; then
+    git add "$DEPLOYMENTS_LOG"
+    git commit -m "chore: log auto-sync result"
+    git push -u origin "$branch"
+  fi
+}
+
 main() {
   setup_askpass
   ensure_origin
@@ -208,9 +218,11 @@ main() {
   pr_url="$(create_or_find_pr "$branch")"
   if [ -n "$pr_url" ]; then
     append_deployment "success" "$branch" "$pr_url" "push and PR creation confirmed"
+    commit_deployment_log_if_needed "$branch"
     echo "PR_URL=$pr_url"
   else
     append_deployment "success" "$branch" "n/a" "push confirmed; gh unavailable or not authenticated for PR creation"
+    commit_deployment_log_if_needed "$branch"
     echo "[auto-sync] push confirmed; create PR manually for branch $branch"
   fi
 }
