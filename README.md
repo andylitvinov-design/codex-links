@@ -138,7 +138,6 @@ Set these in Cloudflare Pages for project `codex-links`:
 
 ```bash
 npx wrangler pages secret put LINKS_WRITE_TOKEN --project-name codex-links
-npx wrangler pages secret put OPENAI_API_KEY --project-name codex-links
 npx wrangler pages secret put COMMAND_DISPATCH_MODE --project-name codex-links
 ```
 
@@ -156,7 +155,7 @@ Recommended values:
 
 - `COMMAND_DISPATCH_MODE=cloud-via-slack`
 - `COMMAND_DISPATCH_MODE=direct-openai` only when you explicitly want direct OpenAI as default
-- Keep `OPENAI_API_KEY` only in the Pages environment when direct mode is needed
+- `OPENAI_API_KEY` is optional and only needed for the direct OpenAI API route; the free/default `cloud-via-slack` route does not require it
 - Slack variables are the default production route
 - `SLACK_CODEX_DISPATCH_TOKEN` should be a Slack user token for the linked ChatGPT/Codex user. OpenAI Codex does not accept Codex tasks sent by the `Codex Links` bot actor, so the route uses this token for outgoing `@Codex` messages and photo uploads while keeping `SLACK_BOT_TOKEN` for reads/events.
 
