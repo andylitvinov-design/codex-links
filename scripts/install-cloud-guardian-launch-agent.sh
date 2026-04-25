@@ -4,9 +4,15 @@ set -euo pipefail
 ROOT="/Users/andriilitvinov/projects/MYPROJECTS/links"
 PLIST_PATH="${HOME}/Library/LaunchAgents/com.andriilitvinov.codex-links-cloud-guardian.plist"
 RUN_SCRIPT="${ROOT}/scripts/run-cloud-guardian.mjs"
+NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
 
 if [[ -z "${LINKS_BASE_URL:-}" || -z "${LINKS_WRITE_TOKEN:-}" ]]; then
   echo "Set LINKS_BASE_URL and LINKS_WRITE_TOKEN before installing the cloud guardian launch agent." >&2
+  exit 1
+fi
+
+if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
+  echo "Set NODE_BIN to an executable Node.js path before installing the cloud guardian launch agent." >&2
   exit 1
 fi
 
@@ -21,8 +27,7 @@ cat > "${PLIST_PATH}" <<PLIST
   <string>com.andriilitvinov.codex-links-cloud-guardian</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/env</string>
-    <string>node</string>
+    <string>${NODE_BIN}</string>
     <string>${RUN_SCRIPT}</string>
   </array>
   <key>WorkingDirectory</key>

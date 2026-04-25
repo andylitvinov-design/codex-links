@@ -39,6 +39,14 @@ for key in "${required_keys[@]}"; do
   printf "%s" "$value" | npx wrangler pages secret put "$key" --project-name "$PROJECT_NAME"
 done
 
+admin_token="$(extract_value ADMIN_TOKEN)"
+if [[ -z "$admin_token" ]]; then
+  admin_token="$(extract_value LINKS_WRITE_TOKEN)"
+fi
+
+echo "Uploading ADMIN_TOKEN to Pages project $PROJECT_NAME"
+printf "%s" "$admin_token" | npx wrangler pages secret put ADMIN_TOKEN --project-name "$PROJECT_NAME"
+
 optional_trusted_cloud_keys=(
   CLOUD_BRIDGE_BASE_URL
   CLOUD_BRIDGE_SHARED_SECRET
