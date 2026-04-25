@@ -15,6 +15,7 @@ export async function onRequest(context) {
       const status = await deriveBridgeStatusFromCommands(env);
       return json({
         status,
+        routes: status.routes,
         bridges: {
           localBridge: status.localBridge,
           claudeBridge: status.claudeBridge
@@ -50,6 +51,7 @@ export async function onRequest(context) {
     return json({
       ok: true,
       status,
+      routes: status.routes,
       bridges: {
         localBridge: status.localBridge,
         claudeBridge: status.claudeBridge

@@ -3,6 +3,7 @@ import {
   claimNextCommand,
   COMMAND_TIMEOUTS,
   fallbackCommandToLocalBridge,
+  fallbackCommandToExecutor,
   markCommandAnswered,
   markCommandDispatched,
   markCommandFailed,
@@ -13,6 +14,7 @@ import {
   requeueCommand,
   readCommands,
   rerouteCommandToSlack,
+  resolvePhotoFallbackDispatchMode,
   runCommandMaintenance,
   upsertCommandDispatchState,
   updateCommandProgress,
@@ -79,6 +81,16 @@ function commandHasPhoto(command) {
     || Boolean(command?.photoBytesPresent);
 }
 
+function isRepoChangingRequest(payload) {
+  const text = String(payload?.effectivePrompt || payload?.text || "").trim().toLowerCase();
+
+  if (!text) {
+    return false;
+  }
+
+  return /(^|\b)(fix|update|change|implement|deploy|merge|pull request|pr|production|site|ui|css|html|release|исправ|обнов|измени|сделай|задеплой|деплой|сайт|продакшн)(\b|$)/i.test(text);
+}
+
 function getSlackFirstAckTimeoutMs(command) {
   return commandHasPhoto(command) ? SLACK_PHOTO_FIRST_ACK_TIMEOUT_MS : SLACK_FIRST_ACK_TIMEOUT_MS;
 }
@@ -99,6 +111,7 @@ export function resolveRequestedDispatchMode(payload, runtimeConfig) {
   );
   const requestedDispatchMode = String(payload?.dispatchMode || "").trim().toLowerCase();
   const configuredDispatchMode = getConfiguredDispatchMode(runtimeConfig);
+  const repoChanging = isRepoChangingRequest(payload);
 
   if (requestedDispatchMode === DISPATCH_MODE_LOCAL || requestedExecutor === EXECUTOR_ROUTE_BRIDGE) {
     return DISPATCH_MODE_LOCAL;
@@ -145,6 +158,10 @@ export function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   if (requestedDispatchMode === EXECUTOR_ROUTE_DIRECT_OPENAI || requestedExecutor === EXECUTOR_ROUTE_DIRECT_OPENAI) {
+    if (repoChanging && isSlackDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_SLACK;
+    }
+
     if (isCloudDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_CLOUD;
     }
@@ -157,6 +174,10 @@ export function resolveRequestedDispatchMode(payload, runtimeConfig) {
   }
 
   if (requestedDispatchMode === DISPATCH_MODE_CLOUD) {
+    if (repoChanging && isSlackDispatchConfigured(runtimeConfig)) {
+      return DISPATCH_MODE_SLACK;
+    }
+
     if (hasPhoto && isCloudDispatchConfigured(runtimeConfig)) {
       return DISPATCH_MODE_CLOUD;
     }
@@ -311,7 +332,17 @@ function serializeCommand(command, options = {}) {
     targetRepoUrl: String(command.targetRepoUrl || "").trim(),
     targetContextFiles: Array.isArray(command.targetContextFiles) ? command.targetContextFiles : [],
     targetWorkspacePath: String(command.targetWorkspacePath || "").trim(),
-    targetExecutionMode: String(command.targetExecutionMode || "").trim()
+    targetExecutionMode: String(command.targetExecutionMode || "").trim(),
+    deploy: command.deploy && typeof command.deploy === "object" ? command.deploy : null,
+    productionVerifiable: Boolean(command.productionVerifiable),
+    deliveryStatus: String(command.deliveryStatus || "").trim(),
+    deliveryStatusUpdatedAt: String(command.deliveryStatusUpdatedAt || "").trim(),
+    mergeCommit: String(command.mergeCommit || "").trim(),
+    productionUrl: String(command.productionUrl || "").trim(),
+    productionVerifiedAt: String(command.productionVerifiedAt || "").trim(),
+    desktopMirrorStatus: String(command.desktopMirrorStatus || "").trim(),
+    desktopMirroredAt: String(command.desktopMirroredAt || "").trim(),
+    desktopMirrorThreadId: String(command.desktopMirrorThreadId || "").trim()
   };
 }
 
@@ -412,6 +443,10 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     slackMessageTs: rootTs,
     prUrl: classification.prUrl,
     branchName: classification.branchName,
+    mergeCommit: classification.mergeCommit,
+    productionUrl: classification.productionUrl,
+    productionVerifiedAt: classification.deliveryStatus === "production-verified" ? new Date().toISOString() : "",
+    deliveryStatus: classification.deliveryStatus || (isTerminalReply ? "pr-ready" : "cloud-running"),
     errorMessage: classification.status === "failed" ? latestReply.text : "",
     processingStartedAt: classification.status === "processing" ? new Date().toISOString() : "",
     resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""
@@ -744,6 +779,58 @@ function isPhotoSlackDispatchFailure(command, published) {
   return Boolean(command?.photo) && Boolean(String(published?.photoUploadError || "").trim());
 }
 
+async function fallbackSlackPhotoCommand(env, command, published, commandError) {
+  const fallbackDispatchMode = resolvePhotoFallbackDispatchMode(command, {
+    fallbackToLocal: true,
+    fallbackToClaude: true
+  });
+
+  if (!fallbackDispatchMode) {
+    return markSlackCloudCommandFailed(env, command, commandError);
+  }
+
+  const fallbackRoute = fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "claude-bridge" : "local-bridge";
+  const fallbackStage = fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback-to-claude" : "fallback-to-bridge";
+  const fallbackLabel = fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "Claude bridge" : "local bridge";
+  const detail = String(commandError?.detail || commandError?.message || published?.photoUploadError || "").trim()
+    || "Slack photo upload failed before the command could continue.";
+
+  const fallback = await fallbackCommandToExecutor(env, {
+    id: command.id,
+    dispatchMode: fallbackDispatchMode,
+    progressStage: fallbackStage,
+    timeoutPhase: "first-ack-timeout",
+    fallbackReason: "cloud via Slack photo upload failed",
+    lastDiagnosticCode: "slack_photo_upload_failed",
+    lastDiagnosticDetail: detail,
+    errorMessage: stringifyCommandError({
+      code: fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback_to_claude" : "fallback_to_bridge",
+      stage: fallbackStage,
+      message: `Cloud via Slack photo upload failed. Switched to ${fallbackLabel}.`,
+      detail,
+      fallback: fallbackRoute
+    })
+  });
+
+  await refreshBridgeStatusFromCommands(env, {
+    dispatchMode: fallbackDispatchMode,
+    executorLabel: getDispatchModeLabel(fallbackDispatchMode),
+    bridgeOnline: fallbackDispatchMode === DISPATCH_MODE_LOCAL,
+    lastRunAt: new Date().toISOString(),
+    lastError: detail,
+    ...(fallbackDispatchMode === DISPATCH_MODE_CLAUDE
+      ? {
+          claudeBridge: {
+            online: true,
+            state: "idle"
+          }
+        }
+      : {})
+  });
+
+  return fallback.value || command;
+}
+
 async function answerCloudCommand(env, command, result) {
   const nowIso = new Date().toISOString();
 
@@ -1011,7 +1098,7 @@ export async function dispatchCommandIfNeeded(env, command, runtimeConfig) {
 
       return {
         ok: true,
-        command: await markSlackCloudCommandFailed(env, stagedFailure.value || command, {
+        command: await fallbackSlackPhotoCommand(env, stagedFailure.value || command, published, {
           code: "slack_photo_upload_failed",
           stage: "slack-photo-upload-failed",
           message: "Cloud via Slack photo upload failed.",
@@ -1496,7 +1583,11 @@ export async function onRequest(context) {
       replyIngestedAt: payload?.replyIngestedAt,
       resultAt: payload?.resultAt,
       prUrl: payload?.prUrl,
-      branchName: payload?.branchName
+      branchName: payload?.branchName,
+      mergeCommit: payload?.mergeCommit,
+      productionUrl: payload?.productionUrl,
+      productionVerifiedAt: payload?.productionVerifiedAt,
+      deliveryStatus: payload?.deliveryStatus
     });
 
     if (!answered.ok) {
@@ -1504,6 +1595,82 @@ export async function onRequest(context) {
     }
 
     return json({ ok: true, command: serializeCommand(answered.value, { includePhotoData: true }) });
+  }
+
+  if (action === "delivery-update") {
+    if (!isAuthorized(request, env)) {
+      return json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    const current = await getCommandById(env, payload?.id);
+
+    if (!current) {
+      return json({ error: "Command not found." }, { status: 404 });
+    }
+
+    const updated = await upsertCommandDispatchState(env, {
+      id: payload?.id,
+      status: payload?.status || current.status,
+      progressStage: payload?.progressStage,
+      actualExecutor: payload?.actualExecutor || payload?.actualDispatchMode,
+      prUrl: payload?.prUrl,
+      branchName: payload?.branchName,
+      mergeCommit: payload?.mergeCommit,
+      productionUrl: payload?.productionUrl,
+      productionVerifiedAt: payload?.productionVerifiedAt,
+      deliveryStatus: payload?.deliveryStatus,
+      desktopMirrorStatus: payload?.desktopMirrorStatus,
+      desktopMirroredAt: payload?.desktopMirroredAt,
+      desktopMirrorThreadId: payload?.desktopMirrorThreadId,
+      lastDiagnosticCode: payload?.lastDiagnosticCode,
+      lastDiagnosticDetail: payload?.lastDiagnosticDetail,
+      errorMessage: payload?.errorMessage
+    });
+
+    if (!updated.ok) {
+      return json({ error: updated.error }, { status: 400 });
+    }
+
+    return json({ ok: true, command: serializeCommand(updated.value, { includePhotoData: true }) });
+  }
+
+  if (action === "fallback-local") {
+    if (!isAuthorized(request, env)) {
+      return json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    const current = await getCommandById(env, payload?.id);
+
+    if (!current) {
+      return json({ error: "Command not found." }, { status: 404 });
+    }
+
+    const fallback = await fallbackCommandToLocalBridge(env, {
+      id: current.id,
+      progressStage: payload?.progressStage || "fallback-to-bridge",
+      fallbackReason: payload?.fallbackReason || "cloud guardian requested local bridge fallback",
+      lastDiagnosticCode: payload?.lastDiagnosticCode || "cloud_guardian_fallback",
+      lastDiagnosticDetail: payload?.lastDiagnosticDetail || "Cloud guardian moved this command to local bridge fallback.",
+      errorMessage: payload?.errorMessage,
+      firstAckAt: payload?.firstAckAt,
+      resultAt: payload?.resultAt
+    });
+
+    if (!fallback.ok) {
+      return json({ error: fallback.error }, { status: 400 });
+    }
+
+    const updated = await upsertCommandDispatchState(env, {
+      id: current.id,
+      status: fallback.value?.status || "queued",
+      progressStage: payload?.progressStage || "fallback-to-bridge",
+      deliveryStatus: "fallback-running",
+      lastDiagnosticCode: payload?.lastDiagnosticCode || "cloud_guardian_fallback",
+      lastDiagnosticDetail: payload?.lastDiagnosticDetail || "Cloud guardian moved this command to local bridge fallback.",
+      errorMessage: payload?.errorMessage
+    });
+
+    return json({ ok: true, command: serializeCommand(updated.value || fallback.value, { includePhotoData: true }) });
   }
 
   if (action === "fail") {
@@ -1705,7 +1872,10 @@ export async function onRequest(context) {
   });
 
   if (!manifestTarget.ok) {
-    return json({ error: manifestTarget.error }, { status: 400 });
+    return json({
+      error: manifestTarget.error,
+      code: manifestTarget.code || ""
+    }, { status: 400 });
   }
 
   const requestStartedAt = new Date().toISOString();
@@ -1722,9 +1892,11 @@ export async function onRequest(context) {
     projectLabel: manifestTarget.value.label,
     projectCategory: manifestTarget.value.group,
     targetRepo: manifestTarget.value.targetRepo,
-    targetRepoUrl: manifestTarget.value.targetRepoUrl,
-    targetContextFiles: manifestTarget.value.contextFiles,
-    targetWorkspacePath: manifestTarget.value.workspacePath
+      targetRepoUrl: manifestTarget.value.targetRepoUrl,
+      targetContextFiles: manifestTarget.value.contextFiles,
+      targetWorkspacePath: manifestTarget.value.workspacePath,
+      deploy: manifestTarget.value.deploy,
+      productionVerifiable: manifestTarget.value.productionVerifiable
   });
 
   if (!created.ok) {

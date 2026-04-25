@@ -16,7 +16,6 @@ typeset -a required_keys
 required_keys=(
   LINKS_WRITE_TOKEN
   COMMAND_DISPATCH_MODE
-  OPENAI_API_KEY
   GITHUB_OWNER
   GITHUB_TOKEN
 )
@@ -65,6 +64,10 @@ optional_slack_keys=(
   SLACK_CODEX_USER_ID
   SLACK_CODEX_MENTION
   SLACK_ACTOR_ACTIVITY_FRESHNESS_MS
+  SLACK_ACTOR_LIVE_PROBE
+  SLACK_ACTOR_PROBE_TIMEOUT_MS
+  SLACK_ACTOR_PROBE_POLL_MS
+  SLACK_ACTOR_PROBE_COOLDOWN_MS
 )
 
 for key in "${optional_slack_keys[@]}"; do
@@ -77,6 +80,19 @@ for key in "${optional_slack_keys[@]}"; do
   echo "Uploading optional legacy key $key to Pages project $PROJECT_NAME"
   printf "%s" "$value" | npx wrangler pages secret put "$key" --project-name "$PROJECT_NAME"
 done
+
+openai_api_key="$(extract_value OPENAI_API_KEY)"
+dispatch_mode="$(extract_value COMMAND_DISPATCH_MODE)"
+
+if [[ -n "$openai_api_key" ]]; then
+  echo "Uploading optional direct OpenAI key OPENAI_API_KEY to Pages project $PROJECT_NAME"
+  printf "%s" "$openai_api_key" | npx wrangler pages secret put OPENAI_API_KEY --project-name "$PROJECT_NAME"
+elif [[ "$dispatch_mode" == "direct-openai" || "$dispatch_mode" == "cloud" ]]; then
+  echo "Missing OPENAI_API_KEY in $ENV_FILE for direct OpenAI dispatch mode" >&2
+  exit 1
+else
+  echo "OPENAI_API_KEY not set; direct OpenAI will remain unavailable."
+fi
 
 echo ""
 echo "Secrets uploaded. Verify production mode:"

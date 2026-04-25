@@ -46,7 +46,7 @@ function createSlackOkResponse(body) {
   };
 }
 
-test("dispatchCommandIfNeeded still posts to Slack when the actor probe is unacknowledged but channel membership is valid", async () => {
+test("dispatchCommandIfNeeded falls back when the actor probe is unacknowledged", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();
 
@@ -79,6 +79,86 @@ test("dispatchCommandIfNeeded still posts to Slack when the actor probe is unack
       return createSlackOkResponse({ messages: [] });
     }
 
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-invalid-actor");
+    const result = await dispatchCommandIfNeeded(env, command, env);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.command.status, "queued");
+    assert.equal(result.command.progressStage, "queued");
+    assert.equal(result.command.dispatchMode, "local-bridge");
+    assert.equal(result.command.actualExecutor, "bridge");
+    assert.equal(result.command.lastDiagnosticCode, "codex_target_actor_unverified");
+
+    const storedStatus = await readBridgeStatus(env);
+    assert.notEqual(storedStatus.slackActor?.validationStatus, "validated");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("dispatchCommandIfNeeded requeues manifest-backed Slack photo upload failures to Claude bridge", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-upload-fallback",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "queued",
+    progressStage: "queued",
+    photo: {
+      contentType: "image/png",
+      fileName: "photo.png",
+      size: 4,
+      dataUrl: "data:image/png;base64,AAAAAA=="
+    },
+    photoAttached: true,
+    photoBytesPresent: true,
+    targetRepo: "andylitvinov-design/codex-links",
+    targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
+    targetWorkspacePath: "/workspace/links",
+    targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+    allowClaudeFallback: true
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/auth.test")) {
+      return createSlackOkResponse({ user_id: "UBOT" });
+    }
+
+    if (String(url).includes("/api/conversations.members")) {
+      return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({
+        messages: [
+          { ts: "1712345678.000050", user: "U999", text: "Ready for cloud work." }
+        ]
+      });
+    }
+
+    if (String(url).includes("/api/conversations.replies")) {
+      return createSlackOkResponse({
+        messages: [
+          { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" },
+          { ts: "1712345678.000200", thread_ts: "1712345678.000100", user: "U999", text: "Проверяю." }
+        ]
+      });
+    }
+
     if (String(url).includes("/api/chat.postMessage")) {
       return createSlackOkResponse({
         channel: "C123",
@@ -90,31 +170,29 @@ test("dispatchCommandIfNeeded still posts to Slack when the actor probe is unack
       });
     }
 
-    if (String(url).includes("/api/conversations.replies")) {
-      return createSlackOkResponse({
-        messages: [
-          { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" }
-        ]
-      });
+    if (String(url).includes("/api/files.getUploadURLExternal")) {
+      return {
+        ok: true,
+        async json() {
+          return { ok: false, error: "temporarily_unavailable" };
+        }
+      };
     }
 
     throw new Error(`Unexpected fetch: ${String(url)}`);
   };
 
   try {
-    const command = await getCommandById(env, "cmd-slack-invalid-actor");
+    const command = await getCommandById(env, "cmd-slack-photo-upload-fallback");
     const result = await dispatchCommandIfNeeded(env, command, env);
 
     assert.equal(result.ok, true);
-    assert.equal(result.command.status, "dispatched");
-    assert.equal(result.command.progressStage, "dispatched");
-    assert.equal(result.command.dispatchMode, "slack-codex-cloud");
-    assert.equal(result.command.slackChannelId, "C123");
-    assert.equal(result.command.slackThreadTs, "1712345678.000100");
-
-    const storedStatus = await readBridgeStatus(env);
-    assert.equal(storedStatus.slackActor?.validationStatus, "unverified");
-    assert.equal(storedStatus.slackActor?.configuredUserId, "U999");
+    assert.equal(result.command.status, "queued");
+    assert.equal(result.command.dispatchMode, "claude-bridge");
+    assert.equal(result.command.progressStage, "fallback-to-claude");
+    assert.equal(result.command.lastDiagnosticCode, "slack_photo_upload_failed");
+    assert.equal(result.command.actualExecutor, "claude");
+    assert.match(result.command.errorMessage, /fallback_to_claude/);
   } finally {
     global.fetch = originalFetch;
   }

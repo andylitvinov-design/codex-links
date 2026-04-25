@@ -207,6 +207,10 @@ async function ingestSlackReply(env, command, event, options = {}) {
     slackMessageTs: command.slackMessageTs,
     prUrl: classification.prUrl,
     branchName: classification.branchName,
+    mergeCommit: classification.mergeCommit,
+    productionUrl: classification.productionUrl,
+    productionVerifiedAt: classification.deliveryStatus === "production-verified" ? new Date().toISOString() : "",
+    deliveryStatus: classification.deliveryStatus || (isTerminalReply ? "pr-ready" : "cloud-running"),
     errorMessage: classification.status === "failed" ? text : "",
     processingStartedAt: classification.status === "processing" ? new Date().toISOString() : "",
     resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""

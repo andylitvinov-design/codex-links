@@ -45,7 +45,7 @@ function createSlackOkResponse(body) {
   };
 }
 
-test("dispatchCommandIfNeeded keeps Slack dispatch active when actor probe is unacknowledged but membership is valid", async () => {
+test("dispatchCommandIfNeeded falls back locally when actor probe is unacknowledged but membership is valid", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();
 
@@ -80,25 +80,6 @@ test("dispatchCommandIfNeeded keeps Slack dispatch active when actor probe is un
       return createSlackOkResponse({ messages: [] });
     }
 
-    if (String(url).includes("/api/chat.postMessage")) {
-      return createSlackOkResponse({
-        channel: "C123",
-        ts: "1712345678.000100",
-        message: {
-          ts: "1712345678.000100",
-          thread_ts: "1712345678.000100"
-        }
-      });
-    }
-
-    if (String(url).includes("/api/conversations.replies")) {
-      return createSlackOkResponse({
-        messages: [
-          { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" }
-        ]
-      });
-    }
-
     throw new Error(`Unexpected fetch: ${String(url)}`);
   };
 
@@ -107,17 +88,16 @@ test("dispatchCommandIfNeeded keeps Slack dispatch active when actor probe is un
     const result = await dispatchCommandIfNeeded(env, command, env);
 
     assert.equal(result.ok, true);
-    assert.equal(result.command.status, "dispatched");
-    assert.equal(result.command.progressStage, "dispatched");
-    assert.equal(result.command.dispatchMode, "slack-codex-cloud");
-    assert.equal(result.command.slackChannelId, "C123");
-    assert.equal(result.command.slackThreadTs, "1712345678.000100");
+    assert.equal(result.command.status, "queued");
+    assert.equal(result.command.dispatchMode, "local-bridge");
+    assert.equal(result.command.actualExecutor, "bridge");
+    assert.equal(result.command.lastDiagnosticCode, "codex_target_actor_unverified");
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test("dispatchCommandIfNeeded still dispatches to Slack for cloud-only threads when actor probe is unacknowledged", async () => {
+test("dispatchCommandIfNeeded fails cloud-only threads when actor probe is unacknowledged", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();
 
@@ -150,25 +130,6 @@ test("dispatchCommandIfNeeded still dispatches to Slack for cloud-only threads w
       return createSlackOkResponse({ messages: [] });
     }
 
-    if (String(url).includes("/api/chat.postMessage")) {
-      return createSlackOkResponse({
-        channel: "C123",
-        ts: "1712345678.000100",
-        message: {
-          ts: "1712345678.000100",
-          thread_ts: "1712345678.000100"
-        }
-      });
-    }
-
-    if (String(url).includes("/api/conversations.replies")) {
-      return createSlackOkResponse({
-        messages: [
-          { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" }
-        ]
-      });
-    }
-
     throw new Error(`Unexpected fetch: ${String(url)}`);
   };
 
@@ -177,11 +138,10 @@ test("dispatchCommandIfNeeded still dispatches to Slack for cloud-only threads w
     const result = await dispatchCommandIfNeeded(env, command, env);
 
     assert.equal(result.ok, true);
-    assert.equal(result.command.status, "dispatched");
-    assert.equal(result.command.progressStage, "dispatched");
+    assert.equal(result.command.status, "failed");
+    assert.equal(result.command.progressStage, "failed");
     assert.equal(result.command.dispatchMode, "slack-codex-cloud");
-    assert.equal(result.command.slackChannelId, "C123");
-    assert.equal(result.command.slackThreadTs, "1712345678.000100");
+    assert.equal(result.command.lastDiagnosticCode, "codex_target_actor_unverified");
   } finally {
     global.fetch = originalFetch;
   }

@@ -472,6 +472,44 @@ function normalizeStringArray(rawValue, maxItems = 8, maxLength = 80) {
   )].slice(0, maxItems);
 }
 
+function normalizeDeployConfig(rawValue) {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const platform = normalizeDiagnosticText(source.platform, 80);
+  const productionBranch = normalizeSlackValue(source.productionBranch) || "main";
+  const productionUrl = normalizeUrlValue(source.productionUrl);
+  const smokePath = normalizeDiagnosticText(source.smokePath, 160) || "/";
+  const versionPath = normalizeDiagnosticText(source.versionPath, 160);
+
+  if (!platform && !productionUrl) {
+    return null;
+  }
+
+  return {
+    platform,
+    productionBranch,
+    productionUrl,
+    smokePath,
+    versionPath
+  };
+}
+
+function normalizeDeliveryStatus(rawValue) {
+  const value = normalizeDiagnosticText(rawValue, 80).toLowerCase();
+  const allowed = new Set([
+    "",
+    "cloud-running",
+    "pr-ready",
+    "merged",
+    "production-verified",
+    "blocked",
+    "fallback-running",
+    "setup-needed",
+    "mirrored"
+  ]);
+
+  return allowed.has(value) ? value : "";
+}
+
 function normalizeErrorMessage(rawValue) {
   const value = String(rawValue || "").trim().slice(0, 500);
   const parsed = parseCommandError(value);
@@ -887,6 +925,8 @@ function normalizeStoredCommandEntry(entry) {
     targetRepoUrl: normalizeUrlValue(entry.targetRepoUrl),
     targetContextFiles: normalizeStringArray(entry.targetContextFiles),
     targetWorkspacePath: normalizeWorkspacePathValue(entry.targetWorkspacePath),
+    deploy: normalizeDeployConfig(entry.deploy),
+    productionVerifiable: normalizeBooleanValue(entry.productionVerifiable),
       targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode, dispatchModeToExecutorRoute(entry.dispatchMode)),
       requestedExecutor: normalizeExecutionMode(
         entry.requestedExecutor || entry.requestedMode || entry.targetExecutionMode,
@@ -943,6 +983,14 @@ function normalizeStoredCommandEntry(entry) {
     slackThreadTs: normalizeSlackValue(entry.slackThreadTs),
     prUrl: String(entry.prUrl || "").trim(),
     branchName: normalizeSlackValue(entry.branchName),
+    mergeCommit: normalizeSlackValue(entry.mergeCommit),
+    productionUrl: normalizeUrlValue(entry.productionUrl),
+    productionVerifiedAt: normalizeDateValue(entry.productionVerifiedAt),
+    deliveryStatus: normalizeDeliveryStatus(entry.deliveryStatus),
+    deliveryStatusUpdatedAt: normalizeDateValue(entry.deliveryStatusUpdatedAt),
+    desktopMirrorStatus: normalizeDeliveryStatus(entry.desktopMirrorStatus),
+    desktopMirroredAt: normalizeDateValue(entry.desktopMirroredAt),
+    desktopMirrorThreadId: normalizeSlackValue(entry.desktopMirrorThreadId),
     errorMessage: normalizeErrorMessage(entry.errorMessage),
     dispatchedAt: normalizeDateValue(entry.dispatchedAt),
     completedAt: normalizeDateValue(entry.completedAt),
@@ -1140,6 +1188,8 @@ export function createCommandRecord(input) {
       targetRepoUrl: normalizeUrlValue(input.targetRepoUrl),
       targetContextFiles: normalizeStringArray(input.targetContextFiles),
       targetWorkspacePath: normalizeWorkspacePathValue(input.targetWorkspacePath),
+      deploy: normalizeDeployConfig(input.deploy),
+      productionVerifiable: normalizeBooleanValue(input.productionVerifiable),
       targetExecutionMode: normalizeExecutionMode(
         input.targetExecutionMode,
         dispatchModeToExecutorRoute(normalizeDispatchValue(input.dispatchMode))
@@ -1193,6 +1243,14 @@ export function createCommandRecord(input) {
       slackThreadTs: "",
       prUrl: "",
       branchName: "",
+      mergeCommit: "",
+      productionUrl: "",
+      productionVerifiedAt: "",
+      deliveryStatus: "",
+      deliveryStatusUpdatedAt: "",
+      desktopMirrorStatus: "",
+      desktopMirroredAt: "",
+      desktopMirrorThreadId: "",
       errorMessage: "",
       dispatchedAt: "",
       completedAt: "",
@@ -1455,38 +1513,31 @@ export async function requeueCommand(env, id) {
 }
 
 export async function fallbackCommandToLocalBridge(env, input = {}) {
-  return updateCommand(env, input.id, (command, nowIso) => ({
-    ...command,
-    ...mergeCommandDebugState(command, {
-      actualExecutor: "bridge",
-      fallbackApplied: true,
-      fallbackCount: Math.min(1, Number(command?.fallbackCount || 0) + 1),
-      fallbackReason: input.fallbackReason || command.fallbackReason,
-      timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
-      lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
-      lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail
-    }, DISPATCH_MODE_LOCAL),
-    dispatchMode: DISPATCH_MODE_LOCAL,
-    status: "queued",
-    progressStage: normalizeProgressStage(input.progressStage) || "queued",
-    progressUpdatedAt: nowIso,
-    slackChannelId: "",
-    slackMessageTs: "",
-    slackThreadTs: "",
-    errorMessage: normalizeErrorMessage(input.errorMessage),
-    dispatchedAt: "",
-    firstAckAt: "",
-    resultAt: "",
-    processingStartedAt: "",
-    processingLeaseUntil: "",
-    processorId: "",
-    completedAt: "",
-    dispatchStartedAt: "",
-    slackPostedAt: "",
-    bridgeClaimedAt: "",
-    firstExecutorAckSeenAt: "",
-    firstReplySeenAt: "",
-    replyIngestedAt: ""
+  return fallbackCommandToExecutor(env, {
+    ...input,
+    dispatchMode: DISPATCH_MODE_LOCAL
+  });
+}
+
+export async function fallbackCommandToExecutor(env, input = {}) {
+  const nextDispatchMode = normalizeDispatchValue(input.dispatchMode || input.nextDispatchMode || DISPATCH_MODE_LOCAL);
+
+  return updateCommand(env, input.id, (command, nowIso) => createFallbackState(command, nextDispatchMode, nowIso, {
+    progressStage: normalizeProgressStage(input.progressStage) || (
+      nextDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback-to-claude" : "fallback-to-bridge"
+    ),
+    timeoutPhase: Object.prototype.hasOwnProperty.call(input, "timeoutPhase") ? input.timeoutPhase : command.timeoutPhase,
+    fallbackReason: input.fallbackReason || command.fallbackReason,
+    lastDiagnosticCode: input.lastDiagnosticCode || command.lastDiagnosticCode,
+    lastDiagnosticDetail: input.lastDiagnosticDetail || command.lastDiagnosticDetail,
+    errorMessage: input.errorMessage,
+    actorValidationStartedAt: input.actorValidationStartedAt,
+    actorValidationPassedAt: input.actorValidationPassedAt,
+    actorValidationFailedAt: input.actorValidationFailedAt,
+    actorValidationProbeChannelId: input.actorValidationProbeChannelId,
+    actorValidationProbeMessageTs: input.actorValidationProbeMessageTs,
+    actorValidationProbeThreadTs: input.actorValidationProbeThreadTs,
+    actorValidationPreDispatchFailed: input.actorValidationPreDispatchFailed
   }));
 }
 
@@ -1711,6 +1762,13 @@ export async function markCommandAnswered(env, input = {}) {
       progressUpdatedAt: nowIso,
       prUrl: String(input.prUrl || command.prUrl || "").trim(),
       branchName: normalizeSlackValue(input.branchName || command.branchName),
+      mergeCommit: normalizeSlackValue(input.mergeCommit || command.mergeCommit),
+      productionUrl: normalizeUrlValue(input.productionUrl || command.productionUrl),
+      productionVerifiedAt: normalizeDateValue(input.productionVerifiedAt || command.productionVerifiedAt),
+      deliveryStatus: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus),
+      deliveryStatusUpdatedAt: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus) !== normalizeDeliveryStatus(command.deliveryStatus)
+        ? nowIso
+        : command.deliveryStatusUpdatedAt,
       resultAt: normalizeDateValue(input.resultAt) || nowIso,
       completedAt: normalizeDateValue(input.completedAt) || nowIso,
       errorMessage: ""
@@ -1776,6 +1834,16 @@ export async function upsertCommandDispatchState(env, input = {}) {
     slackThreadTs: normalizeSlackValue(input.slackThreadTs || command.slackThreadTs || command.slackMessageTs),
     prUrl: String(input.prUrl || command.prUrl || "").trim(),
     branchName: normalizeSlackValue(input.branchName || command.branchName),
+    mergeCommit: normalizeSlackValue(input.mergeCommit || command.mergeCommit),
+    productionUrl: normalizeUrlValue(input.productionUrl || command.productionUrl),
+    productionVerifiedAt: normalizeDateValue(input.productionVerifiedAt || command.productionVerifiedAt),
+    deliveryStatus: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus),
+    deliveryStatusUpdatedAt: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus) !== normalizeDeliveryStatus(command.deliveryStatus)
+      ? nowIso
+      : command.deliveryStatusUpdatedAt,
+    desktopMirrorStatus: normalizeDeliveryStatus(input.desktopMirrorStatus || command.desktopMirrorStatus),
+    desktopMirroredAt: normalizeDateValue(input.desktopMirroredAt || command.desktopMirroredAt),
+    desktopMirrorThreadId: normalizeSlackValue(input.desktopMirrorThreadId || command.desktopMirrorThreadId),
     errorMessage: normalizeErrorMessage(input.errorMessage || (nextStatus === "failed" ? command.errorMessage : "")),
     dispatchedAt: normalizeDateValue(input.dispatchedAt || command.dispatchedAt),
     firstAckAt: nextStatus === "processing" || nextStatus === "answered" || nextStatus === "failed"
@@ -1834,6 +1902,37 @@ function canFallbackToClaude(command, options = {}) {
     && Number(command?.fallbackCount || 0) < 1
     && Boolean(command?.allowClaudeFallback)
     && command?.dispatchMode === DISPATCH_MODE_LOCAL;
+}
+
+function hasManifestBackedExecutionContext(command) {
+  const targetRepo = String(command?.targetRepo || "").trim();
+  const targetRepoUrl = String(command?.targetRepoUrl || "").trim();
+  const targetWorkspacePath = String(command?.targetWorkspacePath || "").trim();
+  const targetContextFiles = Array.isArray(command?.targetContextFiles)
+    ? command.targetContextFiles.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+
+  return Boolean(targetRepo) && Boolean(targetWorkspacePath || targetRepoUrl || targetContextFiles.length);
+}
+
+function canFallbackPhotoToClaude(command, options = {}) {
+  return Boolean(options.fallbackToClaude)
+    && commandHasPhoto(command)
+    && Number(command?.fallbackCount || 0) < 1
+    && Boolean(command?.allowClaudeFallback)
+    && hasManifestBackedExecutionContext(command);
+}
+
+export function resolvePhotoFallbackDispatchMode(command, options = {}) {
+  if (canFallbackPhotoToClaude(command, options)) {
+    return DISPATCH_MODE_CLAUDE;
+  }
+
+  if (canFallbackToLocal(command, options)) {
+    return DISPATCH_MODE_LOCAL;
+  }
+
+  return "";
 }
 
 function getBridgeClaimTimeoutMs(command) {
@@ -1895,7 +1994,14 @@ function getBridgeQueueState(command, nowIso, input = {}) {
     bridgeClaimedAt: "",
     firstExecutorAckSeenAt: "",
     firstReplySeenAt: "",
-    replyIngestedAt: ""
+    replyIngestedAt: "",
+    actorValidationStartedAt: String(input.actorValidationStartedAt || command.actorValidationStartedAt || "").trim(),
+    actorValidationPassedAt: String(input.actorValidationPassedAt || command.actorValidationPassedAt || "").trim(),
+    actorValidationFailedAt: String(input.actorValidationFailedAt || command.actorValidationFailedAt || "").trim(),
+    actorValidationProbeChannelId: String(input.actorValidationProbeChannelId || command.actorValidationProbeChannelId || "").trim(),
+    actorValidationProbeMessageTs: String(input.actorValidationProbeMessageTs || command.actorValidationProbeMessageTs || "").trim(),
+    actorValidationProbeThreadTs: String(input.actorValidationProbeThreadTs || command.actorValidationProbeThreadTs || "").trim(),
+    actorValidationPreDispatchFailed: Boolean(input.actorValidationPreDispatchFailed || command.actorValidationPreDispatchFailed)
   };
 }
 
@@ -2073,11 +2179,16 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
   }
 
   const hasPhoto = commandHasPhoto(command);
-  const fallbackAllowed = canFallbackToLocal(command, options);
+  const photoFallbackDispatchMode = hasPhoto ? resolvePhotoFallbackDispatchMode(command, options) : "";
+  const fallbackAllowed = hasPhoto ? Boolean(photoFallbackDispatchMode) : canFallbackToLocal(command, options);
   const preDispatchFallbackAllowed = canFallbackToLocal(command, options);
   const status = String(command.status || "").trim().toLowerCase();
   const firstAckTimeoutMs = getSlackFirstAckTimeoutMs(command);
   const resultTimeoutMs = getSlackResultTimeoutMs(command);
+  const fallbackDispatchMode = photoFallbackDispatchMode || DISPATCH_MODE_LOCAL;
+  const fallbackRoute = fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "claude-bridge" : "local-bridge";
+  const fallbackStage = fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback-to-claude" : "fallback-to-bridge";
+  const fallbackLabel = fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "Claude bridge" : "local bridge";
 
   if (status !== "processing" && status !== "dispatched" && status !== "queued") {
     return command;
@@ -2159,18 +2270,18 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
       const photoReplyTimeoutDetail = "Slack thread and photo upload succeeded, but no cloud acknowledgement or reply was observed within the Slack photo first-ack window.";
 
       if (fallbackAllowed) {
-        return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
-          progressStage: "fallback-to-bridge",
+        return createFallbackState(command, fallbackDispatchMode, nowIso, {
+          progressStage: fallbackStage,
           timeoutPhase: "first-ack-timeout",
           fallbackReason: "cloud via Slack photo acknowledgement timed out after upload",
           lastDiagnosticCode: "slack_photo_ack_timeout",
           lastDiagnosticDetail: photoReplyTimeoutDetail,
           errorMessage: stringifyCommandError({
-            code: "fallback_to_bridge",
-            stage: "fallback-to-bridge",
-            message: "Cloud via Slack photo acknowledgement timed out after upload. Switched to local bridge.",
+            code: fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback_to_claude" : "fallback_to_bridge",
+            stage: fallbackStage,
+            message: `Cloud via Slack photo acknowledgement timed out after upload. Switched to ${fallbackLabel}.`,
             detail: photoReplyTimeoutDetail,
-            fallback: "local-bridge"
+            fallback: fallbackRoute
           })
         });
       }
@@ -2197,13 +2308,9 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
     const firstAckDiagnosticDetail = command.slackPhotoUploadError
       ? `Slack photo upload failed before a worker acknowledgement was observed: ${String(command.slackPhotoUploadError || "").trim()}`
       : "Slack dispatch succeeded, but no Codex acknowledgement was observed within the Slack first-ack window.";
-    const firstAckFallbackMessage = command.slackPhotoUploadError
-      ? "Cloud via Slack photo upload failed. Switched to local bridge."
-      : "Cloud via Slack did not acknowledge in time. Switched to local bridge.";
-
     if (fallbackAllowed) {
-      return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
-        progressStage: "fallback-to-bridge",
+      return createFallbackState(command, fallbackDispatchMode, nowIso, {
+        progressStage: fallbackStage,
         timeoutPhase: "first-ack-timeout",
         fallbackReason: command.slackPhotoUploadError
           ? "cloud via Slack photo upload failed"
@@ -2211,11 +2318,13 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
         lastDiagnosticCode: firstAckDiagnosticCode,
         lastDiagnosticDetail: firstAckDiagnosticDetail,
         errorMessage: stringifyCommandError({
-          code: "fallback_to_bridge",
-          stage: "fallback-to-bridge",
-          message: firstAckFallbackMessage,
+          code: fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback_to_claude" : "fallback_to_bridge",
+          stage: fallbackStage,
+          message: command.slackPhotoUploadError
+            ? `Cloud via Slack photo upload failed. Switched to ${fallbackLabel}.`
+            : `Cloud via Slack did not acknowledge in time. Switched to ${fallbackLabel}.`,
           detail: firstAckDiagnosticDetail,
-          fallback: "local-bridge"
+          fallback: fallbackRoute
         })
       });
     }
@@ -2245,18 +2354,18 @@ function evaluateSlackMaintenance(command, nowIso, options = {}) {
   }
 
   if (fallbackAllowed) {
-    return createFallbackState(command, DISPATCH_MODE_LOCAL, nowIso, {
-      progressStage: "fallback-to-bridge",
+    return createFallbackState(command, fallbackDispatchMode, nowIso, {
+      progressStage: fallbackStage,
       timeoutPhase: "result-timeout",
       fallbackReason: "cloud via Slack did not produce a reply in time",
       lastDiagnosticCode: "slack_result_timeout",
       lastDiagnosticDetail: "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window.",
       errorMessage: stringifyCommandError({
-        code: "fallback_to_bridge",
-        stage: "fallback-to-bridge",
-        message: "Cloud via Slack did not produce a reply in time. Switched to local bridge.",
+        code: fallbackDispatchMode === DISPATCH_MODE_CLAUDE ? "fallback_to_claude" : "fallback_to_bridge",
+        stage: fallbackStage,
+        message: `Cloud via Slack did not produce a reply in time. Switched to ${fallbackLabel}.`,
         detail: "Slack dispatch succeeded, but no Codex reply was observed within the Slack result wait window.",
-        fallback: "local-bridge"
+        fallback: fallbackRoute
       })
     });
   }

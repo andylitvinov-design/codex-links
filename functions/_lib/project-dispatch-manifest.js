@@ -1,6 +1,6 @@
 const PROJECT_DISPATCH_MANIFEST = {
   version: 1,
-  updatedAt: "2026-04-23T17:12:00Z",
+  updatedAt: "2026-04-25T02:51:13Z",
   projects: [
     {
       id: "links",
@@ -10,6 +10,13 @@ const PROJECT_DISPATCH_MANIFEST = {
       targetRepo: "andylitvinov-design/codex-links",
       targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
       contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      deploy: {
+        platform: "cloudflare-pages",
+        productionBranch: "main",
+        productionUrl: "https://codex-links.pages.dev/",
+        smokePath: "/",
+        versionPath: "/version.json"
+      },
       visible: true,
       cloudReady: true
     },
@@ -51,11 +58,11 @@ const PROJECT_DISPATCH_MANIFEST = {
       label: "ezohata",
       group: "myprojects",
       workspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/ezohata",
-      targetRepo: "",
-      targetRepoUrl: "",
+      targetRepo: "andylitvinov-design/ezohata",
+      targetRepoUrl: "https://github.com/andylitvinov-design/ezohata",
       contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
       visible: true,
-      cloudReady: false
+      cloudReady: true
     },
     {
       id: "ezohata_ads",
@@ -109,6 +116,37 @@ function normalizeContextFiles(value) {
   )];
 }
 
+function normalizeDeployConfig(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const platform = normalizeText(source.platform, 80);
+  const productionBranch = normalizeText(source.productionBranch, 120) || "main";
+  const productionUrl = normalizeText(source.productionUrl, 400);
+  const smokePath = normalizeText(source.smokePath, 160) || "/";
+  const versionPath = normalizeText(source.versionPath, 160);
+
+  if (!platform && !productionUrl) {
+    return null;
+  }
+
+  return {
+    platform,
+    productionBranch,
+    productionUrl,
+    smokePath,
+    versionPath
+  };
+}
+
+function isProductionChangingText(value) {
+  const text = normalizeText(value, 4000).toLowerCase();
+
+  if (!text) {
+    return false;
+  }
+
+  return /(^|\b)(fix|update|change|implement|deploy|merge|pull request|pr|production|site|ui|css|html|app|release|исправ|обнов|измени|сделай|задеплой|деплой|сайт|продакшн)(\b|$)/i.test(text);
+}
+
 function normalizeProjectId(value) {
   return normalizeText(value, 120).toLowerCase();
 }
@@ -133,6 +171,7 @@ function normalizeProjectEntry(project) {
   const targetRepo = normalizeText(project.targetRepo, 240);
   const targetRepoUrl = normalizeText(project.targetRepoUrl, 400);
   const contextFiles = normalizeContextFiles(project.contextFiles);
+  const deploy = normalizeDeployConfig(project.deploy);
   const aliases = normalizeAliases(project.aliases, [id, label]);
   const visible = normalizeBoolean(project.visible);
   const cloudReady = normalizeBoolean(project.cloudReady) && Boolean(targetRepo);
@@ -152,6 +191,8 @@ function normalizeProjectEntry(project) {
     isPrivate: false,
     contextReady: Boolean(contextFiles.length),
     contextFiles,
+    deploy,
+    productionVerifiable: Boolean(deploy?.productionUrl),
     workspacePath,
     category: group,
     group,
@@ -212,13 +253,23 @@ export function resolveProjectDispatchTarget(input = {}) {
   const effectiveTargetRepoUrl = providedTargetRepoUrl || project?.targetRepoUrl || "";
   const effectiveWorkspacePath = providedWorkspacePath || project?.workspacePath || "";
   const effectiveContextFiles = providedContextFiles.length ? providedContextFiles : (project?.contextFiles || []);
+  const effectiveDeploy = normalizeDeployConfig(input.deploy) || project?.deploy || null;
 
   const needsCloudRepo = dispatchMode === "cloud" || dispatchMode === "slack-codex-cloud";
+  const needsProductionVerification = needsCloudRepo && isProductionChangingText(input.text || input.effectivePrompt);
 
   if (needsCloudRepo && !effectiveTargetRepo) {
     return {
       ok: false,
       error: `Project ${projectLabel} is bridge-only until a manifest-backed GitHub repository is confirmed.`
+    };
+  }
+
+  if (needsProductionVerification && !effectiveDeploy?.productionUrl) {
+    return {
+      ok: false,
+      code: "setup-needed",
+      error: `Project ${projectLabel} needs deploy metadata before production-changing cloud tasks can be guaranteed.`
     };
   }
 
@@ -232,6 +283,8 @@ export function resolveProjectDispatchTarget(input = {}) {
       targetRepo: effectiveTargetRepo,
       targetRepoUrl: effectiveTargetRepoUrl,
       contextFiles: effectiveContextFiles,
+      deploy: effectiveDeploy,
+      productionVerifiable: Boolean(effectiveDeploy?.productionUrl),
       visible: project?.visible ?? true,
       cloudReady: Boolean(effectiveTargetRepo)
     }

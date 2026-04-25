@@ -158,18 +158,20 @@ test("remediation run creates an agent command when auto-fixable issues exist", 
   assert.equal(run.status, "queued");
   assert.equal(run.actions[0].commandId, "fix-command-1");
   assert.equal(run.plan.autoFixCount, 2);
-  assert.equal(run.actions[0].selectedDispatchMode, "local-bridge");
-  assert.equal(run.actions[0].selectedTargetExecutionMode, "bridge");
-  assert.equal(run.actions[0].selectionReason, "delivery-route-degraded-codex-bridge-healthy");
+  assert.equal(run.actions[0].selectedDispatchMode, "slack-codex-cloud");
+  assert.equal(run.actions[0].selectedTargetExecutionMode, "cloud-via-slack");
+  assert.equal(run.actions[0].selectionReason, "codex-cloud-remediation-required");
   assert.equal(run.recheckScope, "selective");
   assert.deepEqual(run.recheckedCheckIds.sort(), ["text-cloud", "text-codex-bridge"]);
+  assert.equal(commandPayload.dispatchMode, "slack-codex-cloud");
+  assert.equal(commandPayload.targetExecutionMode, "cloud-via-slack");
   assert.equal(commandPayload.targetWorkspacePath, "/Users/andriilitvinov/projects/MYPROJECTS/links");
   assert.deepEqual(commandPayload.targetContextFiles, ["AGENTS.md", "README.md", "STATE.md"]);
   assert.match(commandPayload.text, /branch, push it, open a PR, merge it, and deploy Cloudflare Pages/i);
   assert.match(commandPayload.text, /Start by reading AGENTS\.md, README\.md, and STATE\.md/i);
 });
 
-test("remediation route falls back to Claude only when Codex bridge is unavailable", async () => {
+test("remediation route stays on Codex Cloud even when local bridge is unavailable", async () => {
   const env = createMockEnv();
   const diagnosis = createDiagnosisFixture();
   diagnosis.checks = diagnosis.checks.map((check) => {
@@ -206,9 +208,9 @@ test("remediation route falls back to Claude only when Codex bridge is unavailab
     }
   }));
 
-  assert.equal(run.actions[0].selectedDispatchMode, "claude-bridge");
-  assert.equal(run.actions[0].selectedTargetExecutionMode, "claude");
-  assert.equal(run.actions[0].selectionReason, "codex-bridge-unavailable-claude-code-fallback");
+  assert.equal(run.actions[0].selectedDispatchMode, "slack-codex-cloud");
+  assert.equal(run.actions[0].selectedTargetExecutionMode, "cloud-via-slack");
+  assert.equal(run.actions[0].selectionReason, "codex-cloud-remediation-required");
 });
 
 test("remediation run rejects a running diagnosis before creating an agent command", async () => {

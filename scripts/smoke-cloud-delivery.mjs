@@ -112,10 +112,10 @@ function assertDirectCloudState(command, label) {
   const requestedExecutor = String(command?.requestedExecutor || "").trim()
   const actualExecutor = String(command?.actualExecutor || "").trim()
   const expectedDispatchMode = CLOUD_ROUTE === "direct" ? "cloud" : "slack-codex-cloud"
-  const expectedRequestedExecutor = "direct-openai"
+  const expectedRequestedExecutor = CLOUD_ROUTE === "direct" ? "direct-openai" : "cloud-via-slack"
   const allowedAnsweredExecutors = CLOUD_ROUTE === "direct"
     ? new Set(["direct-openai", "bridge"])
-    : new Set(["cloud-via-slack", "bridge"])
+    : new Set(["cloud-via-slack", "bridge", "claude"])
 
   if (dispatchMode !== expectedDispatchMode && !(expectedDispatchMode === "slack-codex-cloud" && dispatchMode === "local-bridge")) {
     throw new Error(`${label}: expected dispatchMode=${expectedDispatchMode} for cloud request, got ${dispatchMode || "empty"}.`)

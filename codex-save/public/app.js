@@ -77,13 +77,90 @@ function getRunningChecks(run) {
     .filter((check) => check?.state === "running" || check?.state === "pending");
 }
 
+function isAnalysisActive(run) {
+  return String(run?.status || "").trim() === "running" || getRunningChecks(run).length > 0;
+}
+
+function renderHourglassBadge(label = "В работе") {
+  return `<span class="badge badge-hourglass" data-status="unknown">⏳ ${escapeHtml(label)}</span>`;
+}
+
+function getCheckTimeLabel(check) {
+  if (check?.completedAt) {
+    return `completed ${formatStamp(check.completedAt)}`;
+  }
+
+  if (check?.startedAt) {
+    return `started ${formatStamp(check.startedAt)}`;
+  }
+
+  return "not started";
+}
+
+function buildRecommendationsCopyText(diagnosisRun, remediationRun) {
+  const lines = [];
+  const diagnosis = diagnosisRun || {};
+  const remediation = remediationRun || null;
+  const recommendationsList = Array.isArray(diagnosis.recommendations) ? diagnosis.recommendations : [];
+  const checksList = Array.isArray(diagnosis.checks) ? diagnosis.checks : [];
+
+  lines.push("Codex Save recommendations report");
+  lines.push(`Analysis: ${diagnosis.runId || "n/a"}`);
+  lines.push(`Created: ${formatStamp(diagnosis.createdAt)}`);
+  lines.push(`Updated: ${formatStamp(diagnosis.updatedAt)}`);
+  lines.push(`Completed: ${diagnosis.completedAt ? formatStamp(diagnosis.completedAt) : "in progress"}`);
+  lines.push(`Status: ${diagnosis.overallStatus || "unknown"} / ${diagnosis.status || "unknown"}`);
+  lines.push("");
+
+  if (isAnalysisActive(diagnosis)) {
+    const runningLabels = getRunningChecks(diagnosis).map((check) => check.label || check.id).filter(Boolean);
+    lines.push(`⏳ Running: ${runningLabels.join(", ") || "analysis is still running"}`);
+    lines.push("");
+  }
+
+  lines.push("Recommendations:");
+  if (recommendationsList.length) {
+    recommendationsList.forEach((item, index) => {
+      lines.push(`${index + 1}. ${item.title || "Recommendation"} [${item.actionType || "manual"}]`);
+      lines.push(`   Summary: ${item.summary || "n/a"}`);
+      lines.push(`   Recommendation: ${item.recommendation || "n/a"}`);
+    });
+  } else {
+    lines.push("No separate recommendations.");
+  }
+
+  lines.push("");
+  lines.push("Checks:");
+  if (checksList.length) {
+    checksList.forEach((check) => {
+      lines.push(`- ${check.label || check.id}: ${check.status || "unknown"} / ${check.state || "pending"} | ${getCheckTimeLabel(check)} | ${check.summary || ""}`);
+    });
+  } else {
+    lines.push("- No checks yet.");
+  }
+
+  if (remediation) {
+    const action = Array.isArray(remediation.actions) ? remediation.actions[0] : null;
+    lines.push("");
+    lines.push("Remediation:");
+    lines.push(`Status: ${remediation.status || "unknown"}`);
+    lines.push(`Route: ${action?.selectedDispatchMode || "n/a"} / ${action?.selectedTargetExecutionMode || "n/a"}`);
+    lines.push(`Command: ${action?.commandId || "n/a"}`);
+    if (action?.prUrl) lines.push(`PR: ${action.prUrl}`);
+    if (action?.deployUrl) lines.push(`Deploy: ${action.deployUrl}`);
+  }
+
+  return lines.join("\n");
+}
+
 function renderDiagnosis() {
   const run = state.diagnosis;
+  const activeAnalysis = isAnalysisActive(run);
   diagnosisStatus.textContent = run
-    ? `${run.overallStatus} / ${run.status}`
+    ? `${activeAnalysis ? "⏳ " : ""}${run.overallStatus} / ${run.status}`
     : "Нет данных";
   diagnosisMeta.textContent = run
-    ? `runId ${run.runId} | ${Number(run.completedCount || 0)}/${Array.isArray(run.checks) ? run.checks.length : 0} checks | updated ${formatStamp(run.updatedAt)}`
+    ? `runId ${run.runId} | created ${formatStamp(run.createdAt)} | ${run.completedAt ? `completed ${formatStamp(run.completedAt)}` : "completed in progress"} | ${Number(run.completedCount || 0)}/${Array.isArray(run.checks) ? run.checks.length : 0} checks | updated ${formatStamp(run.updatedAt)}`
     : "Нет активного прогона.";
   targetUrl.textContent = run?.target?.baseUrl || "https://codex-links.pages.dev";
 
@@ -108,6 +185,10 @@ function renderDiagnosis() {
       tokens.push(`<span class="token">dispatch: ${escapeHtml(check.details.createdDispatchMode || check.details.dispatchMode)}</span>`);
     }
     if (check.fixCategory) tokens.push(`<span class="token">${escapeHtml(check.fixCategory)}</span>`);
+    tokens.push(`<span class="token">${escapeHtml(getCheckTimeLabel(check))}</span>`);
+    const stateBadge = check.state === "running" || check.state === "pending"
+      ? renderHourglassBadge(check.state === "pending" ? "В очереди" : "В работе")
+      : "";
 
     return `
       <article class="check-card">
@@ -116,7 +197,10 @@ function renderDiagnosis() {
             <h3>${escapeHtml(check.label)}</h3>
             <p class="check-meta">${escapeHtml(check.group || "general")} • ${escapeHtml(check.state || "pending")}</p>
           </div>
-          <span class="badge" data-status="${formatStatus(check.status)}">${escapeHtml(check.status || "unknown")}</span>
+          <div class="badge-row">
+            ${stateBadge}
+            <span class="badge" data-status="${formatStatus(check.status)}">${escapeHtml(check.status || "unknown")}</span>
+          </div>
         </div>
         <p class="check-summary">${escapeHtml(check.summary || "")}</p>
         <div class="inline-list">${tokens.join("")}</div>
@@ -125,18 +209,16 @@ function renderDiagnosis() {
   }).join("");
 
   const recommendationList = Array.isArray(run?.recommendations) ? run.recommendations : [];
-  recommendations.innerHTML = recommendationList.length
-    ? recommendationList.map((item) => `
-      <article class="note" data-severity="${escapeHtml(item.severity || "info")}">
-        <div class="note-head">
-          <strong>${escapeHtml(item.title || "Recommendation")}</strong>
-          <span class="badge" data-status="${item.actionType === "autofix" ? "degraded" : "blocked"}">${escapeHtml(item.actionType || "manual")}</span>
-        </div>
-        <p>${escapeHtml(item.summary || "")}</p>
-        <p>${escapeHtml(item.recommendation || "")}</p>
-      </article>
-    `).join("")
-    : '<div class="note"><p>Диагностика не выявила проблем. Отдельные рекомендации не нужны.</p></div>';
+  const recommendationsText = buildRecommendationsCopyText(run, state.remediation);
+  recommendations.innerHTML = `
+    <article class="note" data-severity="${recommendationList.length ? "warning" : "info"}">
+      <div class="note-head">
+        <strong>Recommendations report</strong>
+        ${activeAnalysis ? renderHourglassBadge("Анализ в работе") : `<span class="badge" data-status="${recommendationList.length ? "degraded" : "pass"}">${recommendationList.length ? "items" : "clear"}</span>`}
+      </div>
+      <textarea class="copy-field" readonly id="recommendations-copy" aria-label="Скопировать рекомендации">${escapeHtml(recommendationsText)}</textarea>
+    </article>
+  `;
 }
 
 function renderRemediation() {

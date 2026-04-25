@@ -100,6 +100,16 @@ test("bridge loop supports bounded in-flight workers instead of a strictly seria
   assert.match(source, /textOnly: true/);
 });
 
+test("bridge runner uses a unique processor id and checks ownership before syncing completions", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /const PROCESSOR_ID = String\(process\.env\.BRIDGE_PROCESSOR_ID/);
+  assert.match(source, /process\.pid/);
+  assert.match(source, /processorId: PROCESSOR_ID/);
+  assert.match(source, /async function isProcessorOwner\(commandId, processorId\)/);
+  assert.match(source, /await isProcessorOwner\(command\.id, command\.processorId\)/);
+});
+
 test("bridge loop keeps retrying after claim timeouts instead of aborting the runner", async () => {
   const source = await readFile(bridgeScriptPath, "utf8");
 
@@ -115,6 +125,15 @@ test("bridge executor tolerates benign stdin warnings when Codex already produce
   assert.match(source, /function shouldTreatCodexExecAsUsable\(error, result, prompt = ""\)/);
   assert.match(source, /text\.includes\("no stdin data received in 3s"\)/);
   assert.match(source, /if \(shouldTreatCodexExecAsUsable\(error, result, prompt\)\) \{\s*resolve\(result\);/);
+});
+
+test("bridge executor starts fresh Codex threads for new text commands by default", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /const BRIDGE_CODEX_NEW_THREAD_PER_COMMAND = String\(process\.env\.BRIDGE_CODEX_NEW_THREAD_PER_COMMAND \|\| "1"\)/);
+  assert.match(source, /const useFreshCodexThread = BRIDGE_EXECUTOR === "codex" && BRIDGE_CODEX_NEW_THREAD_PER_COMMAND && !command\.photo;/);
+  assert.match(source, /useFreshCodexThread[\s\S]+runCodexExecFreshThread\(/);
+  assert.match(source, /useFreshCodexThread[\s\S]+runCodexExecFreshThread\([\s\S]+:[\s\S]+runCodexResume\(/);
 });
 
 test("bridge executor sends photos directly to Codex CLI without the script tty wrapper", async () => {

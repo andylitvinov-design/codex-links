@@ -58,9 +58,9 @@ test("getConfiguredDispatchMode falls back to local bridge when nothing cloud-ca
   }), DISPATCH_MODE_LOCAL);
 });
 
-test("getSlackCodexMention prefers explicit mention over target user id", () => {
+test("getSlackCodexMention prefers the configured target user id over a stale explicit mention", () => {
   assert.equal(getSlackCodexMention({
-    SLACK_CODEX_MENTION: "@Codex",
-    SLACK_CODEX_USER_ID: "U123"
-  }), "@Codex");
+    SLACK_CODEX_MENTION: "<@U0AT5L4634J>",
+    SLACK_CODEX_USER_ID: "U0B0H405MFA"
+  }), "<@U0B0H405MFA>");
 });

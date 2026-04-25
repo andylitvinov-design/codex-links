@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
 import { resolveClaudeBin, validateClaudeCli } from "./_lib/claude-cli.mjs";
@@ -17,6 +17,9 @@ const baseUrl = process.env.LINKS_BASE_URL || "https://codex-links.pages.dev";
 const token = process.env.LINKS_WRITE_TOKEN;
 const BRIDGE_DISPATCH_MODE = process.env.BRIDGE_DISPATCH_MODE || "local-bridge";
 const BRIDGE_EXECUTOR = (process.env.BRIDGE_EXECUTOR || "codex").trim().toLowerCase() === "claude" ? "claude" : "codex";
+const BRIDGE_CODEX_NEW_THREAD_PER_COMMAND = String(process.env.BRIDGE_CODEX_NEW_THREAD_PER_COMMAND || "1").trim() !== "0";
+const PROCESSOR_ID = String(process.env.BRIDGE_PROCESSOR_ID || "").trim()
+  || `launchd-${BRIDGE_EXECUTOR}-bridge:${hostname()}:${process.pid}`;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const READ_TIMEOUT_MS = 15 * 1000;
 const WRITE_TIMEOUT_MS = 60 * 1000;
@@ -811,13 +814,20 @@ function runCodexResume(threadId, prompt, photoPath, timeoutMs = BRIDGE_EXEC_TIM
 }
 
 function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS) {
+  return runCodexExec(prompt, photoPath, cwd, timeoutMs, { ephemeral: true });
+}
+
+function runCodexExecFreshThread(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS) {
+  return runCodexExec(prompt, photoPath, cwd, timeoutMs, { ephemeral: false });
+}
+
+function runCodexExec(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_TIMEOUT_MS, options = {}) {
   const codexBin = process.env.CODEX_BIN || "/Users/andriilitvinov/.npm-global/bin/codex";
   return new Promise((resolve, reject) => {
     const outputPath = join(tmpdir(), `codex-links-output-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
     const codexArgs = [
       "exec",
       prompt,
-      "--ephemeral",
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
       "-c",
@@ -825,6 +835,10 @@ function runCodexExecEphemeral(prompt, photoPath, cwd, timeoutMs = BRIDGE_EXEC_T
       "-o",
       outputPath
     ];
+
+    if (options.ephemeral) {
+      codexArgs.splice(2, 0, "--ephemeral");
+    }
 
     if (cwd) {
       codexArgs.push("-C", cwd);
@@ -956,7 +970,7 @@ async function claimNextCommand(options = {}) {
       },
       body: JSON.stringify({
         action: "claim",
-        processorId: "launchd-bridge",
+        processorId: PROCESSOR_ID,
         leaseMs: CLAIM_LEASE_MS,
         dispatchMode: BRIDGE_DISPATCH_MODE,
         textOnly
@@ -1138,6 +1152,9 @@ async function markAnswered(commandId, assistantText, completedAt, processorId =
     const body = await response.text();
     throw new Error(`Failed to mark command answered: ${response.status} ${body}`);
   }
+
+  const data = await response.json().catch(() => ({}));
+  return data?.command || null;
 }
 
 async function markFailed(commandId, errorMessage, completedAt, processorId = "") {
@@ -1167,6 +1184,9 @@ async function markFailed(commandId, errorMessage, completedAt, processorId = ""
     const body = await response.text();
     throw new Error(`Failed to mark command failed: ${response.status} ${body}`);
   }
+
+  const data = await response.json().catch(() => ({}));
+  return data?.command || null;
 }
 
 async function syncMessages(messages) {
@@ -1240,6 +1260,22 @@ async function wasCommandAnswered(commandId) {
     String(entry?.id || "").trim() === String(commandId).trim()
     && String(entry?.status || "").trim().toLowerCase() === "answered"
   );
+}
+
+async function isProcessorOwner(commandId, processorId) {
+  const normalizedProcessorId = String(processorId || "").trim();
+
+  if (!commandId || !normalizedProcessorId) {
+    return false;
+  }
+
+  const command = await fetchCommandById(commandId).catch((error) => {
+    void appendBridgeErrorLog("isProcessorOwner.fetch", error, { commandId });
+    return null;
+  });
+
+  return String(command?.status || "").trim().toLowerCase() === "processing"
+    && String(command?.processorId || "").trim() === normalizedProcessorId;
 }
 
 async function publishBridgeStatus(status) {
@@ -1644,6 +1680,14 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
   for (const command of batchCompleted) {
     const message = batchMessages.find((entry) => entry.commandId === command.id) || null;
 
+    if (!(await isProcessorOwner(command.id, command.processorId))) {
+      await appendBridgeErrorLog("flushCompletedBatch.skipLostProcessorOwnership", new Error("Skipping completion from a bridge worker that no longer owns the command."), {
+        commandId: command.id,
+        processorId: command.processorId
+      });
+      continue;
+    }
+
     if (command.result === "failed") {
       try {
         if (message) {
@@ -1745,8 +1789,9 @@ async function processClaimedCommand(command) {
       sourceThreadLabel
     } = await getResolvedExecutionThread(command, legacyLinksThreadId);
     let threadId = executionThreadId;
+    const useFreshCodexThread = BRIDGE_EXECUTOR === "codex" && BRIDGE_CODEX_NEW_THREAD_PER_COMMAND && !command.photo;
 
-    if (!threadId && BRIDGE_EXECUTOR !== "claude") {
+    if (!threadId && BRIDGE_EXECUTOR !== "claude" && !useFreshCodexThread) {
       throw new Error("Missing threadId.");
     }
 
@@ -1866,15 +1911,27 @@ async function processClaimedCommand(command) {
           , command.processorId);
           assistantText = getImmediateAssistantText(result, prompt);
         } else {
-          const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
-            runTurnStart(threadId, input, {
-              timeoutMs: commandExecTimeoutMs,
-              onHeartbeat: async () => {
-                await updateProgress(command.id, "waiting-for-codex", {}, command.processorId);
-              }
-            })
-          , command.processorId);
-          assistantText = getAssistantTextFromTurn(turn);
+          if (useFreshCodexThread) {
+            const result = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+              runCodexExecFreshThread(
+                prompt || "Handle the task.",
+                "",
+                String(command?.targetWorkspacePath || "").trim() || process.cwd(),
+                commandExecTimeoutMs
+              )
+            , command.processorId);
+            assistantText = getImmediateAssistantText(result, prompt);
+          } else {
+            const turn = await runWithProgressHeartbeat(command.id, "waiting-for-codex", () =>
+              runTurnStart(threadId, input, {
+                timeoutMs: commandExecTimeoutMs,
+                onHeartbeat: async () => {
+                  await updateProgress(command.id, "waiting-for-codex", {}, command.processorId);
+                }
+              })
+            , command.processorId);
+            assistantText = getAssistantTextFromTurn(turn);
+          }
         }
       }
     } catch (appServerError) {
@@ -1906,7 +1963,14 @@ async function processClaimedCommand(command) {
               "",
               String(command?.targetWorkspacePath || "").trim() || process.cwd()
             )
-              : runCodexResume(threadId, prompt || "See attached image and respond.", photoPath, commandExecTimeoutMs)
+              : useFreshCodexThread
+                ? runCodexExecFreshThread(
+                    prompt || "Handle the task.",
+                    "",
+                    String(command?.targetWorkspacePath || "").trim() || process.cwd(),
+                    commandExecTimeoutMs
+                  )
+                : runCodexResume(threadId, prompt || "See attached image and respond.", photoPath, commandExecTimeoutMs)
         , command.processorId);
         assistantText = getImmediateAssistantText(result, prompt);
       }
@@ -1934,7 +1998,7 @@ async function processClaimedCommand(command) {
       assistantText = getImmediateAssistantText(result);
     }
 
-    if (!assistantText && !photoPath && BRIDGE_EXECUTOR !== "claude") {
+    if (!assistantText && !photoPath && BRIDGE_EXECUTOR !== "claude" && !useFreshCodexThread) {
       await updateProgress(command.id, "reading-codex-reply", {}, command.processorId);
       assistantText = await getThreadFallbackAssistantText(command, threadId);
     }
