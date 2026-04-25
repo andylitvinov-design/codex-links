@@ -510,6 +510,11 @@ function normalizeDeliveryStatus(rawValue) {
   return allowed.has(value) ? value : "";
 }
 
+function normalizeRepoAckStatus(rawValue) {
+  const value = normalizeDiagnosticText(rawValue, 80).toLowerCase();
+  return value === "validated" || value === "warning" || value === "pending" ? value : "pending";
+}
+
 function normalizeErrorMessage(rawValue) {
   const value = String(rawValue || "").trim().slice(0, 500);
   const parsed = parseCommandError(value);
@@ -747,6 +752,26 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
       Object.prototype.hasOwnProperty.call(input, "lastDiagnosticDetail") ? input.lastDiagnosticDetail : command?.lastDiagnosticDetail,
       500
     ),
+    repoAckStatus: normalizeRepoAckStatus(
+      Object.prototype.hasOwnProperty.call(input, "repoAckStatus") ? input.repoAckStatus : command?.repoAckStatus
+    ),
+    repoAckAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "repoAckAt") ? input.repoAckAt : command?.repoAckAt
+    ),
+    repoAckRepo: normalizeRepoValue(
+      Object.prototype.hasOwnProperty.call(input, "repoAckRepo") ? input.repoAckRepo : command?.repoAckRepo
+    ),
+    repoAckProject: normalizeThreadId(
+      Object.prototype.hasOwnProperty.call(input, "repoAckProject") ? input.repoAckProject : command?.repoAckProject
+    ),
+    repoAckCommand: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "repoAckCommand") ? input.repoAckCommand : command?.repoAckCommand,
+      120
+    ),
+    repoAckWarning: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "repoAckWarning") ? input.repoAckWarning : command?.repoAckWarning,
+      500
+    ),
     photoAttached: derivePhotoAttached(command, input),
     photoBytesPresent: derivePhotoBytesPresent(command, input),
     photoSeenByBridge: normalizeBooleanValue(input.photoSeenByBridge, Boolean(command?.photoSeenByBridge)),
@@ -962,6 +987,12 @@ function normalizeStoredCommandEntry(entry) {
     routeSelectionReason: normalizeRouteSelectionReason(entry.routeSelectionReason),
     lastDiagnosticCode: normalizeDiagnosticText(entry.lastDiagnosticCode, 80),
     lastDiagnosticDetail: normalizeDiagnosticText(entry.lastDiagnosticDetail, 500),
+    repoAckStatus: normalizeRepoAckStatus(entry.repoAckStatus),
+    repoAckAt: normalizeDateValue(entry.repoAckAt),
+    repoAckRepo: normalizeRepoValue(entry.repoAckRepo),
+    repoAckProject: normalizeThreadId(entry.repoAckProject),
+    repoAckCommand: normalizeDiagnosticText(entry.repoAckCommand, 120),
+    repoAckWarning: normalizeDiagnosticText(entry.repoAckWarning, 500),
     photoAttached: derivePhotoAttached(entry),
     photoBytesPresent: derivePhotoBytesPresent(entry),
     photoSeenByBridge: normalizeBooleanValue(entry.photoSeenByBridge),
@@ -1224,6 +1255,12 @@ export function createCommandRecord(input) {
       routeSelectionReason: normalizeRouteSelectionReason(input.routeSelectionReason),
       lastDiagnosticCode: normalizeDiagnosticText(input.lastDiagnosticCode, 80),
       lastDiagnosticDetail: normalizeDiagnosticText(input.lastDiagnosticDetail, 500),
+      repoAckStatus: "pending",
+      repoAckAt: "",
+      repoAckRepo: "",
+      repoAckProject: "",
+      repoAckCommand: "",
+      repoAckWarning: "",
       photoAttached: Boolean(normalizedPhoto?.value),
       photoBytesPresent: Boolean(String(normalizedPhoto?.value?.dataUrl || "").trim()),
       photoSeenByBridge: false,
@@ -1841,6 +1878,12 @@ export async function upsertCommandDispatchState(env, input = {}) {
     deliveryStatusUpdatedAt: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus) !== normalizeDeliveryStatus(command.deliveryStatus)
       ? nowIso
       : command.deliveryStatusUpdatedAt,
+    repoAckStatus: normalizeRepoAckStatus(input.repoAckStatus || command.repoAckStatus),
+    repoAckAt: normalizeDateValue(input.repoAckAt || command.repoAckAt),
+    repoAckRepo: normalizeRepoValue(input.repoAckRepo || command.repoAckRepo),
+    repoAckProject: normalizeThreadId(input.repoAckProject || command.repoAckProject),
+    repoAckCommand: normalizeDiagnosticText(input.repoAckCommand || command.repoAckCommand, 120),
+    repoAckWarning: normalizeDiagnosticText(input.repoAckWarning || command.repoAckWarning, 500),
     desktopMirrorStatus: normalizeDeliveryStatus(input.desktopMirrorStatus || command.desktopMirrorStatus),
     desktopMirroredAt: normalizeDateValue(input.desktopMirroredAt || command.desktopMirroredAt),
     desktopMirrorThreadId: normalizeSlackValue(input.desktopMirrorThreadId || command.desktopMirrorThreadId),

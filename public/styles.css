@@ -138,6 +138,13 @@ body {
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 120ms ease;
 }
 
+.dispatch-toggle-button small {
+  color: currentColor;
+  font-size: 0.68rem;
+  font-weight: 700;
+  opacity: 0.68;
+}
+
 .dispatch-toggle-button:hover {
   transform: translateY(-1px);
 }
@@ -1379,6 +1386,12 @@ input[type="radio"] {
   align-items: center;
   gap: 8px;
   color: #1c4f43;
+}
+
+.command-answer-time {
+  color: #527064;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .command-answer-title::before {

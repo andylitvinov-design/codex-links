@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { writeCommands, getCommandById } from "../functions/_lib/commands.js";
 import { readMessages } from "../functions/_lib/messages.js";
 import { syncSlackCommandReplies } from "../functions/api/commands.js";
-import { classifySlackReply } from "../functions/_lib/slack.js";
+import { buildSlackCommandPrompt, classifySlackReply } from "../functions/_lib/slack.js";
 
 function createMockEnv() {
   const store = new Map();
@@ -41,6 +41,30 @@ function createSlackResponse(messages) {
     }
   };
 }
+
+test("buildSlackCommandPrompt requires an exact repo ACK and repo context", () => {
+  const prompt = buildSlackCommandPrompt({
+    id: "cmd-links-ack",
+    threadId: "links",
+    threadLabel: "links",
+    projectId: "links",
+    projectLabel: "links",
+    projectCategory: "myprojects",
+    targetRepo: "andylitvinov-design/codex-links",
+    targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
+    targetWorkspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/links",
+    targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+    text: "check routing"
+  }, {
+    SLACK_CODEX_MENTION: "<@U999>"
+  });
+
+  assert.match(prompt, /ACK repo=andylitvinov-design\/codex-links project=links command=cmd-links-ack/);
+  assert.match(prompt, /Repository: andylitvinov-design\/codex-links/);
+  assert.match(prompt, /Repository URL: https:\/\/github\.com\/andylitvinov-design\/codex-links/);
+  assert.match(prompt, /Workspace path: \/Users\/andriilitvinov\/projects\/MYPROJECTS\/links/);
+  assert.match(prompt, /AGENTS\.md -> README\.md -> STATE\.md/);
+});
 
 test("syncSlackCommandReplies keeps progress-only Slack replies non-terminal", async () => {
   const env = createMockEnv();
@@ -87,6 +111,98 @@ test("syncSlackCommandReplies keeps progress-only Slack replies non-terminal", a
   assert.equal(updated?.replyMatched, false);
   assert.equal(updated?.replyMatchedBy, "");
   assert.equal(messages.length, 0);
+});
+
+test("syncSlackCommandReplies validates exact repo ACK", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-valid-ack",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    projectId: "links",
+    targetRepo: "andylitvinov-design/codex-links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackChannelId: "C123",
+    slackMessageTs: "1100.000001",
+    slackThreadTs: "1100.000001",
+    dispatchedAt: createdAt
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => createSlackResponse([
+    { ts: "1100.000001", thread_ts: "1100.000001", text: "root task" },
+    { ts: "1101.000001", thread_ts: "1100.000001", user: "U123", text: "ACK repo=andylitvinov-design/codex-links project=links command=cmd-slack-valid-ack\nПроверяю." }
+  ]);
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-valid-ack");
+    await syncSlackCommandReplies(env, command, { SLACK_CODEX_USER_ID: "U123" });
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const updated = await getCommandById(env, "cmd-slack-valid-ack");
+  assert.equal(updated?.status, "processing");
+  assert.equal(updated?.repoAckStatus, "validated");
+  assert.equal(updated?.repoAckRepo, "andylitvinov-design/codex-links");
+  assert.equal(updated?.repoAckProject, "links");
+  assert.equal(updated?.repoAckCommand, "cmd-slack-valid-ack");
+  assert.equal(updated?.repoAckWarning, "");
+});
+
+test("syncSlackCommandReplies warns on mismatched repo ACK", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-wrong-ack",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    projectId: "links",
+    targetRepo: "andylitvinov-design/codex-links",
+    text: "fix the dialogs",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackChannelId: "C123",
+    slackMessageTs: "1200.000001",
+    slackThreadTs: "1200.000001",
+    dispatchedAt: createdAt
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => createSlackResponse([
+    { ts: "1200.000001", thread_ts: "1200.000001", text: "root task" },
+    { ts: "1201.000001", thread_ts: "1200.000001", user: "U123", text: "ACK repo=andylitvinov-design/other project=links command=cmd-slack-wrong-ack\nПроверяю." }
+  ]);
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-wrong-ack");
+    await syncSlackCommandReplies(env, command, { SLACK_CODEX_USER_ID: "U123" });
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const updated = await getCommandById(env, "cmd-slack-wrong-ack");
+  assert.equal(updated?.status, "processing");
+  assert.equal(updated?.repoAckStatus, "warning");
+  assert.match(updated?.repoAckWarning || "", /Repo ACK mismatch/);
+  assert.equal(updated?.lastDiagnosticCode, "repo_ack_warning");
 });
 
 test("syncSlackCommandReplies ignores helper-only Slack replies and does not mark first ack", async () => {

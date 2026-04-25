@@ -12,7 +12,7 @@ const FALLBACK_THREAD_LABEL = process.env.CODEX_LINKS_SMOKE_FALLBACK_THREAD_LABE
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || ""
 const CLOUD_ROUTE = String(process.env.CODEX_LINKS_SMOKE_CLOUD_ROUTE || "slack").trim().toLowerCase()
 const clientId = `smoke-${Date.now()}`
-const text = "delivery-probe: reply with OK only"
+const text = "delivery-probe: reply with codex-links and andylitvinov-design/codex-links only after repo ACK"
 const pollStartedAt = Date.now()
 
 async function sleep(ms) {
@@ -31,6 +31,13 @@ async function fetchAssistantReplies(commandId) {
         && String(message?.role || "").trim() === "assistant"
       )
     : []
+}
+
+function getReplyText(replies) {
+  return (Array.isArray(replies) ? replies : [])
+    .map((message) => String(message?.text || "").trim())
+    .filter(Boolean)
+    .join("\n")
 }
 
 async function fetchStatus() {
@@ -233,9 +240,29 @@ async function main() {
   console.log(`commandId=${created.command.id}`)
   const answered = await pollCommand(created.command.id)
   const status = await fetchStatus()
+  const replies = await fetchAssistantReplies(answered.id)
+  const replyText = getReplyText(replies)
+  const answeredDispatchMode = String(answered?.dispatchMode || "").trim()
+  const actualExecutor = String(answered?.actualExecutor || "").trim()
+  const usedSlackCloud = answeredDispatchMode === "slack-codex-cloud" && actualExecutor !== "bridge"
+  const usedFallback = answeredDispatchMode !== "slack-codex-cloud" || actualExecutor === "bridge"
 
-  if (CLOUD_ROUTE !== "direct" && String(status?.slackActor?.validationStatus || "").trim() !== "validated") {
+  if (CLOUD_ROUTE !== "direct" && usedSlackCloud && String(status?.slackActor?.validationStatus || "").trim() !== "validated") {
     throw new Error(`Expected /api/status slackActor.validationStatus=validated, got ${String(status?.slackActor?.validationStatus || "").trim() || "empty"}.`)
+  }
+
+  if (usedSlackCloud) {
+    if (String(answered?.repoAckStatus || "").trim() !== "validated") {
+      throw new Error(`Expected repoAckStatus=validated for Slack Cloud command, got ${String(answered?.repoAckStatus || "").trim() || "empty"}.`)
+    }
+
+    if (!/\bcodex-links\b/i.test(replyText) || !/andylitvinov-design\/codex-links/i.test(replyText)) {
+      throw new Error("Expected Slack Cloud smoke reply to contain codex-links and andylitvinov-design/codex-links.")
+    }
+  }
+
+  if (usedFallback) {
+    console.log("[cloud-smoke] Cloud route was gated or fell back before Slack Cloud completion; treating as diagnostic fallback outcome.")
   }
 
   const report = {
@@ -245,7 +272,10 @@ async function main() {
     firstReplyVisibleMs: Number(answered?.latencyBreakdown?.dispatchToFirstReplyMs ?? null),
     doneMs: Date.now() - pollStartedAt,
     stage: answered?.deliveryStage || answered?.progressStage || answered?.status || "unknown",
-    dispatchMode: String(answered?.dispatchMode || "").trim() || "unknown"
+    dispatchMode: answeredDispatchMode || "unknown",
+    actualExecutor: actualExecutor || "unknown",
+    repoAckStatus: String(answered?.repoAckStatus || "").trim() || "unknown",
+    cloudFallback: usedFallback
   }
   console.log(JSON.stringify({ latencyReport: report }, null, 2))
   console.log(`Smoke OK: command ${answered.id} answered via stage=${answered.progressStage || "unknown"} dispatchMode=${answered.dispatchMode || "unknown"}`)

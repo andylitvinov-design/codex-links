@@ -55,6 +55,21 @@ test("cloud is blue and Claude is orange across controls and reply accents", () 
   assert.match(styleSource, /\.command-answer\[data-executor="claude"\] \{[^}]*inset 4px 0 0 rgba\(245, 158, 11/);
 });
 
+test("dispatch controls explain route capabilities", () => {
+  assert.match(appSource, /return "Cloud via Slack";/);
+  assert.match(appSource, /return "Claude Bridge";/);
+  assert.match(appSource, /return "Local Bridge";/);
+  assert.match(appSource, /repo ACK warning/);
+  assert.match(styleSource, /\.dispatch-toggle-button small \{/);
+});
+
+test("reply cards show assistant arrival time", () => {
+  assert.match(appSource, /const replyAt = String\(message\?\.createdAt \|\| replyEntry\?\.createdAt \|\| linkedCommand\?\.resultAt \|\| ""\)\.trim\(\);/);
+  assert.match(appSource, /class="command-answer-time"/);
+  assert.match(appSource, /ответ: \$\{escapeHtml\(replyTime\)\}/);
+  assert.match(styleSource, /\.command-answer-time \{/);
+});
+
 test("timeline can keep production delivery note alongside grouped replies", () => {
   assert.match(appSource, /const hasReplies = Array\.isArray\(entry\.replies\) && entry\.replies\.length > 0;/);
   assert.match(appSource, /const deliveryStatus = getCommandDeliveryStatus\(command\);/);

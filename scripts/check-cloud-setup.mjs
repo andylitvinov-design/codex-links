@@ -140,7 +140,7 @@ async function main() {
 
   const missing = REQUIRED.filter((key) => !String(merged[key] || "").trim());
   const configuredMode = String(merged.COMMAND_DISPATCH_MODE || "").trim().toLowerCase();
-  const wantsDirectOpenAi = configuredMode === "direct-openai" || configuredMode === "cloud";
+  const wantsDirectOpenAi = configuredMode === "direct-openai";
   const hasOpenAiKey = Boolean(String(merged.OPENAI_API_KEY || "").trim());
   const hasSlackRoute = Boolean(String(merged.SLACK_BOT_TOKEN || "").trim()) && Boolean(String(merged.SLACK_CODEX_CHANNEL_ID || "").trim());
   const hasTrustedBridge = Boolean(String(merged.CLOUD_BRIDGE_BASE_URL || "").trim()) && Boolean(String(merged.CLOUD_BRIDGE_SHARED_SECRET || "").trim());
@@ -163,7 +163,7 @@ async function main() {
     console.log("All required local values are present.");
   }
 
-  if (!hasOpenAiKey && !wantsDirectOpenAi) {
+  if (!hasOpenAiKey) {
     console.log("OPENAI_API_KEY: advisory missing; direct OpenAI will be unavailable, but cloud-via-slack can still run.");
   }
 

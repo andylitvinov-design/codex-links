@@ -41,7 +41,7 @@ import {
   normalizeExecutorRoute
 } from "../_lib/dispatch.js";
 import { isAuthorized } from "../_lib/security.js";
-import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isIgnorableSlackReplyText, isLikelyCodexSlackActor, postSlackCommand } from "../_lib/slack.js";
+import { classifySlackReply, fetchSlackChannelMessages, fetchSlackThreadReplies, isIgnorableSlackReplyText, isLikelyCodexSlackActor, parseSlackRepoAck, postSlackCommand, validateSlackRepoAck } from "../_lib/slack.js";
 import { upsertMessages } from "../_lib/messages.js";
 import { refreshBridgeStatusFromCommands } from "../_lib/status.js";
 import { readBridgeStatus, isBridgeHeartbeatFresh } from "../_lib/status.js";
@@ -326,6 +326,12 @@ function serializeCommand(command, options = {}) {
     actorValidationPreDispatchFailed: Boolean(command.actorValidationPreDispatchFailed),
     slackThreadCreatedAt: String(command.slackPostedAt || "").trim(),
     slackAckObservedAt: String(command.slackAckObservedAt || "").trim(),
+    repoAckStatus: String(command.repoAckStatus || "").trim(),
+    repoAckAt: String(command.repoAckAt || "").trim(),
+    repoAckRepo: String(command.repoAckRepo || "").trim(),
+    repoAckProject: String(command.repoAckProject || "").trim(),
+    repoAckCommand: String(command.repoAckCommand || "").trim(),
+    repoAckWarning: String(command.repoAckWarning || "").trim(),
     projectId: String(command.projectId || "").trim(),
     projectLabel: String(command.projectLabel || "").trim(),
     projectCategory: String(command.projectCategory || "").trim(),
@@ -417,6 +423,17 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
 
   const classification = classifySlackReply(latestReply.text);
   const isTerminalReply = classification.status === "answered" || classification.status === "failed";
+  const ackReply = threadReplies.find((reply) => parseSlackRepoAck(reply.text)) || (parseSlackRepoAck(latestReply.text) ? latestReply : null);
+  const repoAck = parseSlackRepoAck(ackReply?.text || "");
+  const repoAckValidation = validateSlackRepoAck(command, repoAck);
+  const repoAckStatus = command.repoAckStatus === "validated" ? "validated" : repoAckValidation.status;
+  const repoAckWarning = repoAckStatus === "validated" ? "" : repoAckValidation.warning;
+  const diagnosticCode = progressStage === "slack-reply-received-unthreaded"
+    ? "slack_reply_unthreaded"
+    : (repoAckStatus === "warning" ? "repo_ack_warning" : "");
+  const diagnosticDetail = progressStage === "slack-reply-received-unthreaded"
+    ? "A Codex reply arrived outside the original Slack thread and was reconciled from recent channel history."
+    : repoAckWarning;
 
   await upsertCommandDispatchState(env, {
     id: command.id,
@@ -432,11 +449,15 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
       : "",
     firstAckAt: command.firstAckAt || new Date().toISOString(),
     timeoutPhase: "",
-    lastDiagnosticCode: progressStage === "slack-reply-received-unthreaded" ? "slack_reply_unthreaded" : "",
-    lastDiagnosticDetail: progressStage === "slack-reply-received-unthreaded"
-      ? "A Codex reply arrived outside the original Slack thread and was reconciled from recent channel history."
-      : "",
+    lastDiagnosticCode: diagnosticCode,
+    lastDiagnosticDetail: diagnosticDetail,
     slackAckObservedAt: command.slackAckObservedAt || new Date().toISOString(),
+    repoAckStatus,
+    repoAckAt: repoAck ? (command.repoAckAt || slackTsToIso(ackReply?.ts)) : command.repoAckAt,
+    repoAckRepo: repoAck?.repo || command.repoAckRepo,
+    repoAckProject: repoAck?.project || command.repoAckProject,
+    repoAckCommand: repoAck?.command || command.repoAckCommand,
+    repoAckWarning,
     slackChannelId: channelId,
     slackThreadTs: progressStage === "slack-reply-received-unthreaded"
       ? (latestReply.threadTs || latestReply.ts || threadTs)
