@@ -264,8 +264,7 @@ export async function readBridgeStatus(env) {
   }
 
   if (status.dispatchMode === DISPATCH_MODE_LOCAL && !isCloudDispatchConfigured(runtimeConfig)) {
-    status.executorLabel = "Cloud not configured; local bridge fallback";
-    status.lastError = status.lastError || "Missing OPENAI_API_KEY in Pages project.";
+    status.executorLabel = "Local bridge fallback";
   }
 
   status.slackActor = normalizeSlackActorStatus({

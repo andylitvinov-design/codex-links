@@ -618,6 +618,75 @@ function buildSlackActorProbeText(targetUserId) {
   ].join(" ");
 }
 
+export function parseSlackRepoAck(text) {
+  const value = normalizeText(text, 4000);
+  const line = value.split(/\r?\n/).map((entry) => entry.trim()).find((entry) => /^ACK\s+/i.test(entry));
+
+  if (!line) {
+    return null;
+  }
+
+  const result = {};
+  const pattern = /\b(repo|project|command)=([^\s]+)/gi;
+  let match;
+
+  while ((match = pattern.exec(line)) !== null) {
+    result[match[1].toLowerCase()] = normalizeText(match[2], 300);
+  }
+
+  if (!result.repo && !result.project && !result.command) {
+    return null;
+  }
+
+  return {
+    repo: result.repo || "",
+    project: result.project || "",
+    command: result.command || "",
+    raw: line
+  };
+}
+
+export function validateSlackRepoAck(command, ack) {
+  if (!ack) {
+    return {
+      status: "warning",
+      warning: "Missing repo ACK from Codex Cloud worker."
+    };
+  }
+
+  const expectedRepo = normalizeText(command?.targetRepo);
+  const expectedProject = normalizeText(command?.projectId || command?.threadId).toLowerCase();
+  const expectedCommand = normalizeText(command?.id);
+  const actualRepo = normalizeText(ack.repo);
+  const actualProject = normalizeText(ack.project).toLowerCase();
+  const actualCommand = normalizeText(ack.command);
+  const mismatches = [];
+
+  if (expectedRepo && actualRepo !== expectedRepo) {
+    mismatches.push(`repo expected ${expectedRepo}, got ${actualRepo || "empty"}`);
+  }
+
+  if (expectedProject && actualProject !== expectedProject) {
+    mismatches.push(`project expected ${expectedProject}, got ${actualProject || "empty"}`);
+  }
+
+  if (expectedCommand && actualCommand !== expectedCommand) {
+    mismatches.push(`command expected ${expectedCommand}, got ${actualCommand || "empty"}`);
+  }
+
+  if (mismatches.length) {
+    return {
+      status: "warning",
+      warning: `Repo ACK mismatch: ${mismatches.join("; ")}.`
+    };
+  }
+
+  return {
+    status: "validated",
+    warning: ""
+  };
+}
+
 function pickValidatedProbeReply(replies, targetUserId) {
   const normalizedTarget = normalizeText(targetUserId);
   const candidates = (Array.isArray(replies) ? replies : [])
@@ -848,6 +917,7 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
   const contextLine = contextFiles.length
     ? `Start by reading repo root context files in order: ${contextFiles.join(" -> ")}.`
     : "Start by reading the repo root context files first.";
+  const ackLine = `ACK repo=${targetRepo || "unknown"} project=${projectId || "unknown"} command=${normalizeText(command?.id) || "unknown"}`;
 
   return [
     `${String(env?.SLACK_CODEX_MENTION || "").trim() || ""}`.trim(),
@@ -870,7 +940,8 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
     "Important: Conversation Label is a human label, not a thread id.",
     "If Codex Thread ID is absent, create or reuse the correct Codex thread inside the target repository yourself.",
     contextLine,
-    "Immediately reply in this Slack thread with a short acknowledgement before doing the work.",
+    "Immediately reply in this Slack thread with this exact first acknowledgement line before doing the work:",
+    ackLine,
     "Keep every progress update and the final result in the same Slack thread.",
     "Delivery rule: create a branch and PR, never push directly to main.",
     productionUrl

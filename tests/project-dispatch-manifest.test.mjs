@@ -7,6 +7,18 @@ import {
   resolveProjectDispatchTarget
 } from "../functions/_lib/project-dispatch-manifest.js";
 
+test("dispatch manifest exposes links with repo context and deploy metadata", () => {
+  const project = findProjectTargetById("links");
+
+  assert.ok(project, "expected links project in dispatch manifest");
+  assert.equal(project.targetRepo, "andylitvinov-design/codex-links");
+  assert.equal(project.targetRepoUrl, "https://github.com/andylitvinov-design/codex-links");
+  assert.equal(project.workspacePath, "/Users/andriilitvinov/projects/MYPROJECTS/links");
+  assert.deepEqual(project.contextFiles, ["AGENTS.md", "README.md", "STATE.md"]);
+  assert.equal(project.cloudReady, true);
+  assert.equal(project.statusLabel, "cloud-ready");
+});
+
 test("dispatch manifest exposes ezohata as a visible cloud-ready project", () => {
   const project = findProjectTargetById("ezohata");
 

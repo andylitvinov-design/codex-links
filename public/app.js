@@ -56,7 +56,7 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260425-0854";
+const BUILD_VERSION = "20260425-0929";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -566,6 +566,14 @@ function formatRouteState(route, label) {
   return parts.join(" · ");
 }
 
+function getActiveRepoAckWarnings() {
+  return state.commands.filter((command) => {
+    const status = String(command?.status || "").trim().toLowerCase();
+    return ["queued", "dispatched", "processing"].includes(status)
+      && String(command?.repoAckStatus || "").trim().toLowerCase() === "warning";
+  });
+}
+
 function normalizeRepoSelectionId(value) {
   return String(value || "").trim().toLowerCase().replace(/^cloud:/, "");
 }
@@ -668,14 +676,14 @@ function getProjectStatusLabel(repo) {
 
 function getSelectedDispatchModeLabel() {
   if (getActiveDispatchMode() === "cloud") {
-    return "Codex Cloud";
+    return "Cloud via Slack";
   }
 
   if (getActiveDispatchMode() === "claude") {
-    return "Claude";
+    return "Claude Bridge";
   }
 
-  return "Bridge";
+  return "Local Bridge";
 }
 
 function formatExecutorStatus(status = {}) {
@@ -686,21 +694,25 @@ function formatExecutorStatus(status = {}) {
     formatRouteState("bridge", "Bridge"),
     formatRouteState("claude", "Claude")
   ].join(" | ");
+  const repoAckWarnings = getActiveRepoAckWarnings();
+  const ackWarningText = repoAckWarnings.length ? ` · repo ACK warning ${repoAckWarnings.length}` : "";
 
   if (selectedMode === "bridge") {
     const local = status?.localBridge || {};
-    return `Статус: ${selectedModeLabel} selected · local bridge · ${String(local.state || "idle").trim() || "idle"} · ${routes}`;
+    return `Статус: ${selectedModeLabel} selected · repo access · ${String(local.state || "idle").trim() || "idle"} · ${routes}${ackWarningText}`;
   }
 
   if (selectedMode === "claude") {
     const claude = status?.claudeBridge || {};
-    return `Статус: ${selectedModeLabel} selected · Claude bridge · ${String(claude.state || "idle").trim() || "idle"} · ${routes}`;
+    return `Статус: ${selectedModeLabel} selected · fallback/photo · ${String(claude.state || "idle").trim() || "idle"} · ${routes}${ackWarningText}`;
   }
 
-  const cloudLabel = getActiveCloudRoute() === "direct-openai" ? "direct OpenAI" : "via Slack";
+  const cloudLabel = getActiveCloudRoute() === "direct-openai"
+    ? "Direct OpenAI · text only · unavailable unless configured"
+    : "Cloud via Slack · repo checkout";
   const executorLabel = String(status?.executorLabel || "").trim() || "неизвестно";
   const executorState = String(status?.state || "").trim() || "idle";
-  return `Статус: ${selectedModeLabel} selected · ${cloudLabel} · backend ${executorLabel} · ${executorState} · ${routes}`;
+  return `Статус: ${selectedModeLabel} selected · ${cloudLabel} · backend ${executorLabel} · ${executorState} · ${routes}${ackWarningText}`;
 }
 
 function formatWatchdogMessage(rawValue) {
@@ -2604,11 +2616,14 @@ function renderAssistantReplyMarkup(replyEntry) {
   const title = getCommandAnswerTitle(linkedCommand);
   const executor = getCommandAnswerExecutor(linkedCommand);
   const replyThreadId = String(linkedCommand?.threadId || message?.threadId || "").trim();
+  const replyAt = String(message?.createdAt || replyEntry?.createdAt || linkedCommand?.resultAt || "").trim();
+  const replyTime = replyAt ? formatDate(replyAt) : "";
 
   return `
     <details class="command-answer" data-entry-id="${escapeHtml(messageId)}" data-executor="${escapeHtml(executor)}">
       <summary class="command-answer-summary">
         <span class="command-answer-title">${escapeHtml(title)}</span>
+        ${replyTime ? `<time class="command-answer-time" datetime="${escapeHtml(replyAt)}">ответ: ${escapeHtml(replyTime)}</time>` : ""}
       </summary>
       <div class="command-answer-body">
         <p class="command-answer-text">${escapeHtml(replyEntry?.text || "")}</p>

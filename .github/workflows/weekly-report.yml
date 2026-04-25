@@ -1,0 +1,60 @@
+name: Weekly Management Report
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Optional YYYY-MM-DD report date override"
+        required: false
+        type: string
+      allow_stale_source_date:
+        description: "Allow publishing when dashboard source dates are stale"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  publish-weekly-report:
+    runs-on: ubuntu-latest
+    env:
+      LINKS_API_BASE: ${{ vars.LINKS_API_BASE || 'https://codex-links.pages.dev' }}
+      LINKS_WRITE_TOKEN: ${{ secrets.LINKS_WRITE_TOKEN }}
+      MANAGEMENT_DATA_ROOT: ${{ vars.MANAGEMENT_DATA_ROOT || 'management-source/dashboard-thinking/data' }}
+      REPORT_DATE: ${{ github.event.inputs.report_date || '' }}
+      ALLOW_STALE_SOURCE_DATE: ${{ github.event.inputs.allow_stale_source_date || 'false' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout management data
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.MANAGEMENT_DATA_REPOSITORY || 'andylitvinov-design/brain-management' }}
+          token: ${{ secrets.MANAGEMENT_REPO_TOKEN || github.token }}
+          path: management-source
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dry run management report
+        run: |
+          args=(--dry-run)
+          if [[ -n "${REPORT_DATE}" ]]; then args+=(--date "${REPORT_DATE}" --allow-date-override); fi
+          if [[ "${ALLOW_STALE_SOURCE_DATE}" == "true" ]]; then args+=(--allow-stale-source-date); fi
+          node scripts/publish-management-report.mjs "${args[@]}"
+
+      - name: Publish management report
+        run: |
+          args=()
+          if [[ -n "${REPORT_DATE}" ]]; then args+=(--date "${REPORT_DATE}" --allow-date-override); fi
+          if [[ "${ALLOW_STALE_SOURCE_DATE}" == "true" ]]; then args+=(--allow-stale-source-date); fi
+          node scripts/publish-management-report.mjs "${args[@]}"
