@@ -174,6 +174,7 @@ Quick helpers added to this repo:
 - Local/prod setup check: `npm run cloud:check`
 - End-to-end text smoke for the default Slack cloud path: `npm run cloud:smoke`
 - End-to-end text smoke for the optional direct path: `CODEX_LINKS_SMOKE_CLOUD_ROUTE=direct npm run cloud:smoke`
+- Cloud production delivery guardian: `npm run cloud:guardian`
 - Bulk Pages secret upload from `.dev.vars`: `npm run cloud:install-secrets`
 - KV-backed runtime config upload from `.dev.vars`: `npm run cloud:save-config`
 
@@ -189,6 +190,7 @@ Operational contract for `cloud-via-slack`:
 - Set `SLACK_CODEX_DISPATCH_TOKEN` to a Slack user token for the human ChatGPT/Codex account linked to that workspace; bot-originated messages from `Codex Links` trigger the OpenAI Codex "connect your ChatGPT Codex account" prompt instead of starting work.
 - Optional: set `SLACK_ACTOR_PROBE_COOLDOWN_MS=30000` to suppress repeated live actor probes during temporary Slack/Codex disconnects.
 - the local launchd agents in this repo cover only `local-bridge` and `claude-bridge`
+- `cloud:guardian` is the local Mac runner that verifies Cloud PR/merge/live site delivery and mirrors terminal reports into the Codex Desktop `Codex Links Cloud Reports` thread; install its 60s launchd schedule with `scripts/install-cloud-guardian-launch-agent.sh`
 - the Slack/Codex cloud worker is external to this repo; if it stops replying, the route will dispatch to Slack and then fall back to bridge
 
 Recovery checklist:
@@ -203,7 +205,8 @@ Local process management:
 
 - local bridge: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-bridge.plist`
 - Claude bridge: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-claude-bridge.plist`
-- install or refresh launchd agents with `scripts/install-bridge-launch-agent.sh` and `scripts/install-claude-bridge-launch-agent.sh`
+- Cloud guardian: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-cloud-guardian.plist`
+- install or refresh launchd agents with `scripts/install-bridge-launch-agent.sh`, `scripts/install-claude-bridge-launch-agent.sh`, and `scripts/install-cloud-guardian-launch-agent.sh`
 
 Useful log paths:
 
@@ -211,6 +214,8 @@ Useful log paths:
 - `~/Library/Logs/codex-links-bridge.error.log`
 - `~/Library/Logs/codex-links-claude-bridge.launchd.log`
 - `~/Library/Logs/codex-links-claude-bridge.launchd.error.log`
+- `~/Library/Logs/codex-links-cloud-guardian.launchd.log`
+- `~/Library/Logs/codex-links-cloud-guardian.launchd.error.log`
 
 ## Local Development
 
