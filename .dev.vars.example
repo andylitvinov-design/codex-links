@@ -1,4 +1,5 @@
 LINKS_WRITE_TOKEN=replace-with-a-long-random-token
+ADMIN_TOKEN=replace-with-a-long-random-admin-token
 COMMAND_DISPATCH_MODE=cloud-via-slack
 # Optional direct OpenAI API route only. cloud-via-slack does not require it.
 OPENAI_API_KEY=

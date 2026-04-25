@@ -29,12 +29,15 @@ export function getWriteToken(request) {
 }
 
 export function isAuthorized(request, env) {
-  const expected = env.LINKS_WRITE_TOKEN || "";
+  const expectedTokens = [
+    env.ADMIN_TOKEN,
+    env.LINKS_WRITE_TOKEN
+  ].map((value) => String(value || "").trim()).filter(Boolean);
   const provided = getWriteToken(request);
 
-  if (!expected || !provided) {
+  if (!expectedTokens.length || !provided) {
     return false;
   }
 
-  return constantTimeEqual(provided, expected);
+  return expectedTokens.some((expected) => constantTimeEqual(provided, expected));
 }
