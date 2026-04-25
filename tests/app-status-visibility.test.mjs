@@ -18,3 +18,12 @@ test("UI maps Slack actor validation failures to a visible diagnostic message", 
   assert.match(source, /задача не отправлена/i);
   assert.match(source, /diagnosticCode === "codex_target_user_invalid"/);
 });
+
+test("UI blocks degraded cloud routes instead of silently sending", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.match(source, /function isRouteHealthy\(route\)/);
+  assert.match(source, /Cloud route сейчас недоступен/);
+  assert.match(source, /const dispatchMode = requestedDispatchMode;/);
+  assert.doesNotMatch(source, /hasPhotoAttachment && requestedDispatchMode === "cloud"\s*\?\s*"bridge"/);
+});

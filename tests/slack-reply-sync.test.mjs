@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { writeCommands, getCommandById } from "../functions/_lib/commands.js";
 import { readMessages } from "../functions/_lib/messages.js";
 import { syncSlackCommandReplies } from "../functions/api/commands.js";
+import { classifySlackReply } from "../functions/_lib/slack.js";
 
 function createMockEnv() {
   const store = new Map();
@@ -176,6 +177,25 @@ test("syncSlackCommandReplies persists terminal Slack replies and marks them mat
   assert.equal(updated?.replyMatchedBy, "thread");
   assert.equal(messages.length, 1);
   assert.match(messages[0]?.text || "", /PR:/);
+});
+
+test("classifySlackReply extracts structured production delivery block", () => {
+  const result = classifySlackReply([
+    "Done.",
+    "COMMAND_ID: cmd-123",
+    "PR_URL: https://github.com/example/repo/pull/42",
+    "BRANCH: codex/fix-prod",
+    "MERGE_COMMIT: abcdef1234567890",
+    "LIVE_URL: https://example.pages.dev/",
+    "VERIFY_STATUS: production-verified"
+  ].join("\n"));
+
+  assert.equal(result.status, "answered");
+  assert.equal(result.prUrl, "https://github.com/example/repo/pull/42");
+  assert.equal(result.branchName, "codex/fix-prod");
+  assert.equal(result.mergeCommit, "abcdef1234567890");
+  assert.equal(result.productionUrl, "https://example.pages.dev/");
+  assert.equal(result.deliveryStatus, "production-verified");
 });
 
 test("syncSlackCommandReplies treats photo observation replies as terminal", async () => {

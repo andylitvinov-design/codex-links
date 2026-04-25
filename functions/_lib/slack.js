@@ -8,9 +8,11 @@ const SLACK_PHOTO_UPLOAD_RETRY_COUNT = 3;
 const SLACK_PHOTO_UPLOAD_RETRY_DELAY_MS = 1_500;
 const DEFAULT_SLACK_ACTOR_PROBE_TIMEOUT_MS = 30_000;
 const DEFAULT_SLACK_ACTOR_PROBE_POLL_MS = 2_000;
+const DEFAULT_SLACK_ACTOR_PROBE_COOLDOWN_MS = 30_000;
 const DEFAULT_SLACK_ACTOR_ACTIVITY_FRESHNESS_MS = 15 * 60_000;
 const DEFAULT_SLACK_ACTOR_VALIDATION_CACHE_TTL_MS = 5 * 60_000;
 const SLACK_ACTOR_VALIDATION_CACHE_KEY_PREFIX = "slack_actor_validation_cache:";
+const SLACK_ACTOR_PROBE_COOLDOWN_KEY_PREFIX = "slack_actor_probe_cooldown:";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -110,6 +112,16 @@ function getSlackActorProbePollMs(env, fallback = DEFAULT_SLACK_ACTOR_PROBE_POLL
   return configured;
 }
 
+function getSlackActorProbeCooldownMs(env, fallback = DEFAULT_SLACK_ACTOR_PROBE_COOLDOWN_MS) {
+  const configured = Number(env?.SLACK_ACTOR_PROBE_COOLDOWN_MS);
+
+  if (!Number.isFinite(configured) || configured < 1_000) {
+    return fallback;
+  }
+
+  return configured;
+}
+
 function getSlackActorActivityFreshnessMs(env, fallback = DEFAULT_SLACK_ACTOR_ACTIVITY_FRESHNESS_MS) {
   const configured = Number(env?.SLACK_ACTOR_ACTIVITY_FRESHNESS_MS);
 
@@ -143,6 +155,10 @@ function getSlackActorValidationCacheKey(channel, targetUserId) {
   return `${SLACK_ACTOR_VALIDATION_CACHE_KEY_PREFIX}${normalizeText(channel)}:${normalizeText(targetUserId)}`;
 }
 
+function getSlackActorProbeCooldownKey(channel, targetUserId) {
+  return `${SLACK_ACTOR_PROBE_COOLDOWN_KEY_PREFIX}${normalizeText(channel)}:${normalizeText(targetUserId)}`;
+}
+
 async function readSlackActorValidationCache(env, channel, targetUserId) {
   const store = env?.LINKS_STORE;
 
@@ -174,6 +190,62 @@ async function readSlackActorValidationCache(env, channel, targetUserId) {
   }
 
   return normalized;
+}
+
+async function readSlackActorProbeCooldown(env, channel, targetUserId) {
+  const store = env?.LINKS_STORE;
+
+  if (!store?.get) {
+    return null;
+  }
+
+  const cached = await store.get(getSlackActorProbeCooldownKey(channel, targetUserId), "json").catch(() => null);
+
+  if (!cached || typeof cached !== "object") {
+    return null;
+  }
+
+  const checkedAt = normalizeText(cached.checkedAt);
+  const ageMs = Date.now() - Date.parse(checkedAt);
+
+  if (!checkedAt || !Number.isFinite(ageMs) || ageMs < 0 || ageMs > getSlackActorProbeCooldownMs(env) + 5_000) {
+    return null;
+  }
+
+  return buildSlackActorValidationResult({
+    validationStatus: "unverified",
+    code: "codex_target_actor_probe_cooling_down",
+    message: "Slack actor validation probe is cooling down.",
+    detail: "A recent live actor probe already ran. Suppressing a duplicate probe to avoid Slack spam; retry after the cooldown window.",
+    configuredUserId: targetUserId,
+    probeChannelId: cached.probeChannelId,
+    probeMessageTs: cached.probeMessageTs,
+    probeThreadTs: cached.probeThreadTs,
+    lastValidatedAt: checkedAt
+  });
+}
+
+async function writeSlackActorProbeCooldown(env, channel, targetUserId, input = {}) {
+  const store = env?.LINKS_STORE;
+
+  if (!store?.put) {
+    return;
+  }
+
+  const cooldownMs = getSlackActorProbeCooldownMs(env);
+  const jitterMs = Math.floor(Math.random() * Math.min(5_000, cooldownMs));
+  const expirationTtl = Math.max(1, Math.ceil((cooldownMs + jitterMs) / 1000));
+
+  await store.put(
+    getSlackActorProbeCooldownKey(channel, targetUserId),
+    JSON.stringify({
+      checkedAt: new Date().toISOString(),
+      probeChannelId: normalizeText(input.probeChannelId),
+      probeMessageTs: normalizeText(input.probeMessageTs),
+      probeThreadTs: normalizeText(input.probeThreadTs)
+    }),
+    { expirationTtl }
+  ).catch(() => {});
 }
 
 async function writeSlackActorValidationCache(env, channel, targetUserId, result) {
@@ -585,7 +657,7 @@ export async function validateSlackCodexActor(env, options = {}) {
 
   const cachedValidation = await readSlackActorValidationCache(env, channel, targetUserId);
 
-  if (cachedValidation) {
+  if (cachedValidation?.validationStatus === "validated") {
     return cachedValidation;
   }
 
@@ -625,12 +697,25 @@ export async function validateSlackCodexActor(env, options = {}) {
     return result;
   }
 
+  const probeCooldown = await readSlackActorProbeCooldown(env, channel, targetUserId);
+
+  if (probeCooldown) {
+    return probeCooldown;
+  }
+
+  if (cachedValidation) {
+    return cachedValidation;
+  }
+
   const timeoutMs = Number.isFinite(Number(options.timeoutMs))
     ? Number(options.timeoutMs)
     : getSlackActorProbeTimeoutMs(env);
   const pollIntervalMs = Number.isFinite(Number(options.pollIntervalMs)) && Number(options.pollIntervalMs) > 0
     ? Number(options.pollIntervalMs)
     : getSlackActorProbePollMs(env);
+
+  await writeSlackActorProbeCooldown(env, channel, targetUserId);
+
   const probeResponse = await callSlackApi(token, "chat.postMessage", {
     channel,
     text: buildSlackActorProbeText(targetUserId),
@@ -644,6 +729,11 @@ export async function validateSlackCodexActor(env, options = {}) {
   const probeChannelId = normalizeText(probeResponse.channel) || channel;
   const probeMessageTs = normalizeText(probeResponse.ts);
   const probeThreadTs = normalizeText(probeResponse.message?.thread_ts || probeResponse.ts);
+  await writeSlackActorProbeCooldown(env, channel, targetUserId, {
+    probeChannelId,
+    probeMessageTs,
+    probeThreadTs
+  });
   const startedAt = Date.now();
 
   while ((Date.now() - startedAt) < timeoutMs) {
@@ -733,6 +823,11 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
   const targetRepo = normalizeText(command?.targetRepo);
   const targetRepoUrl = normalizeText(command?.targetRepoUrl);
   const targetWorkspacePath = normalizeText(command?.targetWorkspacePath);
+  const deploy = command?.deploy && typeof command.deploy === "object" ? command.deploy : {};
+  const productionBranch = normalizeText(deploy.productionBranch) || "main";
+  const productionUrl = normalizeText(deploy.productionUrl);
+  const smokePath = normalizeText(deploy.smokePath) || "/";
+  const versionPath = normalizeText(deploy.versionPath);
   const codexThreadId = normalizeText(resolvedCodexThreadId) || (/^(urn:uuid:)?[0-9a-fA-F-]{36}$/.test(threadId) ? threadId : "");
   const contextFiles = Array.isArray(command?.targetContextFiles) && command.targetContextFiles.length
     ? command.targetContextFiles.map((item) => normalizeText(item)).filter(Boolean)
@@ -763,6 +858,10 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
     `Repository: ${targetRepo}`,
     repoUrlLine,
     workspacePathLine,
+    productionUrl ? `Production URL: ${productionUrl}` : "",
+    productionUrl ? `Production branch: ${productionBranch}` : "",
+    productionUrl ? `Production smoke path: ${smokePath}` : "",
+    versionPath ? `Production version path: ${versionPath}` : "",
     `Conversation Label: ${threadLabel}`,
     codexThreadId ? `Codex Thread ID: ${codexThreadId}` : "",
     `Command ID: ${normalizeText(command?.id)}`,
@@ -774,6 +873,16 @@ export function buildSlackCommandPrompt(command, env, resolvedCodexThreadId = ""
     "Immediately reply in this Slack thread with a short acknowledgement before doing the work.",
     "Keep every progress update and the final result in the same Slack thread.",
     "Delivery rule: create a branch and PR, never push directly to main.",
+    productionUrl
+      ? `Production rule: after PR checks pass, merge into ${productionBranch}, wait for production deploy, then verify ${productionUrl}${smokePath === "/" ? "" : smokePath}.`
+      : "",
+    "Final reply must include this exact structured block:",
+    "COMMAND_ID: <command id>",
+    "PR_URL: <GitHub PR URL or none>",
+    "BRANCH: <branch name or none>",
+    "MERGE_COMMIT: <merge commit SHA or none>",
+    "LIVE_URL: <production URL or none>",
+    "VERIFY_STATUS: <production-verified, blocked, or none>",
     command?.photo
       ? "For photo-based requests, the final answer must start with one short sentence describing what you observed in the image."
       : "",
@@ -809,7 +918,7 @@ export async function postSlackCommand(env, command, mention) {
 
   const actorValidation = await validateSlackCodexActor(env);
 
-  if (actorValidation.validationStatus === "invalid") {
+  if (actorValidation.validationStatus !== "validated") {
     throw withCommandError(
       new Error(actorValidation.detail || actorValidation.message || "Configured Slack target actor is not validated."),
       {
@@ -957,10 +1066,22 @@ export function extractSlackMessageText(event) {
 
 export function extractGithubPrUrl(text) {
   const match = String(text || "").match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/i);
-  return match ? match[0] : "";
+  return match ? match[0].replace(/[>,.]+$/, "") : "";
+}
+
+function extractStructuredField(text, name) {
+  const pattern = new RegExp(`^\\s*${name}\\s*:\\s*(.+?)\\s*$`, "im");
+  const match = String(text || "").match(pattern);
+  return match ? normalizeText(match[1], 400) : "";
 }
 
 export function extractBranchName(text) {
+  const structured = extractStructuredField(text, "BRANCH");
+
+  if (structured && structured.toLowerCase() !== "none") {
+    return structured;
+  }
+
   const explicit = String(text || "").match(/branch(?:\s+name)?[:\s]+([A-Za-z0-9._/-]+)/i);
 
   if (explicit) {
@@ -969,6 +1090,32 @@ export function extractBranchName(text) {
 
   const codexBranch = String(text || "").match(/\bcodex\/[A-Za-z0-9._/-]+\b/);
   return codexBranch ? codexBranch[0] : "";
+}
+
+export function extractMergeCommit(text) {
+  const structured = extractStructuredField(text, "MERGE_COMMIT");
+  const value = structured || String(text || "").match(/\bmerge commit[:\s]+([a-f0-9]{7,40})\b/i)?.[1] || "";
+  return /^[a-f0-9]{7,40}$/i.test(value) ? value : "";
+}
+
+export function extractProductionUrl(text) {
+  const structured = extractStructuredField(text, "LIVE_URL");
+  const value = structured || "";
+  return /^https?:\/\//i.test(value) ? value.replace(/[>,.]+$/, "") : "";
+}
+
+export function extractVerifyStatus(text) {
+  const structured = extractStructuredField(text, "VERIFY_STATUS").toLowerCase();
+
+  if (structured.includes("pass") || structured.includes("verified") || structured.includes("ok")) {
+    return "production-verified";
+  }
+
+  if (structured.includes("fail") || structured.includes("blocked") || structured.includes("error")) {
+    return "blocked";
+  }
+
+  return "";
 }
 
 function isLikelyProgressOnlySlackReply(text) {
@@ -1024,6 +1171,27 @@ export function classifySlackReply(text) {
   const value = String(text || "").trim();
   const lower = value.toLowerCase();
   const prUrl = extractGithubPrUrl(value);
+  const branchName = extractBranchName(value);
+  const mergeCommit = extractMergeCommit(value);
+  const productionUrl = extractProductionUrl(value);
+  const verifyStatus = extractVerifyStatus(value);
+  const deliveryStatus = verifyStatus
+    || (mergeCommit ? "merged" : (prUrl ? "pr-ready" : ""));
+
+  if (
+    /\bconnect to your chatgpt codex account\b/i.test(value)
+    || /\bafter connecting, tag codex again to continue\b/i.test(value)
+  ) {
+    return {
+      status: "failed",
+      progressStage: "codex-account-not-connected",
+      prUrl,
+      branchName,
+      mergeCommit,
+      productionUrl,
+      deliveryStatus: "blocked"
+    };
+  }
 
   if (
     /\bconnect to your chatgpt codex account\b/i.test(value)
@@ -1042,7 +1210,10 @@ export function classifySlackReply(text) {
       status: "processing",
       progressStage: "ignored-helper",
       prUrl,
-      branchName: ""
+      branchName,
+      mergeCommit,
+      productionUrl,
+      deliveryStatus
     };
   }
 
@@ -1053,7 +1224,10 @@ export function classifySlackReply(text) {
       status: "failed",
       progressStage: "failed",
       prUrl,
-      branchName: extractBranchName(value)
+      branchName,
+      mergeCommit,
+      productionUrl,
+      deliveryStatus: deliveryStatus || "blocked"
     };
   }
 
@@ -1066,7 +1240,10 @@ export function classifySlackReply(text) {
       status: "answered",
       progressStage: "answered",
       prUrl,
-      branchName: extractBranchName(value)
+      branchName,
+      mergeCommit,
+      productionUrl,
+      deliveryStatus
     };
   }
 
@@ -1075,7 +1252,10 @@ export function classifySlackReply(text) {
       status: "processing",
       progressStage: "processing",
       prUrl,
-      branchName: extractBranchName(value)
+      branchName,
+      mergeCommit,
+      productionUrl,
+      deliveryStatus: deliveryStatus || "cloud-running"
     };
   }
 
@@ -1083,7 +1263,10 @@ export function classifySlackReply(text) {
     status: "answered",
     progressStage: "answered",
     prUrl,
-    branchName: extractBranchName(value)
+    branchName,
+    mergeCommit,
+    productionUrl,
+    deliveryStatus
   };
 }
 

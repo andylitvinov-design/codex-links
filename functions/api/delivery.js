@@ -116,6 +116,41 @@ export async function onRequest(context) {
       return json({ error: "clientId is required." }, { status: 400 });
     }
 
+    if (activeOnly) {
+      const [commands, status] = await Promise.all(usePublicScope
+        ? [
+            readCommands(env),
+            deriveBridgeStatusFromCommands(env)
+          ]
+        : [
+            getCommandsForClient(env, clientId),
+            deriveBridgeStatusFromCommands(env)
+          ]);
+      const visibleCommands = usePublicScope
+        ? commands.filter((command) => !isHiddenPublicEntry(command))
+        : commands;
+      const filteredCommands = visibleCommands.filter((command) => isActiveCommand(command));
+      const commandIds = new Set(filteredCommands.map((command) => String(command?.id || "").trim()).filter(Boolean));
+      const messages = commandIds.size
+        ? await (usePublicScope ? readMessages(env) : getMessagesForClient(env, clientId))
+        : [];
+      const visibleMessages = usePublicScope
+        ? messages.filter((message) => !isHiddenPublicEntry(message))
+        : messages;
+      const filteredMessages = visibleMessages.filter((message) => {
+        const commandId = String(message?.commandId || "").trim();
+        return commandId && commandIds.has(commandId);
+      });
+
+      return json({
+        serverTime: new Date().toISOString(),
+        status,
+        commands: filteredCommands.map((command) => serializeCommand(command)),
+        messages: filteredMessages,
+        reports: []
+      });
+    }
+
     const [commands, messages, reports, status] = await Promise.all(usePublicScope
       ? [
           readCommands(env),

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { withCodexAppServer } from "./codex-app-rpc.mjs";
 import { resolveClaudeBin, validateClaudeCli } from "./_lib/claude-cli.mjs";
@@ -18,6 +18,8 @@ const token = process.env.LINKS_WRITE_TOKEN;
 const BRIDGE_DISPATCH_MODE = process.env.BRIDGE_DISPATCH_MODE || "local-bridge";
 const BRIDGE_EXECUTOR = (process.env.BRIDGE_EXECUTOR || "codex").trim().toLowerCase() === "claude" ? "claude" : "codex";
 const BRIDGE_CODEX_NEW_THREAD_PER_COMMAND = String(process.env.BRIDGE_CODEX_NEW_THREAD_PER_COMMAND || "1").trim() !== "0";
+const PROCESSOR_ID = String(process.env.BRIDGE_PROCESSOR_ID || "").trim()
+  || `launchd-${BRIDGE_EXECUTOR}-bridge:${hostname()}:${process.pid}`;
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 const READ_TIMEOUT_MS = 15 * 1000;
 const WRITE_TIMEOUT_MS = 60 * 1000;
@@ -968,7 +970,7 @@ async function claimNextCommand(options = {}) {
       },
       body: JSON.stringify({
         action: "claim",
-        processorId: "launchd-bridge",
+        processorId: PROCESSOR_ID,
         leaseMs: CLAIM_LEASE_MS,
         dispatchMode: BRIDGE_DISPATCH_MODE,
         textOnly
@@ -1150,6 +1152,9 @@ async function markAnswered(commandId, assistantText, completedAt, processorId =
     const body = await response.text();
     throw new Error(`Failed to mark command answered: ${response.status} ${body}`);
   }
+
+  const data = await response.json().catch(() => ({}));
+  return data?.command || null;
 }
 
 async function markFailed(commandId, errorMessage, completedAt, processorId = "") {
@@ -1179,6 +1184,9 @@ async function markFailed(commandId, errorMessage, completedAt, processorId = ""
     const body = await response.text();
     throw new Error(`Failed to mark command failed: ${response.status} ${body}`);
   }
+
+  const data = await response.json().catch(() => ({}));
+  return data?.command || null;
 }
 
 async function syncMessages(messages) {
@@ -1252,6 +1260,22 @@ async function wasCommandAnswered(commandId) {
     String(entry?.id || "").trim() === String(commandId).trim()
     && String(entry?.status || "").trim().toLowerCase() === "answered"
   );
+}
+
+async function isProcessorOwner(commandId, processorId) {
+  const normalizedProcessorId = String(processorId || "").trim();
+
+  if (!commandId || !normalizedProcessorId) {
+    return false;
+  }
+
+  const command = await fetchCommandById(commandId).catch((error) => {
+    void appendBridgeErrorLog("isProcessorOwner.fetch", error, { commandId });
+    return null;
+  });
+
+  return String(command?.status || "").trim().toLowerCase() === "processing"
+    && String(command?.processorId || "").trim() === normalizedProcessorId;
 }
 
 async function publishBridgeStatus(status) {
@@ -1655,6 +1679,14 @@ async function flushCompletedBatch(batchCompleted, batchMessages) {
 
   for (const command of batchCompleted) {
     const message = batchMessages.find((entry) => entry.commandId === command.id) || null;
+
+    if (!(await isProcessorOwner(command.id, command.processorId))) {
+      await appendBridgeErrorLog("flushCompletedBatch.skipLostProcessorOwnership", new Error("Skipping completion from a bridge worker that no longer owns the command."), {
+        commandId: command.id,
+        processorId: command.processorId
+      });
+      continue;
+    }
 
     if (command.result === "failed") {
       try {

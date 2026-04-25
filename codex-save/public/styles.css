@@ -188,6 +188,13 @@ h1 {
   align-items: center;
 }
 
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -223,6 +230,25 @@ h1 {
 .badge[data-status="unknown"] {
   color: var(--unknown);
   background: rgba(84, 96, 111, 0.12);
+}
+
+.badge-hourglass {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.copy-field {
+  width: 100%;
+  min-height: 260px;
+  margin-top: 12px;
+  border: 1px solid rgba(18, 53, 36, 0.12);
+  border-radius: 14px;
+  padding: 12px;
+  resize: vertical;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.86);
+  font: 13px/1.45 "SFMono-Regular", "SF Mono", Consolas, monospace;
+  white-space: pre;
 }
 
 .check-summary,

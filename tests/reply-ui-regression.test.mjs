@@ -36,10 +36,30 @@ test("reply cards use executor-specific titles", () => {
   assert.match(appSource, /return "Ответ Claude";/);
 });
 
-test("timeline hides delivery note once grouped replies are present", () => {
+test("reply cards expose executor-specific accent hooks", () => {
+  assert.match(appSource, /function getCommandAnswerExecutor\(command\)/);
+  assert.match(appSource, /data-executor="\$\{escapeHtml\(executor\)\}"/);
+  assert.match(appSource, /element\.dataset\.executor = getCommandAnswerExecutor\(entry\.linkedCommand\);/);
+});
+
+test("cloud is blue and Claude is orange across controls and reply accents", () => {
+  assert.match(appSource, /value === "cloud-via-slack" \|\| value === "slack-codex-cloud"/);
+  assert.match(appSource, /value === "claude" \|\| value === "claude-bridge"/);
+  assert.match(styleSource, /\.dispatch-toggle-button\[data-mode="cloud"\] \.dispatch-toggle-lamp \{[^}]*rgba\(59, 130, 246/);
+  assert.match(styleSource, /\.dispatch-toggle-button\.is-active\[data-mode="cloud"\] \{[^}]*#1d4ed8/);
+  assert.match(styleSource, /\.dispatch-toggle-button\[data-mode="claude"\] \.dispatch-toggle-lamp \{[^}]*rgba\(245, 158, 11/);
+  assert.match(styleSource, /\.dispatch-toggle-button\.is-active\[data-mode="claude"\] \{[^}]*#9a4d04/);
+  assert.match(styleSource, /\.command-item-assistant\[data-executor="cloud"\] \{[^}]*inset 4px 0 0 rgba\(59, 130, 246/);
+  assert.match(styleSource, /\.command-item-assistant\[data-executor="claude"\] \{[^}]*inset 4px 0 0 rgba\(245, 158, 11/);
+  assert.match(styleSource, /\.command-answer\[data-executor="cloud"\] \{[^}]*inset 4px 0 0 rgba\(59, 130, 246/);
+  assert.match(styleSource, /\.command-answer\[data-executor="claude"\] \{[^}]*inset 4px 0 0 rgba\(245, 158, 11/);
+});
+
+test("timeline can keep production delivery note alongside grouped replies", () => {
   assert.match(appSource, /const hasReplies = Array\.isArray\(entry\.replies\) && entry\.replies\.length > 0;/);
-  assert.match(appSource, /const deliveryStatus = hasReplies \? null : getCommandDeliveryStatus\(command\);/);
-  assert.match(appSource, /: \(hasReplies \? null : \(getCommandDeliveryStatus\(linkedCommand\) \|\| getFallbackMessageDeliveryStatus\(message\?\.commandId\)\)\);/);
+  assert.match(appSource, /const deliveryStatus = getCommandDeliveryStatus\(command\);/);
+  assert.match(appSource, /: \(getCommandDeliveryStatus\(linkedCommand\) \|\| \(hasReplies \? null : getFallbackMessageDeliveryStatus\(message\?\.commandId\)\)\);/);
+  assert.match(appSource, /deliveryStatus === "production-verified"/);
 });
 
 test("timeline tabs expose unread signals for inactive tabs", () => {

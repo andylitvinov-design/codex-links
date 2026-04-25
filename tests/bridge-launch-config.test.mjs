@@ -100,6 +100,16 @@ test("bridge loop supports bounded in-flight workers instead of a strictly seria
   assert.match(source, /textOnly: true/);
 });
 
+test("bridge runner uses a unique processor id and checks ownership before syncing completions", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /const PROCESSOR_ID = String\(process\.env\.BRIDGE_PROCESSOR_ID/);
+  assert.match(source, /process\.pid/);
+  assert.match(source, /processorId: PROCESSOR_ID/);
+  assert.match(source, /async function isProcessorOwner\(commandId, processorId\)/);
+  assert.match(source, /await isProcessorOwner\(command\.id, command\.processorId\)/);
+});
+
 test("bridge loop keeps retrying after claim timeouts instead of aborting the runner", async () => {
   const source = await readFile(bridgeScriptPath, "utf8");
 

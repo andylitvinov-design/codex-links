@@ -64,7 +64,12 @@ test("postSlackCommand uploads attached photos into the original Slack thread", 
       return {
         ok: true,
         async json() {
-          return { ok: true, messages: [] };
+          return {
+            ok: true,
+            messages: [
+              { ts: "1712345678.000050", user: "U999", text: "Ready for cloud photo work." }
+            ]
+          };
         }
       };
     }
@@ -200,7 +205,7 @@ test("postSlackCommand retries photo upload before succeeding", async () => {
     }
 
     if (String(url).includes("/api/conversations.history")) {
-      return { ok: true, async json() { return { ok: true, messages: [] }; } };
+      return { ok: true, async json() { return { ok: true, messages: [{ ts: "1712345678.000050", user: "U999", text: "Ready for cloud photo work." }] }; } };
     }
 
     if (String(url).includes("/api/conversations.replies")) {
@@ -315,7 +320,7 @@ test("postSlackCommand keeps the Slack thread alive when photo upload fails", as
     }
 
     if (String(url).includes("/api/conversations.history")) {
-      return { ok: true, async json() { return { ok: true, messages: [] }; } };
+      return { ok: true, async json() { return { ok: true, messages: [{ ts: "1712345678.000050", user: "U999", text: "Ready for cloud photo work." }] }; } };
     }
 
     if (String(url).includes("/api/conversations.replies")) {

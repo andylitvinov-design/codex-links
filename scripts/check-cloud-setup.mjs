@@ -23,7 +23,10 @@ const OPTIONAL = [
   "SLACK_CODEX_DISPATCH_TOKEN",
   "SLACK_SIGNING_SECRET",
   "SLACK_CODEX_CHANNEL_ID",
-  "SLACK_CODEX_USER_ID"
+  "SLACK_CODEX_USER_ID",
+  "SLACK_ACTOR_LIVE_PROBE",
+  "SLACK_ACTOR_PROBE_TIMEOUT_MS",
+  "SLACK_ACTOR_PROBE_POLL_MS"
 ];
 
 function parseEnvFile(filePath) {
@@ -136,10 +139,16 @@ async function main() {
   console.log("");
 
   const missing = REQUIRED.filter((key) => !String(merged[key] || "").trim());
+  const configuredMode = String(merged.COMMAND_DISPATCH_MODE || "").trim().toLowerCase();
+  const wantsDirectOpenAi = configuredMode === "direct-openai" || configuredMode === "cloud";
   const hasOpenAiKey = Boolean(String(merged.OPENAI_API_KEY || "").trim());
   const hasSlackRoute = Boolean(String(merged.SLACK_BOT_TOKEN || "").trim()) && Boolean(String(merged.SLACK_CODEX_CHANNEL_ID || "").trim());
   const hasTrustedBridge = Boolean(String(merged.CLOUD_BRIDGE_BASE_URL || "").trim()) && Boolean(String(merged.CLOUD_BRIDGE_SHARED_SECRET || "").trim());
   const hasCloudRoute = hasTrustedBridge || hasOpenAiKey || hasSlackRoute;
+
+  if (wantsDirectOpenAi && !hasOpenAiKey) {
+    missing.push("OPENAI_API_KEY for direct OpenAI mode");
+  }
 
   if (!hasCloudRoute) {
     missing.push("OPENAI_API_KEY or Slack cloud route or trusted cloud bridge");
@@ -152,6 +161,10 @@ async function main() {
     }
   } else {
     console.log("All required local values are present.");
+  }
+
+  if (!hasOpenAiKey && !wantsDirectOpenAi) {
+    console.log("OPENAI_API_KEY: advisory missing; direct OpenAI will be unavailable, but cloud-via-slack can still run.");
   }
 
   if (hasSlackRoute) {
@@ -167,6 +180,12 @@ async function main() {
     console.log(`- configuredUserId: ${mask(actorValidation.configuredUserId || merged.SLACK_CODEX_USER_ID)}`);
     console.log(`- validationStatus: ${actorValidation.validationStatus || "unknown"}`);
     console.log(`- detail: ${actorValidation.detail || actorValidation.message || "none"}`);
+    console.log(`- probeChannelId: ${actorValidation.probeChannelId || "none"}`);
+    console.log(`- probeMessageTs: ${actorValidation.probeMessageTs || "none"}`);
+    console.log(`- probeThreadTs: ${actorValidation.probeThreadTs || "none"}`);
+    console.log(`- nextAction: ${actorValidation.validationStatus === "validated"
+      ? "none"
+      : "verify the OpenAI Codex Slack app OAuth install and set SLACK_CODEX_USER_ID to the real worker user"}`);
   }
 
   console.log("");
@@ -180,13 +199,25 @@ async function main() {
   }
 
   const status = prod.status || {};
+  const prodDispatchMode = String(status.dispatchMode || "").trim();
+  const prodSlackActorStatus = String(status.slackActor?.validationStatus || "").trim();
+  const prodUsesSlackRoute = prodDispatchMode === "slack-codex-cloud" || prodDispatchMode === "cloud-via-slack";
   console.log("Production status:");
   console.log(`- dispatchMode: ${status.dispatchMode || "unknown"}`);
   console.log(`- executorLabel: ${status.executorLabel || "unknown"}`);
   console.log(`- bridgeOnline: ${status.bridgeOnline ? "true" : "false"}`);
   console.log(`- slackActor: ${status.slackActor?.configuredUserId ? mask(status.slackActor.configuredUserId) : "missing"} / ${status.slackActor?.validationStatus || "unknown"}`);
+  console.log(`- slackActorProbeChannelId: ${status.slackActor?.probeChannelId || "none"}`);
+  console.log(`- slackActorProbeMessageTs: ${status.slackActor?.probeMessageTs || "none"}`);
+  console.log(`- slackActorProbeThreadTs: ${status.slackActor?.probeThreadTs || "none"}`);
   console.log(`- state: ${status.state || "unknown"}`);
   console.log(`- lastError: ${status.lastError || "none"}`);
+
+  if (prodUsesSlackRoute && prodSlackActorStatus !== "validated") {
+    console.log("Production Slack actor is not validated.");
+    console.log("Next action: verify the OpenAI Codex Slack app OAuth install and set SLACK_CODEX_USER_ID to the real worker user.");
+    process.exitCode = IS_CI ? 0 : 1;
+  }
 
   if (hasTrustedBridge) {
     console.log("");

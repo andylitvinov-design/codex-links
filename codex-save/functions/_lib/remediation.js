@@ -1,8 +1,6 @@
 import {
   FETCH_TIMEOUT_MS,
-  RESULT_BLOCKED,
   RESULT_DEGRADED,
-  RESULT_FAIL,
   RESULT_PASS,
   RESULT_UNKNOWN
 } from "./constants.js";
@@ -23,68 +21,15 @@ function normalizeIssue(check) {
   };
 }
 
-function findCheck(diagnosisRun, checkId) {
-  return (Array.isArray(diagnosisRun?.checks) ? diagnosisRun.checks : []).find((check) => check?.id === checkId) || null;
-}
-
 function isActiveRemediationStatus(status) {
   return ["planning", "queued", "in_progress", "rechecking"].includes(String(status || "").trim());
 }
 
-function isCloudRouteDegraded(diagnosisRun) {
-  const textCloud = findCheck(diagnosisRun, "text-cloud");
-  const photoCloud = findCheck(diagnosisRun, "photo-cloud");
-  const textDirect = findCheck(diagnosisRun, "text-direct-openai");
-  const photoDirect = findCheck(diagnosisRun, "photo-direct-openai");
-  const statusApi = findCheck(diagnosisRun, "status-api");
-  const degradedStatuses = new Set([RESULT_FAIL, RESULT_DEGRADED, RESULT_BLOCKED]);
-
-  return degradedStatuses.has(String(textCloud?.status || "").trim())
-    || [RESULT_FAIL, RESULT_BLOCKED].includes(String(photoCloud?.status || "").trim())
-    || degradedStatuses.has(String(textDirect?.status || "").trim())
-    || [RESULT_FAIL, RESULT_BLOCKED].includes(String(photoDirect?.status || "").trim())
-    || String(statusApi?.details?.dispatchMode || "").trim() === "local-bridge";
-}
-
-function chooseRemediationRoute(diagnosisRun) {
-  const textClaude = findCheck(diagnosisRun, "text-cloud");
-  const photoClaude = findCheck(diagnosisRun, "photo-cloud");
-  const textLocal = findCheck(diagnosisRun, "text-codex-bridge");
-  const photoLocal = findCheck(diagnosisRun, "photo-codex-bridge");
-  const statusApi = findCheck(diagnosisRun, "status-api");
-
-  const localHealthy = String(textLocal?.status || "").trim() === RESULT_PASS
-    || String(photoLocal?.status || "").trim() === RESULT_PASS
-    || Boolean(statusApi?.details?.localBridgeOnline);
-
-  if (localHealthy) {
-    return {
-      selectedDispatchMode: "local-bridge",
-      selectedTargetExecutionMode: "bridge",
-      selectionReason: isCloudRouteDegraded(diagnosisRun)
-        ? "delivery-route-degraded-codex-bridge-healthy"
-        : "default-agent-pr-flow-codex-bridge"
-    };
-  }
-
-  const claudeHealthy = String(textClaude?.status || "").trim() === RESULT_PASS
-    || String(photoClaude?.status || "").trim() === RESULT_PASS
-    || Boolean(statusApi?.details?.claudeBridgeOnline);
-
-  if (claudeHealthy) {
-    return {
-      selectedDispatchMode: "claude-bridge",
-      selectedTargetExecutionMode: "claude",
-      selectionReason: isCloudRouteDegraded(diagnosisRun)
-        ? "codex-bridge-unavailable-claude-code-fallback"
-        : "codex-bridge-unavailable-claude-code-healthy"
-    };
-  }
-
+function chooseRemediationRoute() {
   return {
-    selectedDispatchMode: "local-bridge",
-    selectedTargetExecutionMode: "bridge",
-    selectionReason: "no-healthy-fallback-try-codex-bridge"
+    selectedDispatchMode: "slack-codex-cloud",
+    selectedTargetExecutionMode: "cloud-via-slack",
+    selectionReason: "codex-cloud-remediation-required"
   };
 }
 

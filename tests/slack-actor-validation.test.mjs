@@ -545,3 +545,86 @@ test("validateSlackCodexActor reuses a recent unverified result without running 
     global.fetch = originalFetch;
   }
 });
+
+test("validateSlackCodexActor suppresses duplicate live probes while another probe is cooling down", async () => {
+  const store = new Map();
+  const env = {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    SLACK_CODEX_USER_ID: "U999",
+    SLACK_ACTOR_PROBE_TIMEOUT_MS: "10",
+    SLACK_ACTOR_PROBE_POLL_MS: "1",
+    SLACK_ACTOR_PROBE_COOLDOWN_MS: "30000",
+    LINKS_STORE: {
+      async get(key, type) {
+        if (!store.has(key)) {
+          return null;
+        }
+
+        const value = store.get(key);
+        return type === "json" ? JSON.parse(value) : value;
+      },
+      async put(key, value) {
+        store.set(key, String(value));
+      }
+    }
+  };
+
+  let probePosts = 0;
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/api/auth.test")) {
+      return createSlackOkResponse({ user_id: "UBOT" });
+    }
+
+    if (String(url).includes("/api/conversations.members")) {
+      return createSlackOkResponse({ members: ["UBOT", "U999"] });
+    }
+
+    if (String(url).includes("/api/conversations.history")) {
+      return createSlackOkResponse({ messages: [] });
+    }
+
+    if (String(url).includes("/api/chat.postMessage")) {
+      probePosts += 1;
+      return createSlackOkResponse({
+        channel: "C123",
+        ts: "1712345678.000100",
+        message: {
+          ts: "1712345678.000100",
+          thread_ts: "1712345678.000100"
+        }
+      });
+    }
+
+    if (String(url).includes("/api/conversations.replies")) {
+      return createSlackOkResponse({
+        messages: [
+          { ts: "1712345678.000100", thread_ts: "1712345678.000100", text: "probe root" }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${String(url)}`);
+  };
+
+  try {
+    const first = await validateSlackCodexActor(env, {
+      timeoutMs: 10,
+      pollIntervalMs: 1,
+      liveProbe: true
+    });
+    const second = await validateSlackCodexActor(env, {
+      timeoutMs: 10,
+      pollIntervalMs: 1,
+      liveProbe: true
+    });
+
+    assert.equal(first.validationStatus, "unverified");
+    assert.equal(second.validationStatus, "unverified");
+    assert.equal(probePosts, 1);
+    assert.equal(second.code, "codex_target_actor_probe_cooling_down");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

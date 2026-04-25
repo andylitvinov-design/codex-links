@@ -119,7 +119,95 @@ function normalizeStatus(input) {
     lastError: String(input.lastError || "").trim(),
     slackActor: normalizeSlackActorStatus(input.slackActor),
     localBridge,
-    claudeBridge
+    claudeBridge,
+    routes: input.routes && typeof input.routes === "object" ? input.routes : undefined
+  };
+}
+
+function pickOldestTimestamp(values) {
+  return (Array.isArray(values) ? values : [])
+    .map((value) => normalizeDate(value))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right))[0] || "";
+}
+
+function getOldestActiveAt(commands) {
+  return pickOldestTimestamp((Array.isArray(commands) ? commands : []).map((command) => command?.createdAt));
+}
+
+function routeHealth(input = {}) {
+  const state = String(input.state || "").trim().toLowerCase();
+  const normalizedState = state === "healthy" || state === "degraded" || state === "unavailable"
+    ? state
+    : "unavailable";
+
+  return {
+    state: normalizedState,
+    enabled: Boolean(input.enabled),
+    degradedReason: normalizeText(input.degradedReason),
+    pendingCount: Number.isFinite(Number(input.pendingCount)) ? Number(input.pendingCount) : 0,
+    oldestPendingAt: normalizeDate(input.oldestPendingAt),
+    lastSuccessAt: normalizeDate(input.lastSuccessAt)
+  };
+}
+
+export function buildRouteHealth(status, runtimeConfig = {}, activeCommands = []) {
+  const source = status && typeof status === "object" ? status : {};
+  const active = Array.isArray(activeCommands) ? activeCommands : [];
+  const slackActive = active.filter((command) => command?.dispatchMode === DISPATCH_MODE_SLACK);
+  const directActive = active.filter((command) => command?.dispatchMode === DISPATCH_MODE_CLOUD);
+  const localActive = active.filter((command) => command?.dispatchMode === DISPATCH_MODE_LOCAL);
+  const claudeActive = active.filter((command) => command?.dispatchMode === DISPATCH_MODE_CLAUDE);
+  const slackConfigured = isSlackDispatchConfigured(runtimeConfig);
+  const directConfigured = isCloudDispatchConfigured(runtimeConfig);
+  const slackActorStatus = normalizeSlackActorStatus({
+    ...source.slackActor,
+    configuredUserId: runtimeConfig?.SLACK_CODEX_USER_ID || source.slackActor?.configuredUserId
+  });
+  const slackValidation = String(slackActorStatus.validationStatus || "").trim().toLowerCase();
+  const localBridge = normalizeRunnerStatus(source.localBridge);
+  const claudeBridge = normalizeRunnerStatus(source.claudeBridge);
+  const localHealthy = Boolean(localBridge.online) && isLaunchdManaged(localBridge.managedBy);
+  const claudeHealthy = Boolean(claudeBridge.online);
+  const slackDegradedReason = !slackConfigured
+    ? "Missing SLACK_BOT_TOKEN or SLACK_CODEX_CHANNEL_ID."
+    : slackValidation !== "validated"
+      ? (slackActorStatus.validationError || `Slack Codex actor is ${slackValidation || "unverified"}.`)
+      : "";
+
+  return {
+    cloudViaSlack: routeHealth({
+      state: !slackConfigured ? "unavailable" : (slackValidation === "validated" ? "healthy" : "degraded"),
+      enabled: slackConfigured && slackValidation === "validated",
+      degradedReason: slackDegradedReason,
+      pendingCount: slackActive.length,
+      oldestPendingAt: getOldestActiveAt(slackActive),
+      lastSuccessAt: source.lastSuccessAt
+    }),
+    directOpenai: routeHealth({
+      state: directConfigured ? "healthy" : "unavailable",
+      enabled: directConfigured,
+      degradedReason: directConfigured ? "" : "Missing OPENAI_API_KEY.",
+      pendingCount: directActive.length,
+      oldestPendingAt: getOldestActiveAt(directActive),
+      lastSuccessAt: source.lastSuccessAt
+    }),
+    localBridge: routeHealth({
+      state: localHealthy ? "healthy" : "unavailable",
+      enabled: localHealthy,
+      degradedReason: localHealthy ? "" : (localBridge.lastError || "Local bridge heartbeat is stale or not launchd-managed."),
+      pendingCount: localActive.length || Number(localBridge.pendingCount || 0),
+      oldestPendingAt: getOldestActiveAt(localActive) || localBridge.oldestPendingAt,
+      lastSuccessAt: localBridge.lastSuccessAt
+    }),
+    claudeBridge: routeHealth({
+      state: claudeHealthy ? "healthy" : "unavailable",
+      enabled: claudeHealthy,
+      degradedReason: claudeHealthy ? "" : (claudeBridge.lastError || "Claude bridge heartbeat is stale or unavailable."),
+      pendingCount: claudeActive.length || Number(claudeBridge.pendingCount || 0),
+      oldestPendingAt: getOldestActiveAt(claudeActive) || claudeBridge.oldestPendingAt,
+      lastSuccessAt: claudeBridge.lastSuccessAt
+    })
   };
 }
 
@@ -192,6 +280,7 @@ export async function readBridgeStatus(env) {
   status.oldestPendingAt = status.oldestPendingAt || status.localBridge.oldestPendingAt;
   status.lastDeliveredCount = Math.max(Number(status.lastDeliveredCount || 0), Number(status.localBridge.lastDeliveredCount || 0));
   status.lastError = status.lastError || status.localBridge.lastError;
+  status.routes = buildRouteHealth(status, runtimeConfig);
 
   return status;
 }
@@ -280,7 +369,15 @@ export async function deriveBridgeStatusFromCommands(env, patch = {}) {
     lastError: typeof patch.lastError === "string" ? patch.lastError : current.lastError,
     slackActor: nextSlackActor,
     localBridge: nextLocalBridge,
-    claudeBridge: nextClaudeBridge
+    claudeBridge: nextClaudeBridge,
+    routes: buildRouteHealth({
+      ...current,
+      ...patch,
+      slackActor: nextSlackActor,
+      localBridge: nextLocalBridge,
+      claudeBridge: nextClaudeBridge,
+      lastSuccessAt: patch.lastSuccessAt || current.lastSuccessAt
+    }, runtimeConfig, active)
   });
 }
 

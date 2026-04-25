@@ -817,7 +817,7 @@ test("runCommandMaintenance fails stale Claude commands after retry window when 
   assert.equal(updated.lastDiagnosticCode, "claude_result_timeout");
 });
 
-test("runCommandMaintenance falls back photo Slack upload failures to local bridge when fallback is available", async () => {
+test("runCommandMaintenance falls back manifest-backed photo Slack upload failures to Claude bridge", async () => {
   const env = createMockEnv();
   const staleIso = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
 
@@ -840,15 +840,64 @@ test("runCommandMaintenance falls back photo Slack upload failures to local brid
     dispatchedAt: staleIso,
     photoAttached: true,
     photoBytesPresent: true,
-    slackPhotoUploadError: "temporarily_unavailable"
+    slackPhotoUploadError: "temporarily_unavailable",
+    targetRepo: "andylitvinov-design/codex-links",
+    targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
+    targetWorkspacePath: "/workspace/links",
+    targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+    allowClaudeFallback: true
   }]);
 
   const result = await runCommandMaintenance(env, {
     fallbackToLocal: true,
+    fallbackToClaude: true,
     preferSlack: true
   });
 
   const updated = result.commands.find((command) => command.id === "cmd-slack-photo-upload-error");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "claude-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "fallback-to-claude");
+  assert.equal(updated.lastDiagnosticCode, "slack_photo_upload_failed");
+  assert.equal(updated.actualExecutor, "claude");
+  assert.equal(updated.fallbackReason, "cloud via Slack photo upload failed");
+});
+
+test("runCommandMaintenance falls back bridge-only photo Slack upload failures to local bridge", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-upload-error-bridge-only",
+    clientId: "test-client",
+    threadId: "advice",
+    threadLabel: "advice",
+    text: "Что на фото?",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    dispatchedAt: staleIso,
+    photoAttached: true,
+    photoBytesPresent: true,
+    slackPhotoUploadError: "temporarily_unavailable",
+    allowClaudeFallback: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    fallbackToClaude: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-photo-upload-error-bridge-only");
   assert.ok(updated);
   assert.equal(updated.dispatchMode, "local-bridge");
   assert.equal(updated.status, "queued");
@@ -856,6 +905,107 @@ test("runCommandMaintenance falls back photo Slack upload failures to local brid
   assert.equal(updated.lastDiagnosticCode, "slack_photo_upload_failed");
   assert.equal(updated.actualExecutor, "bridge");
   assert.equal(updated.fallbackReason, "cloud via Slack photo upload failed");
+});
+
+test("runCommandMaintenance keeps manifest-backed Slack photos waiting through the first-ack window", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (2 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-ack-timeout",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "processing",
+    progressStage: "waiting-slack-photo-reply",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    dispatchedAt: staleIso,
+    slackChannelId: "C123",
+    slackMessageTs: "1712345678.000100",
+    slackThreadTs: "1712345678.000100",
+    slackPhotoUploadCompletedAt: staleIso,
+    photoAttached: true,
+    photoBytesPresent: true,
+    targetRepo: "andylitvinov-design/codex-links",
+    targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
+    targetWorkspacePath: "/workspace/links",
+    targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+    allowClaudeFallback: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    fallbackToClaude: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-photo-ack-timeout");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "slack-codex-cloud");
+  assert.equal(updated.status, "processing");
+  assert.equal(updated.progressStage, "waiting-slack-photo-reply");
+  assert.equal(updated.actualExecutor, "cloud-via-slack");
+});
+
+test("runCommandMaintenance falls back manifest-backed Slack photo result timeouts to Claude bridge", async () => {
+  const env = createMockEnv();
+  const staleIso = new Date(Date.now() - (6 * 60 * 1000)).toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-photo-result-timeout",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    text: "Что на фото?",
+    createdAt: staleIso,
+    progressUpdatedAt: staleIso,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "processing",
+    progressStage: "processing",
+    slackDispatchAttempted: true,
+    slackDispatchSucceeded: true,
+    slackPostedAt: staleIso,
+    dispatchedAt: staleIso,
+    firstAckAt: staleIso,
+    firstExecutorAckSeenAt: staleIso,
+    slackChannelId: "C123",
+    slackMessageTs: "1712345678.000100",
+    slackThreadTs: "1712345678.000100",
+    slackPhotoUploadCompletedAt: staleIso,
+    photoAttached: true,
+    photoBytesPresent: true,
+    targetRepo: "andylitvinov-design/codex-links",
+    targetRepoUrl: "https://github.com/andylitvinov-design/codex-links",
+    targetWorkspacePath: "/workspace/links",
+    targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+    allowClaudeFallback: true
+  }]);
+
+  const result = await runCommandMaintenance(env, {
+    fallbackToLocal: true,
+    fallbackToClaude: true,
+    preferSlack: true
+  });
+
+  const updated = result.commands.find((command) => command.id === "cmd-slack-photo-result-timeout");
+  assert.ok(updated);
+  assert.equal(updated.dispatchMode, "claude-bridge");
+  assert.equal(updated.status, "queued");
+  assert.equal(updated.progressStage, "fallback-to-claude");
+  assert.equal(updated.timeoutPhase, "result-timeout");
+  assert.equal(updated.lastDiagnosticCode, "slack_result_timeout");
+  assert.equal(updated.actualExecutor, "claude");
+  assert.match(updated.errorMessage, /fallback_to_claude/);
 });
 
 test("runCommandMaintenance reroutes stale actor-validation Slack failures to local bridge", async () => {

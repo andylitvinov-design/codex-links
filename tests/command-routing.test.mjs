@@ -50,3 +50,18 @@ test("resolveRequestedDispatchMode preserves explicit direct cloud opt-in for ph
 
   assert.equal(dispatchMode, "cloud");
 });
+
+test("resolveRequestedDispatchMode routes repo-changing direct cloud requests through Slack Codex", () => {
+  const dispatchMode = resolveRequestedDispatchMode({
+    dispatchMode: "direct-openai",
+    targetExecutionMode: "direct-openai",
+    text: "fix the production UI and open a PR"
+  }, {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CODEX_CHANNEL_ID: "C123",
+    OPENAI_API_KEY: "sk-test",
+    COMMAND_DISPATCH_MODE: "cloud-via-slack"
+  });
+
+  assert.equal(dispatchMode, "slack-codex-cloud");
+});
