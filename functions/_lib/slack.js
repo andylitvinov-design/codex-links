@@ -445,13 +445,18 @@ async function uploadSlackPhotoToThreadOnce(token, channel, threadTs, photo, opt
 
   const completedFile = Array.isArray(completed?.files) ? completed.files[0] : null;
   let permalink = normalizeText(completedFile?.permalink || completedFile?.permalink_public);
+  // url_private_download is a direct bot-token-authenticated URL Codex can curl.
+  // files.completeUploadExternal sometimes omits it, so we fall back to files.info.
+  let urlPrivateDownload = normalizeText(completedFile?.url_private_download || completedFile?.url_private);
 
-  if (!permalink) {
+  if (!permalink || !urlPrivateDownload) {
     try {
       const info = await callSlackApi(token, "files.info", null, {
         file: normalizeText(upload.file_id)
       }, { env: options.env, timeoutMs });
-      permalink = normalizeText(info?.file?.permalink || info?.file?.permalink_public);
+      permalink = permalink || normalizeText(info?.file?.permalink || info?.file?.permalink_public);
+      urlPrivateDownload = urlPrivateDownload
+        || normalizeText(info?.file?.url_private_download || info?.file?.url_private);
     } catch (error) {
       console.error("[codex-links][slack] files.info fallback failed", {
         fileId: normalizeText(upload.file_id),
@@ -463,6 +468,7 @@ async function uploadSlackPhotoToThreadOnce(token, channel, threadTs, photo, opt
   return {
     fileId: normalizeText(upload.file_id),
     permalink,
+    urlPrivateDownload,
     fileName,
     threadTs: normalizeText(threadTs),
     threaded: Boolean(normalizeText(threadTs))
@@ -984,10 +990,13 @@ export async function postSlackCommand(env, command, mention) {
   }
 
   const resolvedCodexThreadId = await resolveStoredCodexThreadId(env, command);
+
+  // Post initial task message (without photo URL — not known yet)
   const text = buildSlackCommandPrompt(command, {
     ...env,
     SLACK_CODEX_MENTION: mention
   }, resolvedCodexThreadId);
+
   const response = await fetchWithTimeout("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: buildSlackHeaders(dispatchToken),
@@ -1015,12 +1024,39 @@ export async function postSlackCommand(env, command, mention) {
   }
 
   const resolvedChannel = normalizeText(data.channel) || channel;
-  const resolvedThreadTs = normalizeText(data.message?.thread_ts) || normalizeText(data.ts);
+  const resolvedMessageTs = normalizeText(data.ts);
+  const resolvedThreadTs = normalizeText(data.message?.thread_ts) || resolvedMessageTs;
   let uploaded = null;
 
   if (command?.photo) {
     try {
       uploaded = await uploadSlackPhotoToThread(dispatchToken, resolvedChannel, resolvedThreadTs, command.photo, { env });
+      const photoFileUrl = normalizeText(uploaded?.urlPrivateDownload);
+
+      // If we got a direct download URL, update the original task message so
+      // Codex sees the curl command in the thread context it reads first.
+      if (photoFileUrl) {
+        const enrichedText = buildSlackCommandPrompt(
+          { ...command, photoFileUrl },
+          { ...env, SLACK_CODEX_MENTION: mention },
+          resolvedCodexThreadId
+        );
+        try {
+          await callSlackApi(dispatchToken, "chat.update", {
+            channel: resolvedChannel,
+            ts: resolvedMessageTs,
+            text: enrichedText,
+            unfurl_links: false,
+            unfurl_media: false,
+            mrkdwn: true
+          }, null, { env });
+        } catch (updateError) {
+          console.error("[codex-links][slack] chat.update with photo URL failed — non-fatal", {
+            error: updateError instanceof Error ? updateError.message : String(updateError || "")
+          });
+        }
+      }
+
       await postSlackThreadNudge(
         dispatchToken,
         resolvedChannel,
@@ -1028,6 +1064,7 @@ export async function postSlackCommand(env, command, mention) {
         [
           mention ? `${mention} image uploaded in this thread.` : "Image uploaded in this thread.",
           uploaded?.permalink ? `File: <${uploaded.permalink}|${uploaded.fileName || "uploaded image"}>.` : "",
+          photoFileUrl ? `Direct download: ${photoFileUrl}` : "",
           "Acknowledge in this same thread before starting the work."
         ].filter(Boolean).join(" "),
         { env }
@@ -1042,7 +1079,7 @@ export async function postSlackCommand(env, command, mention) {
 
       return {
         channel: resolvedChannel,
-        ts: normalizeText(data.ts),
+        ts: resolvedMessageTs,
         threadTs: resolvedThreadTs,
         photoUpload: null,
         photoUploadError: error instanceof Error ? error.message : "Slack photo upload failed."
@@ -1052,7 +1089,7 @@ export async function postSlackCommand(env, command, mention) {
 
   return {
     channel: resolvedChannel,
-    ts: normalizeText(data.ts),
+    ts: resolvedMessageTs,
     threadTs: resolvedThreadTs,
     photoUpload: uploaded,
     actorValidation
