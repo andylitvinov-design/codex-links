@@ -85,6 +85,7 @@ function buildMaintenanceSummary(commands, maintenance, dispatchedIds = []) {
     const status = String(command?.status || "").trim().toLowerCase();
     const id = String(command?.id || "").trim();
     const active = status === "queued" || status === "dispatched" || status === "processing";
+    const changed = changedIds.has(id);
 
     if (status === "queued" || status === "dispatched") {
       bucket.queued += 1;
@@ -94,15 +95,15 @@ function buildMaintenanceSummary(commands, maintenance, dispatchedIds = []) {
       bucket.processing += 1;
     }
 
-    if (Boolean(command?.fallbackApplied) || /^fallback-to-/i.test(String(command?.progressStage || ""))) {
+    if ((active || changed || dispatched.has(id)) && (Boolean(command?.fallbackApplied) || /^fallback-to-/i.test(String(command?.progressStage || "")))) {
       bucket.fallbackApplied += 1;
     }
 
-    if (status === "failed") {
+    if (changed && status === "failed") {
       bucket.failed += 1;
     }
 
-    if (active && !changedIds.has(id) && !dispatched.has(id)) {
+    if (active && !changed && !dispatched.has(id)) {
       bucket.unchanged += 1;
       remaining.push({
         id,
