@@ -27,3 +27,13 @@ test("UI blocks degraded cloud routes instead of silently sending", async () => 
   assert.match(source, /const dispatchMode = requestedDispatchMode;/);
   assert.doesNotMatch(source, /hasPhotoAttachment && requestedDispatchMode === "cloud"\s*\?\s*"bridge"/);
 });
+
+test("UI exposes route health and Slack diagnostic controls", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.match(source, /function renderRouteHealthPanel\(status = \{\}\)/);
+  assert.match(source, /function runSlackDiagnostic\(\)/);
+  assert.match(source, /action:\s*"slack-diagnostic"/);
+  assert.match(source, /Slack actor:/);
+  assert.match(source, /claude_photo_not_visible/);
+});

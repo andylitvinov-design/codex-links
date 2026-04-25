@@ -177,3 +177,23 @@ test("bridge runner guards the photo preparation phase with a dedicated timeout 
   assert.match(source, /lastDiagnosticCode: "bridge_waiting_photo"/);
   assert.match(source, /photoPhaseTimeout/);
 });
+
+test("Claude photo bridge asserts a non-empty local file and persists executor diagnostics", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /async function assertPreparedPhoto\(commandId, photoPath\)/);
+  assert.match(source, /info\.isFile\(\) \|\| info\.size <= 0/);
+  assert.match(source, /photoPreparedAt: new Date\(\)\.toISOString\(\)/);
+  assert.match(source, /photoTempPath: photoPath/);
+  assert.match(source, /photoBytes: preparedPhoto\.bytes/);
+  assert.match(source, /photoPassedToExecutor: false/);
+  assert.match(source, /photoPassedToExecutor: true/);
+  assert.match(source, /photoExecutorArg: photoPath/);
+});
+
+test("Claude photo visibility failures are classified separately", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+
+  assert.match(source, /claude_photo_not_visible/);
+  assert.match(source, /BRIDGE_EXECUTOR === "claude" && isPhotoVisibilityFailure/);
+});

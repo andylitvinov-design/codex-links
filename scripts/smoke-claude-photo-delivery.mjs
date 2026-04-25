@@ -119,10 +119,17 @@ async function pollCommand(id) {
           throw new Error("Claude photo smoke answered, but CLAUDE_PHOTO_OK reply was not found.");
         }
 
+        if (command.photoPassedToExecutor !== true) {
+          throw new Error("Claude photo smoke answered, but command metadata does not show photoPassedToExecutor=true.");
+        }
+
         return command;
       }
 
       if (matched) {
+        if (command.photoPassedToExecutor !== true) {
+          throw new Error("Claude photo smoke found CLAUDE_PHOTO_OK, but command metadata does not show photoPassedToExecutor=true.");
+        }
         return command;
       }
 
@@ -139,6 +146,9 @@ async function pollCommand(id) {
   const matched = replies.find((reply) => /CLAUDE_PHOTO_OK/i.test(String(reply?.text || "")));
 
   if (matched && String(command?.status || "").trim().toLowerCase() !== "failed") {
+    if (command?.photoPassedToExecutor !== true) {
+      throw new Error("Claude photo smoke found CLAUDE_PHOTO_OK, but command metadata does not show photoPassedToExecutor=true.");
+    }
     return command || { id };
   }
 

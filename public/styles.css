@@ -388,6 +388,13 @@ body {
   gap: 12px;
 }
 
+.bridge-status-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .bridge-status-copy {
   min-width: 0;
   display: grid;
@@ -419,6 +426,53 @@ body {
   color: var(--muted);
   font-size: 0.8rem;
   line-height: 1.45;
+}
+
+.route-health-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.route-health-item {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--field-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.route-health-item strong,
+.route-health-item span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.route-health-item strong {
+  font-size: 0.78rem;
+}
+
+.route-health-item span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.route-health-item[data-state="healthy"] {
+  border-color: rgba(15, 118, 110, 0.2);
+  background: rgba(236, 253, 245, 0.78);
+}
+
+.route-health-item[data-state="degraded"] {
+  border-color: rgba(217, 119, 6, 0.3);
+  background: rgba(255, 247, 237, 0.9);
+}
+
+.route-health-item[data-state="unavailable"] {
+  border-color: rgba(185, 28, 28, 0.22);
+  background: rgba(254, 242, 242, 0.88);
 }
 
 .field-label {
@@ -1546,6 +1600,18 @@ code {
   .dispatch-toggle {
     width: 100%;
     justify-content: center;
+  }
+
+  .bridge-status-row {
+    display: grid;
+  }
+
+  .bridge-status-actions {
+    justify-content: flex-start;
+  }
+
+  .route-health-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .refresh-button {

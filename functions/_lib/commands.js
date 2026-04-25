@@ -776,6 +776,23 @@ function mergeCommandDebugState(command, input = {}, dispatchMode = input.dispat
     photoBytesPresent: derivePhotoBytesPresent(command, input),
     photoSeenByBridge: normalizeBooleanValue(input.photoSeenByBridge, Boolean(command?.photoSeenByBridge)),
     photoProcessed: normalizeBooleanValue(input.photoProcessed, Boolean(command?.photoProcessed)),
+    photoPreparedAt: normalizeDateValue(
+      Object.prototype.hasOwnProperty.call(input, "photoPreparedAt") ? input.photoPreparedAt : command?.photoPreparedAt
+    ),
+    photoTempPath: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "photoTempPath") ? input.photoTempPath : command?.photoTempPath,
+      500
+    ),
+    photoBytes: Number.isFinite(Number(
+      Object.prototype.hasOwnProperty.call(input, "photoBytes") ? input.photoBytes : command?.photoBytes
+    ))
+      ? Math.max(0, Number(Object.prototype.hasOwnProperty.call(input, "photoBytes") ? input.photoBytes : command?.photoBytes))
+      : 0,
+    photoPassedToExecutor: normalizeBooleanValue(input.photoPassedToExecutor, Boolean(command?.photoPassedToExecutor)),
+    photoExecutorArg: normalizeDiagnosticText(
+      Object.prototype.hasOwnProperty.call(input, "photoExecutorArg") ? input.photoExecutorArg : command?.photoExecutorArg,
+      500
+    ),
     photoUnsupportedReason: normalizePhotoUnsupportedReason(
       Object.prototype.hasOwnProperty.call(input, "photoUnsupportedReason")
         ? input.photoUnsupportedReason
@@ -997,6 +1014,11 @@ function normalizeStoredCommandEntry(entry) {
     photoBytesPresent: derivePhotoBytesPresent(entry),
     photoSeenByBridge: normalizeBooleanValue(entry.photoSeenByBridge),
     photoProcessed: normalizeBooleanValue(entry.photoProcessed),
+    photoPreparedAt: normalizeDateValue(entry.photoPreparedAt),
+    photoTempPath: normalizeDiagnosticText(entry.photoTempPath, 500),
+    photoBytes: Number.isFinite(Number(entry.photoBytes)) ? Math.max(0, Number(entry.photoBytes)) : 0,
+    photoPassedToExecutor: normalizeBooleanValue(entry.photoPassedToExecutor),
+    photoExecutorArg: normalizeDiagnosticText(entry.photoExecutorArg, 500),
     photoUnsupportedReason: normalizePhotoUnsupportedReason(entry.photoUnsupportedReason),
     slackPhotoUploadError: normalizeDiagnosticText(entry.slackPhotoUploadError, 500),
     actorValidationStartedAt: normalizeDateValue(entry.actorValidationStartedAt),
@@ -2797,6 +2819,7 @@ export async function runCommandMaintenance(env, options = {}) {
   const current = await readCommands(env);
   const nowIso = new Date().toISOString();
   let changedCount = 0;
+  const changedCommands = [];
   const commandsToDispatch = [];
   const freshProcessingThreadKeys = new Set(current.flatMap((command) => {
     if (command.dispatchMode !== DISPATCH_MODE_LOCAL || command.status !== "processing") {
@@ -2835,6 +2858,7 @@ export async function runCommandMaintenance(env, options = {}) {
 
     if (updated !== previous) {
       changedCount += 1;
+      changedCommands.push(updated);
     }
 
     if (
@@ -2858,6 +2882,7 @@ export async function runCommandMaintenance(env, options = {}) {
   return {
     changed: changedCount > 0,
     changedCount,
+    changedCommands,
     commands: next,
     commandsToDispatch
   };
