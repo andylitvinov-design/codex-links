@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Claude Code Bridge — launchd agent.
+
+  Install:
+    cp launchd/com.codexlinks.claude-bridge.plist ~/Library/LaunchAgents/
+    # Edit the plist: replace LINKS_WRITE_TOKEN value with your real token.
+    launchctl load ~/Library/LaunchAgents/com.codexlinks.claude-bridge.plist
+
+  Check status:
+    launchctl list | grep codexlinks
+
+  Logs:
+    tail -f ~/Library/Logs/codex-links-bridge.log
+    tail -f ~/Library/Logs/codex-links-claude-bridge.error.log
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.codexlinks.claude-bridge.plist
+    rm ~/Library/LaunchAgents/com.codexlinks.claude-bridge.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.codexlinks.claude-bridge</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- Use the same node binary that runs codex bridge -->
+    <string>/usr/local/bin/node</string>
+    <string>/Users/andriilitvinov/projects/MYPROJECTS/links/scripts/bridge-claude-commands.mjs</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/andriilitvinov/projects/MYPROJECTS/links</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LINKS_BASE_URL</key>
+    <string>https://codex-links.pages.dev</string>
+
+    <key>LINKS_WRITE_TOKEN</key>
+    <!-- Replace with your real token (same as LINKS_WRITE_TOKEN in .dev.vars) -->
+    <string>REPLACE_WITH_LINKS_WRITE_TOKEN</string>
+
+    <key>LINKS_REPO_CWD</key>
+    <string>/Users/andriilitvinov/projects/MYPROJECTS/links</string>
+
+    <key>BRIDGE_EXECUTOR</key>
+    <string>claude</string>
+
+    <key>BRIDGE_DISPATCH_MODE</key>
+    <string>claude-bridge</string>
+
+    <key>BRIDGE_PROCESSOR_ID</key>
+    <string>launchd-claude-bridge</string>
+
+    <key>HOME</key>
+    <string>/Users/andriilitvinov</string>
+
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+
+  <!-- Re-launch automatically if the script exits (e.g. after emptying the queue) -->
+  <key>KeepAlive</key>
+  <false/>
+
+  <!-- Run every 30 seconds to pick up new claude-bridge commands -->
+  <key>StartInterval</key>
+  <integer>30</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/andriilitvinov/Library/Logs/codex-links-claude-bridge.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/andriilitvinov/Library/Logs/codex-links-claude-bridge.error.log</string>
+
+  <!-- Throttle: don't restart more than once every 10 seconds -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>
