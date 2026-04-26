@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-title" content="Codex Links" />
     <script>
       (function () {
-        var build = "20260425-1413";
+        var build = "20260425-2001";
         var current = new URL(window.location.href);
         var requested = String(current.searchParams.get("v") || "").trim();
         if (requested === build) {
@@ -24,7 +24,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260425-1413" />
+    <link rel="stylesheet" href="/styles.css?v=20260425-2001" />
   </head>
   <body>
     <main class="page">
@@ -119,17 +119,14 @@
               <button class="dispatch-toggle-button is-active" id="dispatch-mode-bridge" type="button" data-mode="bridge" role="tab" aria-selected="true" title="Local Bridge: локальный агент с доступом к репозиторию">
                 <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
                 <span>Local Bridge</span>
-                <small>repo access</small>
               </button>
               <button class="dispatch-toggle-button" id="dispatch-mode-cloud" type="button" data-mode="cloud" role="tab" aria-selected="false" title="Codex Cloud: cloud-агент через Slack с repo checkout">
                 <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
                 <span>Cloud via Slack</span>
-                <small>repo checkout</small>
               </button>
               <button class="dispatch-toggle-button" id="dispatch-mode-claude" type="button" data-mode="claude" role="tab" aria-selected="false" title="Claude Bridge: управляемый fallback для фото и задач без repo checkout">
                 <span class="dispatch-toggle-lamp" aria-hidden="true"></span>
                 <span>Claude Bridge</span>
-                <small>fallback/photo</small>
               </button>
             </div>
             <div class="dispatch-subtoggle" id="cloud-route-toggle" hidden>
@@ -160,6 +157,6 @@
       </section>
     </main>
 
-    <script type="module" src="/app.js?v=20260425-1413"></script>
+    <script type="module" src="/app.js?v=20260425-2001"></script>
   </body>
 </html>
