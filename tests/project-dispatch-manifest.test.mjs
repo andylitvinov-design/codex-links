@@ -135,3 +135,51 @@ test("production-changing cloud tasks require deploy metadata", () => {
   assert.equal(result.code, "setup-needed");
   assert.match(result.error, /needs deploy metadata/);
 });
+
+test("dispatch manifest resolves finance aliases to the finance repository", () => {
+  const project = findProjectTargetById("ezohata-ledger");
+
+  assert.ok(project, "expected ezohata-ledger alias to resolve");
+  assert.equal(project.id, "finance");
+  assert.equal(project.projectKey, "finance");
+  assert.equal(project.targetRepo, "andylitvinov-design/finance");
+  assert.equal(project.codexEnvironmentName, "finance");
+  assert.equal(project.codexEnvironmentId, "needs-verification");
+});
+
+test("projectKey wins over threadId when resolving a command target", () => {
+  const result = resolveProjectDispatchTarget({
+    projectKey: "reiki-yggdrasil",
+    threadId: "links",
+    dispatchMode: "cloud-via-slack",
+    text: "Audit the layout and report issues without changing production."
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value.projectKey, "reiki-yggdrasil");
+  assert.equal(result.value.targetRepo, "andylitvinov-design/reiki-yggdrasil");
+  assert.equal(result.value.codexEnvironmentName, "reiki-yggdrasil");
+  assert.equal(result.value.codexEnvironmentVerified, false);
+});
+
+test("unknown cloud project is rejected before dispatch", () => {
+  const result = resolveProjectDispatchTarget({
+    projectKey: "missing-project",
+    dispatchMode: "cloud-via-slack",
+    text: "Run a cloud task."
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /dispatch manifest/i);
+});
+
+test("visible project list exposes Codex Cloud diagnostics", () => {
+  const { repos } = listVisibleProjectTargets();
+  const reiki = repos.find((repo) => repo.projectKey === "reiki-yggdrasil");
+
+  assert.ok(reiki, "expected reiki-yggdrasil in visible project list");
+  assert.equal(reiki.targetRepo, "andylitvinov-design/reiki-yggdrasil");
+  assert.equal(reiki.codexCloud.environmentName, "reiki-yggdrasil");
+  assert.equal(reiki.codexCloud.environmentId, "needs-verification");
+  assert.deepEqual(reiki.allowedActions, ["audit", "fix", "test", "design-check"]);
+});
