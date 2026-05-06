@@ -1,6 +1,6 @@
 const PROJECT_DISPATCH_MANIFEST = {
-  version: 1,
-  updatedAt: "2026-04-25T02:51:13Z",
+  version: 2,
+  updatedAt: "2026-05-05T00:00:00Z",
   projects: [
     {
       id: "links",
@@ -17,6 +17,57 @@ const PROJECT_DISPATCH_MANIFEST = {
         smokePath: "/",
         versionPath: "/version.json"
       },
+      codexCloud: {
+        environmentName: "codex-links",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["audit", "fix", "test", "deploy-check"]
+      },
+      visible: true,
+      cloudReady: true
+    },
+    {
+      id: "finance",
+      label: "finance",
+      group: "finance",
+      workspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/finance",
+      targetRepo: "andylitvinov-design/finance",
+      targetRepoUrl: "https://github.com/andylitvinov-design/finance",
+      aliases: ["ezohata-ledger", "ledger", "incoming-ledger"],
+      contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      deploy: {
+        platform: "vercel",
+        productionBranch: "main",
+        productionUrl: "https://ezohata-incoming-ledger.vercel.app/",
+        smokePath: "/api/status"
+      },
+      codexCloud: {
+        environmentName: "finance",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["audit", "fix", "test", "pr"]
+      },
+      visible: true,
+      cloudReady: true
+    },
+    {
+      id: "reiki-yggdrasil",
+      label: "reiki yggdrasil",
+      group: "myprojects",
+      workspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/reiki-yggdrasil",
+      targetRepo: "andylitvinov-design/reiki-yggdrasil",
+      targetRepoUrl: "https://github.com/andylitvinov-design/reiki-yggdrasil",
+      aliases: ["reiki", "yggdrasil"],
+      contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      codexCloud: {
+        environmentName: "reiki-yggdrasil",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["audit", "fix", "test", "design-check"]
+      },
       visible: true,
       cloudReady: true
     },
@@ -27,7 +78,34 @@ const PROJECT_DISPATCH_MANIFEST = {
       workspacePath: "/Users/andriilitvinov/projects/MYPROJECTS/artefacts",
       targetRepo: "andylitvinov-design/artefacts",
       targetRepoUrl: "https://github.com/andylitvinov-design/artefacts",
+      aliases: ["artifacts", "artifacts-site", "artefacts-site"],
       contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      codexCloud: {
+        environmentName: "artefacts",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["audit", "fix", "test", "content"]
+      },
+      visible: true,
+      cloudReady: true
+    },
+    {
+      id: "ai-projects-brain",
+      label: "ai projects brain",
+      group: "brain",
+      workspacePath: "/Users/andriilitvinov/projects/brain/ai-projects-brain",
+      targetRepo: "andylitvinov-design/ai-projects-brain",
+      targetRepoUrl: "https://github.com/andylitvinov-design/ai-projects-brain",
+      aliases: ["project-brain", "projects-brain", "brain-base"],
+      contextFiles: ["AGENTS.md", "README.md", "STATE.md", "systems/agent-rules.md", "systems/codex-project-workflow.md"],
+      codexCloud: {
+        environmentName: "ai-projects-brain",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["docs", "memory-update", "audit"]
+      },
       visible: true,
       cloudReady: true
     },
@@ -61,6 +139,13 @@ const PROJECT_DISPATCH_MANIFEST = {
       targetRepo: "andylitvinov-design/ezohata",
       targetRepoUrl: "https://github.com/andylitvinov-design/ezohata",
       contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      codexCloud: {
+        environmentName: "ezohata",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["audit", "fix", "test", "content"]
+      },
       visible: true,
       cloudReady: true
     },
@@ -72,6 +157,13 @@ const PROJECT_DISPATCH_MANIFEST = {
       targetRepo: "andylitvinov-design/ezohata_ads",
       targetRepoUrl: "https://github.com/andylitvinov-design/ezohata_ads",
       contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      codexCloud: {
+        environmentName: "ezohata_ads",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["audit", "fix", "test", "content"]
+      },
       visible: true,
       cloudReady: true
     },
@@ -82,7 +174,15 @@ const PROJECT_DISPATCH_MANIFEST = {
       workspacePath: "/Users/andriilitvinov/projects/brain/management",
       targetRepo: "andylitvinov-design/brain-management",
       targetRepoUrl: "https://github.com/andylitvinov-design/brain-management",
+      aliases: ["brain-management"],
       contextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+      codexCloud: {
+        environmentName: "brain-management",
+        environmentId: "needs-verification",
+        defaultBranch: "main",
+        dispatchMode: "cloud-via-slack",
+        allowedActions: ["audit", "fix", "test", "dashboard"]
+      },
       visible: true,
       cloudReady: true
     },
@@ -114,6 +214,36 @@ function normalizeContextFiles(value) {
       .map((entry) => normalizeText(entry, 80))
       .filter(Boolean)
   )];
+}
+
+function normalizeAllowedActions(value) {
+  return [...new Set(
+    (Array.isArray(value) ? value : [])
+      .map((entry) => normalizeProjectId(entry))
+      .filter(Boolean)
+  )];
+}
+
+function normalizeCodexCloudConfig(value, targetRepo = "") {
+  const source = value && typeof value === "object" ? value : {};
+  const environmentName = normalizeText(source.environmentName, 160);
+  const environmentId = normalizeText(source.environmentId, 160);
+  const defaultBranch = normalizeText(source.defaultBranch, 120) || "main";
+  const dispatchMode = normalizeText(source.dispatchMode, 80) || "cloud-via-slack";
+  const allowedActions = normalizeAllowedActions(source.allowedActions);
+
+  if (!targetRepo && !environmentName && !environmentId) {
+    return null;
+  }
+
+  return {
+    environmentName,
+    environmentId: environmentId || "needs-verification",
+    defaultBranch,
+    dispatchMode,
+    allowedActions,
+    verified: Boolean(environmentId && environmentId !== "needs-verification")
+  };
 }
 
 function normalizeDeployConfig(value) {
@@ -172,6 +302,7 @@ function normalizeProjectEntry(project) {
   const targetRepoUrl = normalizeText(project.targetRepoUrl, 400);
   const contextFiles = normalizeContextFiles(project.contextFiles);
   const deploy = normalizeDeployConfig(project.deploy);
+  const codexCloud = normalizeCodexCloudConfig(project.codexCloud, targetRepo);
   const aliases = normalizeAliases(project.aliases, [id, label]);
   const visible = normalizeBoolean(project.visible);
   const cloudReady = normalizeBoolean(project.cloudReady) && Boolean(targetRepo);
@@ -182,6 +313,7 @@ function normalizeProjectEntry(project) {
 
   return {
     id,
+    projectKey: id,
     repoId: id,
     label,
     name: label,
@@ -193,6 +325,12 @@ function normalizeProjectEntry(project) {
     contextFiles,
     deploy,
     productionVerifiable: Boolean(deploy?.productionUrl),
+    codexCloud,
+    codexEnvironmentName: codexCloud?.environmentName || "",
+    codexEnvironmentId: codexCloud?.environmentId || "",
+    codexEnvironmentVerified: Boolean(codexCloud?.verified),
+    defaultBranch: codexCloud?.defaultBranch || deploy?.productionBranch || "main",
+    allowedActions: codexCloud?.allowedActions || [],
     workspacePath,
     category: group,
     group,
@@ -225,13 +363,13 @@ export function findProjectTargetById(projectId) {
 }
 
 export function resolveProjectDispatchTarget(input = {}) {
-  const project = findProjectTargetById(input.threadId || input.projectId || input.id);
+  const project = findProjectTargetById(input.threadId || input.projectId || input.projectKey || input.id);
   const dispatchMode = normalizeText(input.dispatchMode, 80).toLowerCase();
   const providedTargetRepo = normalizeText(input.targetRepo, 240).toLowerCase();
   const providedTargetRepoUrl = normalizeText(input.targetRepoUrl, 400);
   const providedWorkspacePath = normalizeText(input.targetWorkspacePath, 500);
   const providedContextFiles = normalizeContextFiles(input.targetContextFiles);
-  const projectId = project?.id || normalizeProjectId(input.projectId || input.threadId || input.id) || "links";
+  const projectId = project?.id || normalizeProjectId(input.projectId || input.projectKey || input.threadId || input.id) || "links";
   const projectLabel = normalizeText(input.projectLabel, 160) || project?.label || projectId;
   const projectGroup = normalizeText(input.projectCategory, 120) || project?.group || "other";
 
@@ -254,8 +392,9 @@ export function resolveProjectDispatchTarget(input = {}) {
   const effectiveWorkspacePath = providedWorkspacePath || project?.workspacePath || "";
   const effectiveContextFiles = providedContextFiles.length ? providedContextFiles : (project?.contextFiles || []);
   const effectiveDeploy = normalizeDeployConfig(input.deploy) || project?.deploy || null;
+  const effectiveCodexCloud = normalizeCodexCloudConfig(input.codexCloud, effectiveTargetRepo) || project?.codexCloud || null;
 
-  const needsCloudRepo = dispatchMode === "cloud" || dispatchMode === "slack-codex-cloud";
+  const needsCloudRepo = dispatchMode === "cloud" || dispatchMode === "slack-codex-cloud" || dispatchMode === "cloud-via-slack";
   const needsProductionVerification = needsCloudRepo && isProductionChangingText(input.text || input.effectivePrompt);
 
   if (needsCloudRepo && !effectiveTargetRepo) {
@@ -277,6 +416,7 @@ export function resolveProjectDispatchTarget(input = {}) {
     ok: true,
     value: {
       id: projectId,
+      projectKey: projectId,
       label: projectLabel,
       group: projectGroup,
       workspacePath: effectiveWorkspacePath,
@@ -284,6 +424,12 @@ export function resolveProjectDispatchTarget(input = {}) {
       targetRepoUrl: effectiveTargetRepoUrl,
       contextFiles: effectiveContextFiles,
       deploy: effectiveDeploy,
+      codexCloud: effectiveCodexCloud,
+      codexEnvironmentName: effectiveCodexCloud?.environmentName || "",
+      codexEnvironmentId: effectiveCodexCloud?.environmentId || "",
+      codexEnvironmentVerified: Boolean(effectiveCodexCloud?.verified),
+      defaultBranch: effectiveCodexCloud?.defaultBranch || effectiveDeploy?.productionBranch || "main",
+      allowedActions: effectiveCodexCloud?.allowedActions || [],
       productionVerifiable: Boolean(effectiveDeploy?.productionUrl),
       visible: project?.visible ?? true,
       cloudReady: Boolean(effectiveTargetRepo)
