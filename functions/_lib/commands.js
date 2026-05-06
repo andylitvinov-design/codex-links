@@ -342,6 +342,7 @@ function normalizeCommandStatus(rawStatus) {
     || status === "processing"
     || status === "answered"
     || status === "failed"
+    || status === "setup-needed"
     || status === "acked"
   ) {
     return status;
@@ -444,6 +445,10 @@ function normalizeRepoValue(rawValue) {
 
 function normalizeUrlValue(rawValue) {
   return String(rawValue || "").trim().slice(0, 400);
+}
+
+function normalizeProjectKeyValue(rawValue) {
+  return normalizeThreadId(rawValue).toLowerCase();
 }
 
 function normalizeWorkspacePathValue(rawValue) {
@@ -946,6 +951,7 @@ function normalizeStoredCommandEntry(entry) {
     fallbackThreadId: normalizeFallbackThreadId(entry.fallbackThreadId),
     fallbackThreadLabel: normalizeFallbackThreadLabel(entry.fallbackThreadLabel, entry.fallbackThreadId),
     dispatchMode: normalizeDispatchValue(entry.dispatchMode),
+    projectKey: normalizeProjectKeyValue(entry.projectKey || entry.projectId || entry.threadId),
     projectId: normalizeThreadId(entry.projectId || entry.threadId),
     projectLabel: normalizeThreadLabel(entry.projectLabel || entry.threadLabel, entry.threadId),
     projectCategory: normalizeDiagnosticText(entry.projectCategory, 120),
@@ -953,6 +959,11 @@ function normalizeStoredCommandEntry(entry) {
     targetRepoUrl: normalizeUrlValue(entry.targetRepoUrl),
     targetContextFiles: normalizeStringArray(entry.targetContextFiles),
     targetWorkspacePath: normalizeWorkspacePathValue(entry.targetWorkspacePath),
+    codexEnvironmentName: normalizeDiagnosticText(entry.codexEnvironmentName, 160),
+    codexEnvironmentId: normalizeDiagnosticText(entry.codexEnvironmentId, 160),
+    codexEnvironmentVerified: normalizeBooleanValue(entry.codexEnvironmentVerified),
+    defaultBranch: normalizeSlackValue(entry.defaultBranch) || "main",
+    allowedActions: normalizeStringArray(entry.allowedActions, 16, 80),
     deploy: normalizeDeployConfig(entry.deploy),
     productionVerifiable: normalizeBooleanValue(entry.productionVerifiable),
       targetExecutionMode: normalizeExecutionMode(entry.targetExecutionMode, dispatchModeToExecutorRoute(entry.dispatchMode)),
@@ -1020,6 +1031,8 @@ function normalizeStoredCommandEntry(entry) {
     slackChannelId: normalizeSlackValue(entry.slackChannelId),
     slackMessageTs: normalizeSlackValue(entry.slackMessageTs),
     slackThreadTs: normalizeSlackValue(entry.slackThreadTs),
+    finalAnswer: normalizeAssistantReplyContext(entry.finalAnswer),
+    resultUrl: normalizeUrlValue(entry.resultUrl),
     prUrl: String(entry.prUrl || "").trim(),
     branchName: normalizeSlackValue(entry.branchName),
     mergeCommit: normalizeSlackValue(entry.mergeCommit),
@@ -1220,6 +1233,7 @@ export function createCommandRecord(input) {
       progressUpdatedAt: new Date().toISOString(),
       source: "site",
       dispatchMode: normalizeDispatchValue(input.dispatchMode),
+      projectKey: normalizeProjectKeyValue(input.projectKey || input.projectId || input.threadId),
       projectId: normalizeThreadId(input.projectId || input.threadId),
       projectLabel: normalizeThreadLabel(input.projectLabel || input.threadLabel, input.threadId),
       projectCategory: normalizeDiagnosticText(input.projectCategory, 120),
@@ -1227,6 +1241,11 @@ export function createCommandRecord(input) {
       targetRepoUrl: normalizeUrlValue(input.targetRepoUrl),
       targetContextFiles: normalizeStringArray(input.targetContextFiles),
       targetWorkspacePath: normalizeWorkspacePathValue(input.targetWorkspacePath),
+      codexEnvironmentName: normalizeDiagnosticText(input.codexEnvironmentName, 160),
+      codexEnvironmentId: normalizeDiagnosticText(input.codexEnvironmentId, 160),
+      codexEnvironmentVerified: normalizeBooleanValue(input.codexEnvironmentVerified),
+      defaultBranch: normalizeSlackValue(input.defaultBranch) || "main",
+      allowedActions: normalizeStringArray(input.allowedActions, 16, 80),
       deploy: normalizeDeployConfig(input.deploy),
       productionVerifiable: normalizeBooleanValue(input.productionVerifiable),
       targetExecutionMode: normalizeExecutionMode(
@@ -1286,6 +1305,8 @@ export function createCommandRecord(input) {
       slackChannelId: "",
       slackMessageTs: "",
       slackThreadTs: "",
+      finalAnswer: "",
+      resultUrl: "",
       prUrl: "",
       branchName: "",
       mergeCommit: "",
@@ -1805,6 +1826,8 @@ export async function markCommandAnswered(env, input = {}) {
       status: "answered",
       progressStage: normalizeProgressStage(input.progressStage) || "answered",
       progressUpdatedAt: nowIso,
+      finalAnswer: normalizeAssistantReplyContext(input.finalAnswer || command.finalAnswer),
+      resultUrl: normalizeUrlValue(input.resultUrl || command.resultUrl),
       prUrl: String(input.prUrl || command.prUrl || "").trim(),
       branchName: normalizeSlackValue(input.branchName || command.branchName),
       mergeCommit: normalizeSlackValue(input.mergeCommit || command.mergeCommit),
@@ -1877,6 +1900,8 @@ export async function upsertCommandDispatchState(env, input = {}) {
     slackChannelId: normalizeSlackValue(input.slackChannelId || command.slackChannelId),
     slackMessageTs: normalizeSlackValue(input.slackMessageTs || command.slackMessageTs),
     slackThreadTs: normalizeSlackValue(input.slackThreadTs || command.slackThreadTs || command.slackMessageTs),
+    finalAnswer: normalizeAssistantReplyContext(input.finalAnswer || command.finalAnswer),
+    resultUrl: normalizeUrlValue(input.resultUrl || command.resultUrl),
     prUrl: String(input.prUrl || command.prUrl || "").trim(),
     branchName: normalizeSlackValue(input.branchName || command.branchName),
     mergeCommit: normalizeSlackValue(input.mergeCommit || command.mergeCommit),

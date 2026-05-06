@@ -56,7 +56,7 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260425-2001";
+const BUILD_VERSION = "20260505-2149";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -4299,6 +4299,7 @@ async function submitCommand(event) {
   payload.targetRepoUrl = String(activeRepo.targetRepoUrl || "").trim();
   payload.targetContextFiles = Array.isArray(activeRepo.contextFiles) ? activeRepo.contextFiles : [];
   payload.targetWorkspacePath = String(activeRepo.workspacePath || "").trim();
+  payload.projectKey = String(activeRepo.projectKey || activeRepo.id || "").trim();
   payload.projectId = String(activeRepo.id || "").trim();
   payload.projectLabel = String(activeRepo.label || "").trim();
   payload.projectCategory = getProjectCategory(activeRepo);

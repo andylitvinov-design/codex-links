@@ -114,6 +114,55 @@ test("syncSlackCommandReplies keeps progress-only Slack replies non-terminal", a
   assert.equal(messages.length, 0);
 });
 
+test("syncSlackCommandReplies keeps repo ACK without final answer non-terminal", async () => {
+  const env = createMockEnv();
+  const createdAt = new Date().toISOString();
+
+  await writeCommands(env, [{
+    id: "cmd-slack-ack-only",
+    clientId: "test-client",
+    threadId: "links",
+    threadLabel: "links",
+    projectKey: "links",
+    projectId: "links",
+    targetRepo: "andylitvinov-design/codex-links",
+    text: "fix routing metadata",
+    createdAt,
+    progressUpdatedAt: createdAt,
+    dispatchMode: "slack-codex-cloud",
+    requestedExecutor: "cloud-via-slack",
+    actualExecutor: "cloud-via-slack",
+    status: "dispatched",
+    progressStage: "dispatched",
+    slackChannelId: "C123",
+    slackMessageTs: "3000.000001",
+    slackThreadTs: "3000.000001",
+    dispatchedAt: createdAt
+  }]);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => createSlackResponse([
+    { ts: "3000.000001", thread_ts: "3000.000001", text: "root task" },
+    { ts: "3001.000001", thread_ts: "3000.000001", user: "U123", text: "ACK repo=andylitvinov-design/codex-links project=links command=cmd-slack-ack-only" }
+  ]);
+
+  try {
+    const command = await getCommandById(env, "cmd-slack-ack-only");
+    const terminal = await syncSlackCommandReplies(env, command, { SLACK_CODEX_USER_ID: "U123" });
+    assert.equal(terminal, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const updated = await getCommandById(env, "cmd-slack-ack-only");
+  const messages = await readMessages(env);
+
+  assert.equal(updated?.status, "processing");
+  assert.equal(updated?.replyMatched, false);
+  assert.equal(updated?.repoAckStatus, "validated");
+  assert.equal(messages.length, 0);
+});
+
 test("syncSlackCommandReplies validates exact repo ACK", async () => {
   const env = createMockEnv();
   const createdAt = new Date().toISOString();

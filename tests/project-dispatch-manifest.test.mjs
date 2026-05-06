@@ -152,7 +152,7 @@ test("projectKey wins over threadId when resolving a command target", () => {
     projectKey: "reiki-yggdrasil",
     threadId: "links",
     dispatchMode: "cloud-via-slack",
-    text: "Audit the layout and report issues without changing production."
+    text: "Audit the layout and report issues."
   });
 
   assert.equal(result.ok, true);
@@ -182,4 +182,36 @@ test("visible project list exposes Codex Cloud diagnostics", () => {
   assert.equal(reiki.codexCloud.environmentName, "reiki-yggdrasil");
   assert.equal(reiki.codexCloud.environmentId, "needs-verification");
   assert.deepEqual(reiki.allowedActions, ["audit", "fix", "test", "design-check"]);
+});
+
+test("cloud slack prompt includes target repo and project key", () => {
+  const result = resolveProjectDispatchTarget({
+    projectKey: "reiki",
+    threadId: "links",
+    dispatchMode: "cloud-via-slack",
+    text: "Audit the landing page."
+  });
+
+  assert.equal(result.ok, true);
+
+  const prompt = buildSlackCommandPrompt({
+    id: "cmd-reiki-routing",
+    threadId: "links",
+    threadLabel: "links",
+    projectKey: result.value.projectKey,
+    projectId: result.value.id,
+    projectLabel: result.value.label,
+    projectCategory: result.value.group,
+    targetRepo: result.value.targetRepo,
+    targetRepoUrl: result.value.targetRepoUrl,
+    targetWorkspacePath: result.value.workspacePath,
+    targetContextFiles: result.value.contextFiles,
+    text: "Audit the landing page."
+  }, {
+    SLACK_CODEX_MENTION: "<@U999>"
+  });
+
+  assert.match(prompt, /Project Key: reiki-yggdrasil/);
+  assert.match(prompt, /Repository: andylitvinov-design\/reiki-yggdrasil/);
+  assert.match(prompt, /ACK repo=andylitvinov-design\/reiki-yggdrasil project=reiki-yggdrasil command=cmd-reiki-routing/);
 });

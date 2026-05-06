@@ -1304,6 +1304,18 @@ export function classifySlackReply(text) {
     };
   }
 
+  if (parseSlackRepoAck(value)) {
+    return {
+      status: "processing",
+      progressStage: "repo-acknowledged",
+      prUrl,
+      branchName,
+      mergeCommit,
+      productionUrl,
+      deliveryStatus: deliveryStatus || "cloud-running"
+    };
+  }
+
   if (
     /\b(error|failed|failure|unable|blocked|need access|permission denied|could not|can'?t complete)\b/i.test(value)
   ) {

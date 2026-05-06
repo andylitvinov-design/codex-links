@@ -391,8 +391,10 @@ export function resolveProjectDispatchTarget(input = {}) {
   const effectiveTargetRepoUrl = providedTargetRepoUrl || project?.targetRepoUrl || "";
   const effectiveWorkspacePath = providedWorkspacePath || project?.workspacePath || "";
   const effectiveContextFiles = providedContextFiles.length ? providedContextFiles : (project?.contextFiles || []);
-  const effectiveDeploy = normalizeDeployConfig(input.deploy) || project?.deploy || null;
-  const effectiveCodexCloud = normalizeCodexCloudConfig(input.codexCloud, effectiveTargetRepo) || project?.codexCloud || null;
+  const inputHasDeploy = input.deploy && typeof input.deploy === "object";
+  const inputHasCodexCloud = input.codexCloud && typeof input.codexCloud === "object";
+  const effectiveDeploy = (inputHasDeploy ? normalizeDeployConfig(input.deploy) : null) || project?.deploy || null;
+  const effectiveCodexCloud = (inputHasCodexCloud ? normalizeCodexCloudConfig(input.codexCloud, effectiveTargetRepo) : null) || project?.codexCloud || null;
 
   const needsCloudRepo = dispatchMode === "cloud" || dispatchMode === "slack-codex-cloud" || dispatchMode === "cloud-via-slack";
   const needsProductionVerification = needsCloudRepo && isProductionChangingText(input.text || input.effectivePrompt);

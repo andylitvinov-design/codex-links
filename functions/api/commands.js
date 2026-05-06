@@ -332,6 +332,7 @@ function serializeCommand(command, options = {}) {
     repoAckProject: String(command.repoAckProject || "").trim(),
     repoAckCommand: String(command.repoAckCommand || "").trim(),
     repoAckWarning: String(command.repoAckWarning || "").trim(),
+    projectKey: String(command.projectKey || command.projectId || command.threadId || "").trim(),
     projectId: String(command.projectId || "").trim(),
     projectLabel: String(command.projectLabel || "").trim(),
     projectCategory: String(command.projectCategory || "").trim(),
@@ -339,11 +340,18 @@ function serializeCommand(command, options = {}) {
     targetRepoUrl: String(command.targetRepoUrl || "").trim(),
     targetContextFiles: Array.isArray(command.targetContextFiles) ? command.targetContextFiles : [],
     targetWorkspacePath: String(command.targetWorkspacePath || "").trim(),
+    codexEnvironmentName: String(command.codexEnvironmentName || "").trim(),
+    codexEnvironmentId: String(command.codexEnvironmentId || "").trim(),
+    codexEnvironmentVerified: Boolean(command.codexEnvironmentVerified),
+    defaultBranch: String(command.defaultBranch || "").trim(),
+    allowedActions: Array.isArray(command.allowedActions) ? command.allowedActions : [],
     targetExecutionMode: String(command.targetExecutionMode || "").trim(),
     deploy: command.deploy && typeof command.deploy === "object" ? command.deploy : null,
     productionVerifiable: Boolean(command.productionVerifiable),
     deliveryStatus: String(command.deliveryStatus || "").trim(),
     deliveryStatusUpdatedAt: String(command.deliveryStatusUpdatedAt || "").trim(),
+    finalAnswer: String(command.finalAnswer || "").trim(),
+    resultUrl: String(command.resultUrl || "").trim(),
     mergeCommit: String(command.mergeCommit || "").trim(),
     productionUrl: String(command.productionUrl || "").trim(),
     productionVerifiedAt: String(command.productionVerifiedAt || "").trim(),
@@ -469,6 +477,8 @@ export async function syncSlackCommandReplies(env, command, runtimeConfig, optio
     productionUrl: classification.productionUrl,
     productionVerifiedAt: classification.deliveryStatus === "production-verified" ? new Date().toISOString() : "",
     deliveryStatus: classification.deliveryStatus || (isTerminalReply ? "pr-ready" : "cloud-running"),
+    finalAnswer: isTerminalReply ? latestReply.text : "",
+    resultUrl: classification.productionUrl || classification.prUrl,
     errorMessage: classification.status === "failed" ? latestReply.text : "",
     processingStartedAt: classification.status === "processing" ? new Date().toISOString() : "",
     resultAt: classification.status === "answered" || classification.status === "failed" ? new Date().toISOString() : ""
@@ -878,6 +888,7 @@ async function answerCloudCommand(env, command, result) {
     replyIngestedAt: nowIso,
     replyMatched: true,
     replyMatchedBy: "direct-api",
+    finalAnswer: result.answerText,
     resultAt: nowIso,
     completedAt: nowIso
   });
@@ -1929,10 +1940,15 @@ export async function onRequest(context) {
   const runtimeConfig = await readRuntimeConfig(env);
   const requestedDispatchMode = resolveRequestedDispatchMode(payload, runtimeConfig);
   const resolvedTargetExecutionMode = dispatchModeToExecutorRoute(requestedDispatchMode);
+  const requestedProjectKey = String(payload?.projectKey || payload?.projectId || payload?.threadId || "").trim();
+  const requestedThreadId = String(payload?.threadId || requestedProjectKey || "").trim();
   const manifestTarget = resolveProjectDispatchTarget({
-    threadId: payload?.threadId,
+    projectKey: requestedProjectKey,
+    threadId: requestedThreadId,
     projectId: payload?.projectId,
     dispatchMode: requestedDispatchMode,
+    text: payload?.text,
+    effectivePrompt: payload?.effectivePrompt,
     projectLabel: payload?.projectLabel,
     projectCategory: payload?.projectCategory,
     targetRepo: payload?.targetRepo,
@@ -1950,23 +1966,36 @@ export async function onRequest(context) {
 
   const requestStartedAt = new Date().toISOString();
   const initialBridgeQueueState = await getInitialBridgeQueueState(env, payload, requestedDispatchMode);
+  const needsCodexEnvironmentVerification = requestedDispatchMode === DISPATCH_MODE_SLACK
+    && manifestTarget.value.codexEnvironmentId === "needs-verification";
   const created = await insertCommand(env, {
     ...(payload || {}),
+    threadId: requestedThreadId,
     dispatchMode: requestedDispatchMode,
     targetExecutionMode: resolvedTargetExecutionMode,
     ...initialBridgeQueueState,
     uiSubmitStartedAt: payload?.uiSubmitStartedAt,
     apiCommandsRequestStartedAt: requestStartedAt,
     commandCreatedAt: new Date().toISOString(),
+    projectKey: manifestTarget.value.projectKey,
     projectId: manifestTarget.value.id,
     projectLabel: manifestTarget.value.label,
     projectCategory: manifestTarget.value.group,
     targetRepo: manifestTarget.value.targetRepo,
-      targetRepoUrl: manifestTarget.value.targetRepoUrl,
-      targetContextFiles: manifestTarget.value.contextFiles,
-      targetWorkspacePath: manifestTarget.value.workspacePath,
-      deploy: manifestTarget.value.deploy,
-      productionVerifiable: manifestTarget.value.productionVerifiable
+    targetRepoUrl: manifestTarget.value.targetRepoUrl,
+    targetContextFiles: manifestTarget.value.contextFiles,
+    targetWorkspacePath: manifestTarget.value.workspacePath,
+    codexEnvironmentName: manifestTarget.value.codexEnvironmentName,
+    codexEnvironmentId: manifestTarget.value.codexEnvironmentId,
+    codexEnvironmentVerified: manifestTarget.value.codexEnvironmentVerified,
+    defaultBranch: manifestTarget.value.defaultBranch,
+    allowedActions: manifestTarget.value.allowedActions,
+    deploy: manifestTarget.value.deploy,
+    productionVerifiable: manifestTarget.value.productionVerifiable,
+    lastDiagnosticCode: needsCodexEnvironmentVerification ? "codex_environment_needs_verification" : "",
+    lastDiagnosticDetail: needsCodexEnvironmentVerification
+      ? "Codex Cloud environment ID is not verified yet; Slack-backed dispatch may proceed, but exact environment launch still needs verification."
+      : ""
   });
 
   if (!created.ok) {
