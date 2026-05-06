@@ -363,13 +363,13 @@ export function findProjectTargetById(projectId) {
 }
 
 export function resolveProjectDispatchTarget(input = {}) {
-  const project = findProjectTargetById(input.threadId || input.projectId || input.projectKey || input.id);
+  const project = findProjectTargetById(input.projectKey || input.projectId || input.threadId || input.id);
   const dispatchMode = normalizeText(input.dispatchMode, 80).toLowerCase();
   const providedTargetRepo = normalizeText(input.targetRepo, 240).toLowerCase();
   const providedTargetRepoUrl = normalizeText(input.targetRepoUrl, 400);
   const providedWorkspacePath = normalizeText(input.targetWorkspacePath, 500);
   const providedContextFiles = normalizeContextFiles(input.targetContextFiles);
-  const projectId = project?.id || normalizeProjectId(input.projectId || input.projectKey || input.threadId || input.id) || "links";
+  const projectId = project?.id || normalizeProjectId(input.projectKey || input.projectId || input.threadId || input.id) || "links";
   const projectLabel = normalizeText(input.projectLabel, 160) || project?.label || projectId;
   const projectGroup = normalizeText(input.projectCategory, 120) || project?.group || "other";
 
