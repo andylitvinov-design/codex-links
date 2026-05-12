@@ -13,6 +13,7 @@
     "save:deploy": "cd codex-save && wrangler pages deploy public --project-name codex-save",
     "kv:seed": "node scripts/seed-demo.mjs",
     "cloud:check": "node scripts/check-cloud-setup.mjs",
+    "check:openclaw": "bash scripts/check-openclaw.sh",
     "cloud:preview-check": "node scripts/check-preview-cloud-status.mjs",
     "cloud:smoke": "node scripts/smoke-cloud-delivery.mjs",
     "cloud:photo-smoke": "node scripts/smoke-cloud-photo-delivery.mjs",
