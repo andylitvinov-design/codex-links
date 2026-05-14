@@ -10,7 +10,9 @@
 - verification command: `bash scripts/check-openclaw.sh`
 - integration status: readiness layer only; OpenClaw is not an active executor in production dispatch
 - probe command: `npm run probe:openclaw`
-- probe status: safe CLI command execution was verified with `openclaw status --json --timeout 2000`; gateway reachability still reported `timeout`
+- probe status: safe CLI command execution was verified with `openclaw status --json --timeout 2000`; gateway reachability remains false, with prior `timeout` and latest non-secret scope error evidence
 - execution status: no safe no-op/dry-run/echo agent run command has been verified, so executor runs remain `needs verification`
 - production dispatch: still not connected to OpenClaw; Slack-backed Codex Cloud, direct OpenAI opt-in, local bridge, and Claude bridge behavior are unchanged
+- usage model: docs define OpenClaw as readiness/probe-only for local diagnostics, smoke checks, safe verification commands, future opt-in local executor mode, and later `brain-management` telemetry
+- blocked before `executor=openclaw`: `gatewayReachable=true`, non-secret auth verification, safe no-op/sandbox execution, timeout contract, stdout/stderr/artifact contract, and stable telemetry contract
 - next action: add an explicit `openclaw` local executor adapter only after auth, gateway health, no-op/sandboxed execution, artifact output, timeout handling, and telemetry are verified
