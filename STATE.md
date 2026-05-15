@@ -16,3 +16,12 @@
 - usage model: docs define OpenClaw as readiness/probe-only for local diagnostics, smoke checks, safe verification commands, future opt-in local executor mode, and later `brain-management` telemetry
 - blocked before `executor=openclaw`: `gatewayReachable=true`, non-secret auth verification, safe no-op/sandbox execution, timeout contract, stdout/stderr/artifact contract, and stable telemetry contract
 - next action: add an explicit `openclaw` local executor adapter only after auth, gateway health, no-op/sandboxed execution, artifact output, timeout handling, and telemetry are verified
+
+## 2026-05-15 OpenClaw Feedback Loop
+
+- feedback loop status: `npm run feedback:verify` added as a read-only live verifier for ChatGPT/Codex post-PR and post-deploy checks
+- supported project keys: `finance`, `reiki-yggdrasil`
+- verified now: finance `/api/status` commit comparison plus bounded `/api/audit-snapshot` summary; Reiki route reachability for `/`, `/profile`, `/masters`, and `/profile/admin`
+- blocked: Reiki still needs a public `/version.json` or `/api/status` endpoint before commit/version proof can pass; OpenClaw gateway/run support remains `needs verification`
+- production dispatch: unchanged; OpenClaw is still not wired into production dispatch, Cloudflare routing, Slack delivery, reports APIs, or deployment config
+- next action: add public version/status endpoints to projects that need provable live commit checks, then optionally feed verifier output into the delivery timeline

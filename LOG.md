@@ -1,5 +1,11 @@
 # LOG
 
+## 2026-05-15
+
+- Added `npm run feedback:verify` as a read-only OpenClaw/ChatGPT feedback verifier for `finance` and `reiki-yggdrasil`.
+- Added compact JSON/key-value output with exact failing check reporting, bounded GET-only live checks, finance commit comparison, finance audit snapshot summary, and Reiki route reachability checks.
+- Documented the feedback-loop contract in `docs/openclaw-feedback-loop.md` and kept OpenClaw out of production dispatch, Cloudflare routing, Slack delivery, reports APIs, deployment config, and secrets/env handling.
+
 ## 2026-05-14
 
 - Added the practical OpenClaw usage model to `docs/openclaw-integration.md`.
