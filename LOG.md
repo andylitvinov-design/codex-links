@@ -2,6 +2,10 @@
 
 ## 2026-05-15
 
+- Added `docs/chatgpt-openclaw-codex-loop.md` and `docs/examples/chatgpt-openclaw-codex-loop.example.json` for the ChatGPT/OpenClaw/Codex approval-loop contract.
+- Added `npm run loop:proposal` as a dry-run-only proposal generator with JSON and compact key/value output; it does not dispatch to Codex, OpenClaw, Slack, Cloudflare, or production services.
+- Added tests for proposal generation, required approval guardrails, missing repo/prompt verification notes, status validation, and compact output.
+- Updated `STATE.md` to mark direct same-ChatGPT-thread callback as `needs verification`, keep Codex Links inbox/timeline as the bridge surface, and keep production dispatch unchanged.
 - Added `npm run feedback:verify` as a read-only OpenClaw/ChatGPT feedback verifier for `finance` and `reiki-yggdrasil`.
 - Added compact JSON/key-value output with exact failing check reporting, bounded GET-only live checks, finance commit comparison, finance audit snapshot summary, and Reiki route reachability checks.
 - Documented the feedback-loop contract in `docs/openclaw-feedback-loop.md` and kept OpenClaw out of production dispatch, Cloudflare routing, Slack delivery, reports APIs, deployment config, and secrets/env handling.

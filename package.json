@@ -16,6 +16,7 @@
     "check:openclaw": "bash scripts/check-openclaw.sh",
     "probe:openclaw": "bash scripts/probe-openclaw-run.sh",
     "feedback:verify": "node scripts/openclaw-feedback-loop.mjs",
+    "loop:proposal": "node scripts/chatgpt-openclaw-codex-loop.mjs",
     "cloud:preview-check": "node scripts/check-preview-cloud-status.mjs",
     "cloud:smoke": "node scripts/smoke-cloud-delivery.mjs",
     "cloud:photo-smoke": "node scripts/smoke-cloud-photo-delivery.mjs",

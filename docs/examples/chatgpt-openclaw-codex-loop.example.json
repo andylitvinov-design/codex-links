@@ -1,0 +1,37 @@
+{
+  "threadKey": "chatgpt-openclaw-codex-loop",
+  "proposalId": "proposal-example-finance-2026-05-15",
+  "projectKey": "finance",
+  "repo": "andylitvinov-design/finance",
+  "goal": "Verify production updated to expected commit",
+  "prompt": "Check /api/status and compare expected commit",
+  "allowedActions": [
+    "read repo",
+    "run tests",
+    "run build",
+    "GET /api/status",
+    "GET /api/audit-snapshot"
+  ],
+  "forbiddenActions": [
+    "financial/account changes without approval",
+    "no secrets/env values",
+    "no .env reads",
+    "no merge without explicit approval",
+    "no deploy without explicit approval",
+    "no delete without explicit approval"
+  ],
+  "requiresApproval": true,
+  "status": "proposed",
+  "codexRunId": null,
+  "deliveryId": null,
+  "resultSummary": null,
+  "changedFiles": [],
+  "checks": [],
+  "exactFailingCommand": null,
+  "risks": [],
+  "nextSuggestedPrompt": null,
+  "createdAt": "2026-05-15T00:00:00.000Z",
+  "updatedAt": "2026-05-15T00:00:00.000Z",
+  "dryRun": true,
+  "needsVerification": []
+}

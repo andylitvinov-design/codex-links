@@ -27,3 +27,12 @@
 - blocked: Reiki still needs a public `/version.json` or `/api/status` endpoint before commit/version proof can pass; OpenClaw gateway/run support remains `needs verification` with `gatewayReachable=false`, latest `gatewayError=missing scope: operator.read`, and `run_supported=false`
 - production dispatch: unchanged; OpenClaw is still not wired into production dispatch, Cloudflare routing, Slack delivery, reports APIs, or deployment config
 - next action: add public version/status endpoints to projects that need provable live commit checks, then optionally feed verifier output into the delivery timeline
+
+## 2026-05-15 ChatGPT/OpenClaw/Codex Approval Loop
+
+- approval loop status: docs + dry-run proposal prototype only
+- direct same-ChatGPT-thread callback: needs verification; do not claim this is available until an official callback surface is proven
+- bridge surface: Codex Links inbox/timeline under a stable `threadKey`
+- supported example project keys: `finance`, `reiki-yggdrasil`
+- production dispatch: unchanged; OpenClaw is still not a production executor and `npm run loop:proposal` does not dispatch
+- next action: implement proposal storage plus approval UI/API in a separate PR
