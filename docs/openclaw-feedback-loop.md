@@ -40,7 +40,8 @@ It does not change Cloudflare routing, Slack delivery, reports APIs, delivery AP
 - GET `/api/status`.
 - Extract `status`, `commitSha`, `commitRef`, and `googleSheetReadOk` when present.
 - GET `/api/audit-snapshot`.
-- Summarize only HTTP status, JSON parse status, `ok/status`, and warning count.
+- Summarize only HTTP status, JSON parse status, `ok/status`, warning count, and bounded parse diagnostics.
+- If `/api/audit-snapshot` returns HTTP 200 but is not parseable JSON, record only content type, body length, parse error type, and a short safe snippet when it does not appear to contain secret material.
 - Compare `--expected-commit` against `/api/status` `commitSha` when provided.
 
 `reiki-yggdrasil`: Reiki Yggdrasil site at `https://reiki-yggdrasil.vercel.app`.

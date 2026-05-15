@@ -184,7 +184,38 @@ test("finance audit snapshot can be reachable even when JSON parsing is unavaila
   assert.equal(result.result, "pass");
   assert.equal(audit.ok, true);
   assert.match(audit.summary, /jsonParsed=false/);
-  assert.doesNotMatch(JSON.stringify(result), /temporary audit snapshot text/);
+  assert.match(audit.summary, /contentType=text\/html/);
+  assert.match(audit.summary, /bodyLength=29/);
+  assert.match(audit.summary, /parseErrorType=SyntaxError/);
+  assert.match(audit.summary, /snippet=temporary audit snapshot text/);
+});
+
+test("finance audit snapshot suppresses unsafe snippets when JSON parsing fails", async () => {
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/api/status")) {
+      return jsonResponse({
+        status: "ok",
+        commitSha: "abc123",
+        commitRef: "main",
+        googleSheetReadOk: true
+      });
+    }
+
+    return textResponse("token=secret-value");
+  };
+
+  const result = await verifyFeedback(parseArgs([
+    "--project", "finance",
+    "--expected-commit", "abc123",
+    "--json"
+  ]), { fetchImpl });
+  const audit = result.checks.find((check) => check.name === "audit-snapshot");
+
+  assert.equal(audit.ok, true);
+  assert.match(audit.summary, /jsonParsed=false/);
+  assert.match(audit.summary, /bodyLength=18/);
+  assert.doesNotMatch(audit.summary, /snippet=/);
+  assert.doesNotMatch(JSON.stringify(result), /secret-value/);
 });
 
 test("reiki route checks are reachable but version proof remains needs_verification", async () => {

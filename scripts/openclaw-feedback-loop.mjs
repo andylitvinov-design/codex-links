@@ -164,9 +164,23 @@ async function readLimitedText(response, maxBytes = MAX_BODY_BYTES) {
 function parseJson(text) {
   try {
     return { parsed: true, value: JSON.parse(text) };
-  } catch {
-    return { parsed: false, value: null };
+  } catch (error) {
+    return {
+      parsed: false,
+      value: null,
+      errorType: error instanceof Error ? error.name : "ParseError"
+    };
   }
+}
+
+function safeSnippet(text, maxLength = 80) {
+  const snippet = shortValue(text, maxLength);
+  if (!snippet) {
+    return "";
+  }
+
+  const secretPattern = /(?:token|secret|password|passwd|authorization|api[_-]?key|bearer|cookie|session|private[_-]?key|access[_-]?key)/i;
+  return secretPattern.test(snippet) ? "" : snippet;
 }
 
 async function fetchCheck(name, url, args, fetchImpl) {
@@ -180,6 +194,7 @@ async function fetchCheck(name, url, args, fetchImpl) {
     });
     const body = await readLimitedText(response);
     const json = parseJson(body);
+    const contentType = response.headers?.get?.("content-type") || "";
 
     return {
       name,
@@ -188,6 +203,10 @@ async function fetchCheck(name, url, args, fetchImpl) {
       httpOk: response.ok,
       jsonParsed: json.parsed,
       data: json.value,
+      contentType: shortValue(contentType, 120),
+      bodyLength: Buffer.byteLength(body),
+      parseErrorType: json.parsed ? null : json.errorType,
+      safeSnippet: json.parsed ? "" : safeSnippet(body),
       error: null
     };
   } catch (error) {
@@ -198,6 +217,10 @@ async function fetchCheck(name, url, args, fetchImpl) {
       httpOk: false,
       jsonParsed: false,
       data: null,
+      contentType: "",
+      bodyLength: 0,
+      parseErrorType: null,
+      safeSnippet: "",
       error: error instanceof Error ? error.message : String(error || "fetch failed")
     };
   } finally {
@@ -243,11 +266,20 @@ function auditWarningCount(data) {
 function auditSummary(rawCheck) {
   const data = rawCheck.data;
   const statusValue = data?.status ?? data?.ok ?? "missing";
+  const parseDetails = rawCheck.jsonParsed
+    ? []
+    : [
+      `contentType=${shortValue(rawCheck.contentType || "missing", 80)}`,
+      `bodyLength=${Number.isFinite(rawCheck.bodyLength) ? rawCheck.bodyLength : "missing"}`,
+      `parseErrorType=${shortValue(rawCheck.parseErrorType || "missing")}`,
+      rawCheck.safeSnippet ? `snippet=${shortValue(rawCheck.safeSnippet, 80)}` : null
+    ].filter(Boolean);
 
   return [
     `jsonParsed=${rawCheck.jsonParsed}`,
     `status=${shortValue(statusValue)}`,
-    `warningCount=${auditWarningCount(data)}`
+    `warningCount=${auditWarningCount(data)}`,
+    ...parseDetails
   ].join("; ");
 }
 

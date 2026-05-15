@@ -20,8 +20,10 @@
 ## 2026-05-15 OpenClaw Feedback Loop
 
 - feedback loop status: `npm run feedback:verify` added as a read-only live verifier for ChatGPT/Codex post-PR and post-deploy checks
+- PR stack status: PR #155 remains stacked on PR #153 and must not be retargeted to `main` until #153 lands
 - supported project keys: `finance`, `reiki-yggdrasil`
 - verified now: finance `/api/status` commit comparison plus bounded `/api/audit-snapshot` summary; Reiki route reachability for `/`, `/profile`, `/masters`, and `/profile/admin`
-- blocked: Reiki still needs a public `/version.json` or `/api/status` endpoint before commit/version proof can pass; OpenClaw gateway/run support remains `needs verification`
+- finance current live note: `/api/status` is HTTP 200 with parseable JSON and commit `8a11322db98d7027e482dc08cb10a9a381536e95`; `/api/audit-snapshot` is HTTP 200 but JSON parse false, so only safe bounded diagnostics should be recorded
+- blocked: Reiki still needs a public `/version.json` or `/api/status` endpoint before commit/version proof can pass; OpenClaw gateway/run support remains `needs verification` with `gatewayReachable=false`, latest `gatewayError=missing scope: operator.read`, and `run_supported=false`
 - production dispatch: unchanged; OpenClaw is still not wired into production dispatch, Cloudflare routing, Slack delivery, reports APIs, or deployment config
 - next action: add public version/status endpoints to projects that need provable live commit checks, then optionally feed verifier output into the delivery timeline
