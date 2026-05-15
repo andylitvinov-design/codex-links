@@ -14,7 +14,7 @@ The first safe prototype keeps Codex Links as the bridge surface:
 6. ChatGPT and the user review the result.
 7. Any next step starts as a new proposal and repeats the same approval loop.
 
-This document is a contract and dry-run prototype only. It does not dispatch real Codex commands.
+This document is a contract plus a safe storage/approval prototype. It does not dispatch real Codex commands.
 
 ## Constraint
 
@@ -110,6 +110,46 @@ npm run loop:proposal -- \
 
 The script only creates, validates, and prints a proposal object. It does not dispatch to Codex, OpenClaw, Slack, Cloudflare, or any production service.
 
+## Proposal Storage API
+
+The safe storage layer keeps proposals in Codex Links KV under a stable `threadKey`.
+
+Create a proposed record:
+
+```bash
+curl -sS -X POST "https://codex-links.pages.dev/api/proposals" \
+  -H "content-type: application/json" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN" \
+  --data '{"threadKey":"chatgpt-openclaw-codex-loop","projectKey":"finance","repo":"andylitvinov-design/finance","goal":"Verify production updated to expected commit","prompt":"Check /api/status and compare expected commit"}'
+```
+
+List proposals for one thread:
+
+```bash
+curl -sS "https://codex-links.pages.dev/api/proposals?threadKey=chatgpt-openclaw-codex-loop" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN"
+```
+
+Read one proposal:
+
+```bash
+curl -sS "https://codex-links.pages.dev/api/proposals/proposal-id" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN"
+```
+
+Approve one proposal:
+
+```bash
+curl -sS -X POST "https://codex-links.pages.dev/api/proposals/proposal-id/approve" \
+  -H "content-type: application/json" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN" \
+  --data '{"approvedBy":"operator"}'
+```
+
+Approval changes only stored state from `proposed` to `approved`, sets `approvedAt`, optionally stores `approvedBy`, and leaves `codexRunId`, `deliveryId`, and `resultSummary` empty. Stored proposals have `dryRun: true` and `dispatchEnabled: false`.
+
+The API requires the existing Codex Links write/admin authorization token. It does not read `.env` files and does not print token values.
+
 ## Example Proposal Payloads
 
 Finance production verification proposal:
@@ -178,9 +218,8 @@ ChatGPT prepares a proposal payload and shows it to the user. If the user says "
 
 ## Future Implementation Steps
 
-1. Connect proposal storage to the Codex Links inbox/timeline under `threadKey`.
-2. Add an approval endpoint and small UI control for approving a proposed payload.
-3. Route approved proposals into the existing Codex command path without changing the production default executor.
-4. Normalize Codex results into `resultSummary`, `checks`, `changedFiles`, `risks`, and `nextSuggestedPrompt`.
-5. Integrate OpenClaw as an experimental executor only after gateway and safe no-op runs are verified.
-6. Expose stable non-secret approval-loop telemetry to `brain-management`.
+1. Add the smallest inbox/timeline UI surface for proposed and approved records under `threadKey`.
+2. Route approved proposals into the existing Codex command path without changing the production default executor.
+3. Normalize Codex results into `resultSummary`, `checks`, `changedFiles`, `risks`, and `nextSuggestedPrompt`.
+4. Integrate OpenClaw as an experimental executor only after gateway and safe no-op runs are verified.
+5. Expose stable non-secret approval-loop telemetry to `brain-management`.

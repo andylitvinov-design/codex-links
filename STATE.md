@@ -30,9 +30,12 @@
 
 ## 2026-05-15 ChatGPT/OpenClaw/Codex Approval Loop
 
-- approval loop status: docs + dry-run proposal prototype only
+- approval loop status: docs + dry-run proposal prototype + safe proposal storage/approval API
+- proposal storage: API records are stored under stable `threadKey` with `dryRun=true` and `dispatchEnabled=false`
+- approval status: `POST /api/proposals/:proposalId/approve` changes only stored status from `proposed` to `approved`
 - direct same-ChatGPT-thread callback: needs verification; do not claim this is available until an official callback surface is proven
 - bridge surface: Codex Links inbox/timeline under a stable `threadKey`
 - supported example project keys: `finance`, `reiki-yggdrasil`
-- production dispatch: unchanged; OpenClaw is still not a production executor and `npm run loop:proposal` does not dispatch
-- next action: implement proposal storage plus approval UI/API in a separate PR
+- production dispatch: unchanged; approved proposals are not connected to Codex commands, OpenClaw, Slack delivery, Cloudflare routing, merge, or deploy
+- UI status: not connected yet; API/docs are the safe layer for this PR
+- next action: connect approved proposal records to the existing Codex command path in a future PR, with dispatch still explicit and bounded

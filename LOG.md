@@ -2,6 +2,12 @@
 
 ## 2026-05-15
 
+- Added safe ChatGPT/OpenClaw/Codex proposal storage API: `POST /api/proposals`, `GET /api/proposals?threadKey=...`, `GET /api/proposals/:proposalId`, and `POST /api/proposals/:proposalId/approve`.
+- Proposal approval is storage-only: it sets `status=approved`, `approvedAt`, optional `approvedBy`, and keeps `codexRunId=null`, `deliveryId=null`, `dryRun=true`, and `dispatchEnabled=false`.
+- Kept dispatch disconnected: no Codex command creation, OpenClaw run, Slack dispatch, Cloudflare deploy, merge, delete, secrets/env reads, or production executor default changes.
+- Added proposal API/storage tests and documented the create/list/read/approve flow in `docs/chatgpt-openclaw-codex-loop.md`.
+- UI remains the next layer; this PR intentionally stops at API/docs/storage.
+
 - Added `docs/chatgpt-openclaw-codex-loop.md` and `docs/examples/chatgpt-openclaw-codex-loop.example.json` for the ChatGPT/OpenClaw/Codex approval-loop contract.
 - Added `npm run loop:proposal` as a dry-run-only proposal generator with JSON and compact key/value output; it does not dispatch to Codex, OpenClaw, Slack, Cloudflare, or production services.
 - Added tests for proposal generation, required approval guardrails, missing repo/prompt verification notes, status validation, and compact output.
