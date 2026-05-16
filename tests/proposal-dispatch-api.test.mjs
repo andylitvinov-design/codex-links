@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createProposal, approveProposal, getProposalById, buildProposalCommandPayload } from "../functions/_lib/proposals.js";
+import {
+  approveProposal,
+  buildProposalCommandPayload,
+  createProposal,
+  getProposalById,
+  markProposalDispatched
+} from "../functions/_lib/proposals.js";
 import { readCommands } from "../functions/_lib/commands.js";
 import { onRequest as dispatchRequest } from "../functions/api/proposals/[proposalId]/dispatch.js";
 
@@ -138,6 +144,28 @@ test("proposal dispatch is duplicate-safe and returns linked command", async () 
   assert.equal(second.duplicate, true);
   assert.equal(second.command.id, first.command.id);
   assert.equal(commands.length, 1);
+});
+
+test("dispatched proposal stores command, run, and delivery identifiers when available", async () => {
+  const env = createMockEnv();
+  const proposal = await createApprovedProposal(env);
+  const updated = await markProposalDispatched(env, proposal, {
+    id: "command-123",
+    codexRunId: "run-123",
+    slackThreadTs: "1711111111.000100",
+    slackMessageTs: "1711111111.000000"
+  }, new Date("2026-05-16T10:02:00.000Z"));
+  const stored = await getProposalById(env, proposal.proposalId);
+
+  assert.equal(updated.status, "dispatched");
+  assert.equal(updated.dispatchedAt, "2026-05-16T10:02:00.000Z");
+  assert.equal(updated.commandId, "command-123");
+  assert.equal(updated.codexRunId, "run-123");
+  assert.equal(updated.deliveryId, "1711111111.000100");
+  assert.equal(updated.dispatchEnabled, true);
+  assert.equal(stored.commandId, "command-123");
+  assert.equal(stored.codexRunId, "run-123");
+  assert.equal(stored.deliveryId, "1711111111.000100");
 });
 
 test("proposal command prompt includes approval wrapper and stop condition", async () => {
