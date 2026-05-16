@@ -1,5 +1,13 @@
 # LOG
 
+## 2026-05-16
+
+- Added explicit approved-proposal dispatch endpoint: `POST /api/proposals/:proposalId/dispatch`.
+- Dispatch requires existing write/admin authorization, requires `status=approved`, is duplicate-safe for already linked proposals, and stores `status=dispatched`, `dispatchedAt`, `commandId`, optional `codexRunId`, optional `deliveryId`, `dispatchEnabled=true`, and `updatedAt`.
+- Approval remains separate from dispatch: `POST /api/proposals/:proposalId/approve` still only changes proposal state and does not auto-create a command.
+- Dispatch connects approved proposals to the existing Codex command path and does not make OpenClaw the production/default executor.
+- Next action: normalize Codex results back into proposal records and add a small inbox/timeline UI for the proposal/result thread.
+
 ## 2026-05-15
 
 - Added safe ChatGPT/OpenClaw/Codex proposal storage API: `POST /api/proposals`, `GET /api/proposals?threadKey=...`, `GET /api/proposals/:proposalId`, and `POST /api/proposals/:proposalId/approve`.

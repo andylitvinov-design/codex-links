@@ -28,14 +28,16 @@
 - production dispatch: unchanged; OpenClaw is still not wired into production dispatch, Cloudflare routing, Slack delivery, reports APIs, or deployment config
 - next action: add public version/status endpoints to projects that need provable live commit checks, then optionally feed verifier output into the delivery timeline
 
-## 2026-05-15 ChatGPT/OpenClaw/Codex Approval Loop
+## 2026-05-16 ChatGPT/OpenClaw/Codex Approval Loop
 
-- approval loop status: docs + dry-run proposal prototype + safe proposal storage/approval API
+- approval loop status: docs + dry-run proposal prototype + safe proposal storage/approval API + explicit approved-proposal dispatch endpoint
 - proposal storage: API records are stored under stable `threadKey` with `dryRun=true` and `dispatchEnabled=false`
 - approval status: `POST /api/proposals/:proposalId/approve` changes only stored status from `proposed` to `approved`
+- dispatch status: `POST /api/proposals/:proposalId/dispatch` requires authorization, requires `status=approved`, builds the approved prompt wrapper, and creates a linked command through the existing Codex command path
+- approve/dispatch boundary: approval remains separate from dispatch; approve does not auto-create a command and does not call Codex
 - direct same-ChatGPT-thread callback: needs verification; do not claim this is available until an official callback surface is proven
 - bridge surface: Codex Links inbox/timeline under a stable `threadKey`
 - supported example project keys: `finance`, `reiki-yggdrasil`
-- production dispatch: unchanged; approved proposals are not connected to Codex commands, OpenClaw, Slack delivery, Cloudflare routing, merge, or deploy
+- production dispatch: unchanged; approved proposal dispatch uses the existing Codex command path and does not make OpenClaw the production/default executor
 - UI status: not connected yet; API/docs are the safe layer for this PR
-- next action: connect approved proposal records to the existing Codex command path in a future PR, with dispatch still explicit and bounded
+- next action: normalize Codex results back into proposal records and show a small proposal/result thread in the Codex Links UI

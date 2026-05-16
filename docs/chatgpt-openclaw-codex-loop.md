@@ -8,13 +8,13 @@ The first safe prototype keeps Codex Links as the bridge surface:
 
 1. ChatGPT prepares a structured proposal payload.
 2. The user reviews and approves that proposal.
-3. A future Codex Links bridge stores and dispatches the approved task.
+3. Codex Links stores the approval, then a separate explicit dispatch sends the approved task into the existing Codex command path.
 4. Codex executes or prepares a PR/result.
 5. The result returns to a Codex Links inbox/timeline thread.
 6. ChatGPT and the user review the result.
 7. Any next step starts as a new proposal and repeats the same approval loop.
 
-This document is a contract plus a safe storage/approval prototype. It does not dispatch real Codex commands.
+This document is a contract plus the safe proposal storage, approval, and explicit dispatch flow. Approval alone does not dispatch real Codex commands.
 
 ## Constraint
 
@@ -26,7 +26,7 @@ For now, Codex Links is the bridge surface. ChatGPT can create a proposal payloa
 
 - `proposal`: ChatGPT creates a concrete task with repo, project, prompt, allowed actions, forbidden actions, and stop conditions.
 - `approval`: the user explicitly approves the proposal before any dispatch.
-- `dispatch`: a future bridge sends only the approved proposal to the existing Codex command path.
+- `dispatch`: a separate authorized request sends only the approved proposal to the existing Codex command path.
 - `running`: Codex works under the approved action boundary and reports progress.
 - `result`: Codex returns a compact result with changed files, checks, risks, and any exact failing command.
 - `review`: the user and ChatGPT review the result in Codex Links.
@@ -57,6 +57,7 @@ The proposal/result object uses these fields:
 - `requiresApproval`: always `true` for generated proposals.
 - `status`: one of the allowed approval-loop statuses.
 - `codexRunId`: future Codex run identifier, initially `null`.
+- `commandId`: Codex Links command id when an approved proposal is explicitly dispatched. The current command lifecycle uses `commandId`; do not infer a fake `codexRunId`.
 - `deliveryId`: future Codex Links delivery/timeline identifier, initially `null`.
 - `resultSummary`: compact final result text, initially `null`.
 - `changedFiles`: exact changed file list, initially empty.
@@ -146,9 +147,68 @@ curl -sS -X POST "https://codex-links.pages.dev/api/proposals/proposal-id/approv
   --data '{"approvedBy":"operator"}'
 ```
 
-Approval changes only stored state from `proposed` to `approved`, sets `approvedAt`, optionally stores `approvedBy`, and leaves `codexRunId`, `deliveryId`, and `resultSummary` empty. Stored proposals have `dryRun: true` and `dispatchEnabled: false`.
+Approval changes only stored state from `proposed` to `approved`, sets `approvedAt`, optionally stores `approvedBy`, and leaves `commandId`, `codexRunId`, `deliveryId`, and `resultSummary` empty. Stored proposals have `dryRun: true` and `dispatchEnabled: false`.
+
+Approve is not dispatch. It never creates a command and never calls Codex, OpenClaw, Slack, Cloudflare deploy, merge, or delete paths.
+
+Dispatch one approved proposal:
+
+```bash
+curl -sS -X POST "https://codex-links.pages.dev/api/proposals/proposal-id/dispatch" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN"
+```
+
+Dispatch requires the same existing Codex Links write/admin authorization. It loads the approved proposal, builds the approved Codex prompt wrapper, creates a command through the existing Codex command storage/dispatch path, and updates the proposal with:
+
+- `status: dispatched`
+- `dispatchedAt`
+- `commandId`
+- `codexRunId` only when the existing command lifecycle provides one
+- `deliveryId` when available from the command/delivery surface
+- `dispatchEnabled: true`
+- `updatedAt`
+
+If the proposal is missing, dispatch returns `404`. If it is not `approved`, dispatch returns `400`. If it already has `commandId`, `codexRunId`, or `deliveryId`, dispatch is duplicate-safe and returns the existing linked command info instead of dispatching twice.
+
+The dispatched result still returns through the existing Codex Links command and delivery timeline surface. Direct callback into the same existing ChatGPT thread still needs verification and must not be treated as available until an official supported callback surface is proven.
+
+OpenClaw remains readiness/probe-only and is not the default executor. This endpoint does not make OpenClaw an unrestricted executor, does not change production dispatch defaults, and does not bypass the existing command route.
 
 The API requires the existing Codex Links write/admin authorization token. It does not read `.env` files and does not print token values.
+
+## Example Approval To Dispatch Flow
+
+1. Create proposal:
+
+```bash
+curl -sS -X POST "https://codex-links.pages.dev/api/proposals" \
+  -H "content-type: application/json" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN" \
+  --data '{"threadKey":"chatgpt-openclaw-codex-loop","projectKey":"finance","repo":"andylitvinov-design/finance","goal":"Verify production updated to expected commit","prompt":"Check /api/status and compare expected commit","allowedActions":["read repo","GET /api/status"],"forbiddenActions":["no secrets/env values","no deploy","no merge"]}'
+```
+
+2. Approve proposal:
+
+```bash
+curl -sS -X POST "https://codex-links.pages.dev/api/proposals/proposal-id/approve" \
+  -H "content-type: application/json" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN" \
+  --data '{"approvedBy":"operator"}'
+```
+
+3. Dispatch approved proposal:
+
+```bash
+curl -sS -X POST "https://codex-links.pages.dev/api/proposals/proposal-id/dispatch" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN"
+```
+
+4. Read result from the existing command/delivery timeline:
+
+```bash
+curl -sS "https://codex-links.pages.dev/api/commands?clientId=proposal:proposal-id" \
+  -H "x-write-token: $LINKS_WRITE_TOKEN"
+```
 
 ## Example Proposal Payloads
 
@@ -214,12 +274,12 @@ Reiki route verification proposal:
 
 ## Example ChatGPT Behavior
 
-ChatGPT prepares a proposal payload and shows it to the user. If the user says "yes" or otherwise explicitly approves it, a future bridge can mark the proposal approved and send it to Codex. Codex returns the result to the Codex Links timeline. The user and ChatGPT review that result, then create a new proposal for the next step only if the user approves continuing.
+ChatGPT prepares a proposal payload and shows it to the user. If the user says "yes" or otherwise explicitly approves it, Codex Links can mark the proposal approved. A separate explicit dispatch request sends the approved proposal to the existing Codex command path. Codex returns the result to the Codex Links command/timeline surface. The user and ChatGPT review that result, then create a new proposal for the next step only if the user approves continuing.
 
 ## Future Implementation Steps
 
 1. Add the smallest inbox/timeline UI surface for proposed and approved records under `threadKey`.
-2. Route approved proposals into the existing Codex command path without changing the production default executor.
-3. Normalize Codex results into `resultSummary`, `checks`, `changedFiles`, `risks`, and `nextSuggestedPrompt`.
+2. Normalize Codex results back into proposal records with `resultSummary`, `checks`, `changedFiles`, `risks`, and `nextSuggestedPrompt`.
+3. Show a proposal/result thread in the Codex Links UI.
 4. Integrate OpenClaw as an experimental executor only after gateway and safe no-op runs are verified.
 5. Expose stable non-secret approval-loop telemetry to `brain-management`.

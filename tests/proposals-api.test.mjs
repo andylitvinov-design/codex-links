@@ -7,6 +7,7 @@ import {
   getProposalById,
   listProposalsByThreadKey
 } from "../functions/_lib/proposals.js";
+import { readCommands } from "../functions/_lib/commands.js";
 import { onRequest as proposalsRequest } from "../functions/api/proposals.js";
 import { onRequest as proposalRequest } from "../functions/api/proposals/[proposalId].js";
 import { onRequest as approveRequest } from "../functions/api/proposals/[proposalId]/approve.js";
@@ -164,6 +165,7 @@ test("proposal API creates, lists, reads, and approves proposals", async () => {
   assert.equal(approveBody.proposal.status, "approved");
   assert.equal(approveBody.proposal.codexRunId, null);
   assert.equal(approveBody.proposal.deliveryId, null);
+  assert.equal((await readCommands(env)).length, 0);
 });
 
 test("proposal API keeps proposal reads authorized", async () => {

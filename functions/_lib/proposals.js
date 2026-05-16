@@ -47,6 +47,11 @@ function normalizeArray(rawValue, maxLength = MAX_SHORT_TEXT) {
   )];
 }
 
+function formatActionList(values) {
+  const items = normalizeArray(values);
+  return items.length ? items.map((item) => `- ${item}`).join("\n") : "- none specified";
+}
+
 function proposalItemKey(proposalId) {
   return `${PROPOSAL_ITEM_PREFIX}${normalizeId(proposalId)}`;
 }
@@ -227,4 +232,112 @@ export async function approveProposal(env, proposalId, input = {}, now = new Dat
 
   await persistProposal(env, approved);
   return { ok: true, value: approved };
+}
+
+export function buildProposalCommandPrompt(proposal) {
+  return [
+    "Approved ChatGPT/Codex proposal.",
+    "",
+    `proposalId: ${normalizeId(proposal?.proposalId)}`,
+    `threadKey: ${normalizeId(proposal?.threadKey)}`,
+    `projectKey: ${normalizeId(proposal?.projectKey)}`,
+    `repo: ${normalizeNullableText(proposal?.repo, MAX_SHORT_TEXT) || "needs verification"}`,
+    `goal: ${normalizeText(proposal?.goal, MAX_SHORT_TEXT)}`,
+    "",
+    "Original approved prompt:",
+    normalizeText(proposal?.prompt),
+    "",
+    "Allowed actions:",
+    formatActionList(proposal?.allowedActions),
+    "",
+    "Forbidden actions:",
+    formatActionList([
+      ...normalizeArray(proposal?.forbiddenActions),
+      "no secrets/env values",
+      "no .env reads",
+      "no merge/deploy/delete unless explicitly included in allowedActions",
+      "no financial/account/access changes unless explicitly included in allowedActions"
+    ]),
+    "",
+    "Stop condition:",
+    "Complete only the approved task. Final report must include:",
+    "- studied files",
+    "- changed files",
+    "- checks run",
+    "- exact failing command if any",
+    "- risks / needs verification",
+    "- STATE/LOG update status",
+    "- next suggested prompt"
+  ].join("\n");
+}
+
+export function buildProposalCommandPayload(proposal) {
+  const projectKey = normalizeId(proposal?.projectKey);
+  const threadKey = normalizeId(proposal?.threadKey);
+  const repo = normalizeNullableText(proposal?.repo, MAX_SHORT_TEXT);
+
+  return {
+    text: buildProposalCommandPrompt(proposal),
+    clientId: `proposal:${normalizeId(proposal?.proposalId)}`,
+    threadId: threadKey,
+    threadLabel: `Proposal ${projectKey || threadKey}`,
+    projectId: projectKey,
+    projectLabel: projectKey,
+    projectCategory: "approval-loop",
+    targetRepo: repo || "",
+    targetRepoUrl: repo ? `https://github.com/${repo}` : "",
+    routeStrategy: "manual",
+    progressStage: "queued"
+  };
+}
+
+function getCommandDeliveryId(command) {
+  return normalizeNullableText(
+    command?.slackThreadTs
+    || command?.slackMessageTs,
+    MAX_ID_TEXT
+  );
+}
+
+function getSafeDispatchError(command, fallbackStage = "dispatch-failed") {
+  const stage = normalizeNullableText(
+    command?.progressStage
+    || command?.lastDiagnosticCode
+    || fallbackStage,
+    120
+  ) || fallbackStage;
+  const detail = normalizeNullableText(command?.lastDiagnosticDetail || command?.errorMessage, MAX_SHORT_TEXT);
+
+  return detail ? `${stage}: ${detail}` : stage;
+}
+
+export async function markProposalDispatched(env, proposal, command, now = new Date()) {
+  const dispatchedAt = now.toISOString();
+  const updated = {
+    ...proposal,
+    status: "dispatched",
+    dispatchedAt,
+    commandId: normalizeId(command?.id),
+    codexRunId: normalizeNullableText(command?.codexRunId, MAX_ID_TEXT),
+    deliveryId: getCommandDeliveryId(command),
+    dispatchEnabled: true,
+    updatedAt: dispatchedAt
+  };
+
+  await persistProposal(env, updated);
+  return updated;
+}
+
+export async function markProposalDispatchFailed(env, proposal, command, stage = "dispatch-failed", now = new Date()) {
+  const failedAt = now.toISOString();
+  const updated = {
+    ...proposal,
+    status: "approved",
+    dispatchEnabled: false,
+    dispatchErrorSummary: getSafeDispatchError(command, stage),
+    updatedAt: failedAt
+  };
+
+  await persistProposal(env, updated);
+  return updated;
 }
