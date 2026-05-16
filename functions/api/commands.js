@@ -347,6 +347,9 @@ function serializeCommand(command, options = {}) {
     mergeCommit: String(command.mergeCommit || "").trim(),
     productionUrl: String(command.productionUrl || "").trim(),
     productionVerifiedAt: String(command.productionVerifiedAt || "").trim(),
+    deliveryFeedback: command.deliveryFeedback && typeof command.deliveryFeedback === "object"
+      ? command.deliveryFeedback
+      : null,
     desktopMirrorStatus: String(command.desktopMirrorStatus || "").trim(),
     desktopMirroredAt: String(command.desktopMirroredAt || "").trim(),
     desktopMirrorThreadId: String(command.desktopMirrorThreadId || "").trim()
@@ -1645,7 +1648,8 @@ export async function onRequest(context) {
       mergeCommit: payload?.mergeCommit,
       productionUrl: payload?.productionUrl,
       productionVerifiedAt: payload?.productionVerifiedAt,
-      deliveryStatus: payload?.deliveryStatus
+      deliveryStatus: payload?.deliveryStatus,
+      deliveryFeedback: payload?.deliveryFeedback
     });
 
     if (!answered.ok) {
@@ -1677,6 +1681,7 @@ export async function onRequest(context) {
       productionUrl: payload?.productionUrl,
       productionVerifiedAt: payload?.productionVerifiedAt,
       deliveryStatus: payload?.deliveryStatus,
+      deliveryFeedback: payload?.deliveryFeedback,
       desktopMirrorStatus: payload?.desktopMirrorStatus,
       desktopMirroredAt: payload?.desktopMirroredAt,
       desktopMirrorThreadId: payload?.desktopMirrorThreadId,

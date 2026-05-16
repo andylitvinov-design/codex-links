@@ -97,6 +97,14 @@ test("delivery-update persists production delivery fields", async () => {
         mergeCommit: "abcdef123456",
         productionUrl: "https://codex-links.pages.dev/",
         productionVerifiedAt: "2026-04-25T12:00:00.000Z",
+        deliveryFeedback: {
+          result: "pass",
+          observedCommit: "abcdef123456",
+          versionVerification: "pass",
+          exactFailingCommand: null,
+          nextAction: "none",
+          auditSnapshot: { rows: [{ secretLike: "do not persist full audit rows" }] }
+        },
         desktopMirrorStatus: "mirrored",
         desktopMirroredAt: "2026-04-25T12:01:00.000Z",
         desktopMirrorThreadId: "thr_reports"
@@ -111,6 +119,14 @@ test("delivery-update persists production delivery fields", async () => {
   assert.equal(updated.mergeCommit, "abcdef123456");
   assert.equal(updated.productionUrl, "https://codex-links.pages.dev/");
   assert.equal(updated.productionVerifiedAt, "2026-04-25T12:00:00.000Z");
+  assert.deepEqual(updated.deliveryFeedback, {
+    result: "pass",
+    observedCommit: "abcdef123456",
+    versionVerification: "pass",
+    exactFailingCommand: "",
+    nextAction: "none"
+  });
+  assert.doesNotMatch(JSON.stringify(updated), /secretLike|do not persist full audit rows/);
   assert.equal(updated.desktopMirrorStatus, "mirrored");
   assert.equal(updated.desktopMirrorThreadId, "thr_reports");
 });

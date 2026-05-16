@@ -56,7 +56,7 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260425-2001";
+const BUILD_VERSION = "20260516-1306";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -1696,6 +1696,31 @@ function getCommandDeliveryStatus(command) {
   const deliveryStatus = String(command?.deliveryStatus || "").trim().toLowerCase();
   const productionUrl = String(command?.productionUrl || command?.deploy?.productionUrl || "").trim();
   const prUrl = String(command?.prUrl || "").trim();
+  const feedback = command?.deliveryFeedback && typeof command.deliveryFeedback === "object"
+    ? command.deliveryFeedback
+    : null;
+
+  if (feedback) {
+    const result = String(feedback.result || "").trim();
+    const observedCommit = String(feedback.observedCommit || "").trim();
+    const versionVerification = String(feedback.versionVerification || "").trim();
+    const exactFailingCommand = String(feedback.exactFailingCommand || "").trim();
+    const nextAction = String(feedback.nextAction || "").trim();
+    const parts = [
+      result ? `result=${result}` : "",
+      observedCommit ? `observedCommit=${observedCommit}` : "",
+      versionVerification ? `versionVerification=${versionVerification}` : "",
+      exactFailingCommand ? `exactFailingCommand=${exactFailingCommand}` : "",
+      nextAction ? `nextAction=${nextAction}` : ""
+    ].filter(Boolean);
+
+    if (parts.length) {
+      return {
+        tone: result === "pass" ? "success" : (result === "fail" ? "error" : "delivery"),
+        text: `Deploy feedback · ${parts.join(" · ")}`
+      };
+    }
+  }
 
   if (deliveryStatus === "production-verified") {
     return {
