@@ -119,11 +119,44 @@ The setup command enforces this safe OpenClaw Telegram posture:
 
 This deliberately avoids wildcard public access. The doctor fails if `channels.telegram.groups` contains `"*"`, if DM policy is not pairing, if group policy is not allowlist, or if the token is not an env reference.
 
-After the local daemon environment has `TELEGRAM_BOT_TOKEN`, activate Telegram explicitly:
+### Simplest local token setup
+
+Cloudflare Pages env vars are not enough for the local daemon. The local machine or VPS that runs `openclaw gateway` must have its own local token.
+
+Use one command and paste the BotFather token once:
 
 ```bash
-npm run setup:openclaw:telegram -- --enable
+npm run setup:openclaw:telegram -- --enable --token "<TELEGRAM_BOT_TOKEN>"
+```
+
+What this command does:
+
+- saves the token only to local untracked `.env`
+- loads the token for the setup process
+- writes OpenClaw config as an env reference, not as a raw token value
+- enables Telegram only after a local token is present
+- keeps `dmPolicy=pairing`, `groupPolicy=allowlist`, and `groups={}`
+- redacts token-looking values from command output
+
+The local `.env` file is ignored by git. Do not paste the token into GitHub, PR comments, ChatGPT, or docs.
+
+Then verify:
+
+```bash
 npm run doctor:openclaw:telegram
+```
+
+If the doctor still shows `gatewayReachable=false`, start or restart the gateway in the same local environment where `.env` exists:
+
+```bash
+openclaw gateway
+```
+
+Then pair from Telegram:
+
+```bash
+openclaw pairing list telegram
+openclaw pairing approve telegram <CODE>
 ```
 
 Do not paste or print the token. Cloudflare Pages can confirm only that the encrypted secret name exists; it cannot export that value back into the local daemon.
@@ -218,5 +251,3 @@ No `brain-management` telemetry is changed in this readiness PR. The next safe s
 3. Phase 3 feedback loop: verify public live URLs and optional expected commits without any production mutation.
 4. Phase 4 gateway fix: resolve the gateway timeout and prove `gatewayReachable=true`.
 5. Phase 5 local no-op execution: prove a safe no-op, sandbox, dry-run, or echo agent execution path.
-6. Phase 6 experimental executor mode: add explicit opt-in only, never as production default dispatch.
-7. Phase 7 telemetry dashboard: emit stable non-secret telemetry for `brain-management`.
