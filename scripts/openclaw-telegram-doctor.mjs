@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { loadLocalEnv } from "./openclaw-telegram-setup.mjs";
 
 const PROJECT_NAME = "codex-links";
 const TOKEN_ENV = "TELEGRAM_BOT_TOKEN";
@@ -28,6 +29,7 @@ function summarize(value) {
   return String(value || "")
     .replace(/[\r\n\t]+/g, " ")
     .replace(new RegExp(`${TOKEN_ENV}=[^\\s]+`, "g"), `${TOKEN_ENV}=[redacted]`)
+    .replace(/\d{5,}:[A-Za-z0-9_-]{20,}/g, "[redacted-telegram-token]")
     .replace(/([A-Za-z0-9_-]*token[A-Za-z0-9_-]*)\s*[:=]\s*[^,}\s]+/gi, "$1=[redacted]")
     .slice(0, 260);
 }
@@ -157,6 +159,7 @@ function main() {
   const json = process.argv.includes("--json");
   const skipCloudflare = process.argv.includes("--skip-cloudflare");
   const skipProbe = process.argv.includes("--skip-probe");
+  loadLocalEnv();
   const openclaw = run("bash", ["-lc", "command -v openclaw"]);
   const binary = openclaw.stdout.trim();
   const version = binary ? run(binary, ["--version"]).stdout.trim() || "needs_verification" : "not_found";
