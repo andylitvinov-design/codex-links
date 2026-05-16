@@ -496,6 +496,33 @@ function normalizeDeliveryStatus(rawValue) {
   return allowed.has(value) ? value : "";
 }
 
+function normalizeDeliveryFeedback(rawValue) {
+  const source = rawValue && typeof rawValue === "object" ? rawValue : {};
+  const result = normalizeDiagnosticText(source.result, 40).toLowerCase();
+  const versionVerification = normalizeDiagnosticText(source.versionVerification, 40).toLowerCase();
+  const allowedResult = new Set(["pass", "fail", "needs_verification"]);
+  const allowedVerification = new Set(["pass", "fail", "needs_verification"]);
+  const compact = {
+    result: allowedResult.has(result) ? result : "",
+    observedCommit: normalizeSlackValue(source.observedCommit),
+    versionVerification: allowedVerification.has(versionVerification) ? versionVerification : "",
+    exactFailingCommand: normalizeDiagnosticText(source.exactFailingCommand, 160),
+    nextAction: normalizeDiagnosticText(source.nextAction, 240)
+  };
+
+  if (
+    !compact.result
+    && !compact.observedCommit
+    && !compact.versionVerification
+    && !compact.exactFailingCommand
+    && !compact.nextAction
+  ) {
+    return null;
+  }
+
+  return compact;
+}
+
 function normalizeRepoAckStatus(rawValue) {
   const value = normalizeDiagnosticText(rawValue, 80).toLowerCase();
   return value === "validated" || value === "warning" || value === "pending" ? value : "pending";
@@ -929,6 +956,7 @@ function compactCommandForStorage(command) {
     status,
     previousAssistantReply: normalizeAssistantReplyContext(command.previousAssistantReply),
     effectivePrompt: buildEffectivePrompt(command.text, command.previousAssistantReply),
+    deliveryFeedback: normalizeDeliveryFeedback(command.deliveryFeedback),
     photo: compactPhotoForStorage(command.photo, keepPhotoData)
   };
 }
@@ -1027,6 +1055,7 @@ function normalizeStoredCommandEntry(entry) {
     productionVerifiedAt: normalizeDateValue(entry.productionVerifiedAt),
     deliveryStatus: normalizeDeliveryStatus(entry.deliveryStatus),
     deliveryStatusUpdatedAt: normalizeDateValue(entry.deliveryStatusUpdatedAt),
+    deliveryFeedback: normalizeDeliveryFeedback(entry.deliveryFeedback),
     desktopMirrorStatus: normalizeDeliveryStatus(entry.desktopMirrorStatus),
     desktopMirroredAt: normalizeDateValue(entry.desktopMirroredAt),
     desktopMirrorThreadId: normalizeSlackValue(entry.desktopMirrorThreadId),
@@ -1293,6 +1322,7 @@ export function createCommandRecord(input) {
       productionVerifiedAt: "",
       deliveryStatus: "",
       deliveryStatusUpdatedAt: "",
+      deliveryFeedback: null,
       desktopMirrorStatus: "",
       desktopMirroredAt: "",
       desktopMirrorThreadId: "",
@@ -1814,6 +1844,9 @@ export async function markCommandAnswered(env, input = {}) {
       deliveryStatusUpdatedAt: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus) !== normalizeDeliveryStatus(command.deliveryStatus)
         ? nowIso
         : command.deliveryStatusUpdatedAt,
+      deliveryFeedback: Object.prototype.hasOwnProperty.call(input, "deliveryFeedback")
+        ? normalizeDeliveryFeedback(input.deliveryFeedback)
+        : command.deliveryFeedback,
       resultAt: normalizeDateValue(input.resultAt) || nowIso,
       completedAt: normalizeDateValue(input.completedAt) || nowIso,
       errorMessage: ""
@@ -1886,6 +1919,9 @@ export async function upsertCommandDispatchState(env, input = {}) {
     deliveryStatusUpdatedAt: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus) !== normalizeDeliveryStatus(command.deliveryStatus)
       ? nowIso
       : command.deliveryStatusUpdatedAt,
+    deliveryFeedback: Object.prototype.hasOwnProperty.call(input, "deliveryFeedback")
+      ? normalizeDeliveryFeedback(input.deliveryFeedback)
+      : command.deliveryFeedback,
     repoAckStatus: normalizeRepoAckStatus(input.repoAckStatus || command.repoAckStatus),
     repoAckAt: normalizeDateValue(input.repoAckAt || command.repoAckAt),
     repoAckRepo: normalizeRepoValue(input.repoAckRepo || command.repoAckRepo),

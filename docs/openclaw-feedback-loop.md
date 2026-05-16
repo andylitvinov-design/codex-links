@@ -4,7 +4,7 @@
 
 ChatGPT/Codex often finishes a PR or deploy task but still needs a reliable answer to one operational question: did the live site update to the expected commit or version?
 
-This feedback verifier gives Codex a compact read-only check it can run from the terminal and paste back into the conversation or later store in the Codex Links delivery timeline.
+This feedback verifier gives Codex a compact read-only check it can run from the terminal and paste back into the conversation or store in the Codex Links delivery timeline.
 
 ## What It Does
 
@@ -65,9 +65,28 @@ npm run feedback:verify -- --project finance --expected-commit <sha> --json
 
 Treat `pass` as live verification. Treat `fail` as a concrete live mismatch or endpoint failure and use `exactFailingCommand` as the next debug target. Treat `needs_verification` as live reachable but not provably updated, usually because no expected commit/version was passed or no public version endpoint exists.
 
-## Future Integration
+## Delivery Timeline Feedback
 
-Later Codex Links can call this verifier from the delivery timeline and store the compact result with each delivery event.
+Codex Links can store the compact verifier result on an existing command with the authorized `delivery-update` action:
+
+```json
+{
+  "action": "delivery-update",
+  "id": "<command-id>",
+  "deliveryStatus": "production-verified",
+  "deliveryFeedback": {
+    "result": "pass",
+    "observedCommit": "<sha>",
+    "versionVerification": "pass",
+    "exactFailingCommand": null,
+    "nextAction": "none"
+  }
+}
+```
+
+Only these `deliveryFeedback` fields are persisted and returned through `/api/delivery`: `result`, `observedCommit`, `versionVerification`, `exactFailingCommand`, and `nextAction`. Full audit snapshots, response bodies, secrets, env values, and unrestricted OpenClaw output must not be stored.
+
+## Future Integration
 
 Later `brain-management` can consume stable non-secret telemetry events from these checks.
 

@@ -1,5 +1,12 @@
 # LOG
 
+## 2026-05-16
+
+- Merged PR #152 into `main`, retargeted and merged PR #153 into `main`, then retargeted and rebased PR #155 onto `main`.
+- Added compact delivery timeline feedback persistence for OpenClaw/ChatGPT deploy verification results.
+- Stored only `result`, `observedCommit`, `versionVerification`, `exactFailingCommand`, and `nextAction`; full audit snapshots and response bodies remain out of command storage.
+- Kept OpenClaw readiness/probe-only: no `executor=openclaw`, no default dispatch change, no Slack delivery change, no Cloudflare routing change, no reports API change, and no secrets/env values touched.
+
 ## 2026-05-15
 
 - Added `npm run feedback:verify` as a read-only OpenClaw/ChatGPT feedback verifier for `finance` and `reiki-yggdrasil`.
