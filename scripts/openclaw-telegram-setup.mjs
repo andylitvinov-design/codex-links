@@ -129,8 +129,12 @@ function main() {
   loadLocalEnv();
 
   const tokenFromCli = args.token || "";
-  const tokenFromPrompt = args.enable && !tokenFromCli && !process.env[TOKEN_ENV] ? readHiddenLine("Paste TELEGRAM_BOT_TOKEN: ") : "";
-  const tokenToSave = tokenFromCli || tokenFromPrompt;
+  const tokenFromWrapper = process.env.CODEX_LINKS_TELEGRAM_TOKEN_INPUT || "";
+  const tokenFromPrompt =
+    args.enable && !tokenFromCli && !tokenFromWrapper && !process.env[TOKEN_ENV]
+      ? readHiddenLine("Paste TELEGRAM_BOT_TOKEN: ")
+      : "";
+  const tokenToSave = tokenFromCli || tokenFromWrapper || tokenFromPrompt;
 
   if (tokenToSave) {
     try {

@@ -173,6 +173,7 @@ Quick helpers added to this repo:
 
 - Slack app manifest for legacy maintenance: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
 - Local/prod setup check: `npm run cloud:check`
+- OpenClaw Telegram setup from any shell directory: `node /Users/andriilitvinov/projects/MYPROJECTS/links/scripts/openclaw-telegram-anywhere.mjs --enable --token "<TELEGRAM_BOT_TOKEN>"`
 - End-to-end text smoke for the default Slack cloud path: `npm run cloud:smoke`
 - End-to-end text smoke for the optional direct path: `CODEX_LINKS_SMOKE_CLOUD_ROUTE=direct npm run cloud:smoke`
 - Cloud production delivery guardian: `npm run cloud:guardian`

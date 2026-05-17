@@ -10,6 +10,10 @@ import {
   parseKeyValueLines,
   parseWranglerSecretList
 } from "../scripts/openclaw-telegram-doctor.mjs";
+import {
+  findCodexLinksCheckout,
+  isCodexLinksCheckout
+} from "../scripts/openclaw-telegram-anywhere.mjs";
 
 import {
   looksLikeTelegramToken,
@@ -141,4 +145,25 @@ test("local env files are ignored while example env can be committed", () => {
   assert.match(ignore, /^\.env$/m);
   assert.match(ignore, /^\.env\.\*$/m);
   assert.match(ignore, /^!\.env\.example$/m);
+});
+
+test("OpenClaw Telegram anywhere helper finds checkout from outside repo root", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-links-anywhere-"));
+  const checkout = path.join(tmp, "nested", "links");
+  const outside = path.join(tmp, "outside");
+  fs.mkdirSync(path.join(checkout, "scripts"), { recursive: true });
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(checkout, "package.json"), JSON.stringify({ name: "codex-links" }));
+  fs.writeFileSync(path.join(checkout, "scripts", "openclaw-telegram-setup.mjs"), "");
+
+  assert.equal(isCodexLinksCheckout(checkout), true);
+  assert.equal(
+    findCodexLinksCheckout({
+      startDir: outside,
+      homeDir: path.join(tmp, "home"),
+      scriptRepoRoot: path.join(tmp, "not-a-repo"),
+      extraRoots: [tmp]
+    }),
+    checkout
+  );
 });

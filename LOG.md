@@ -23,3 +23,9 @@
 - Removed the local OpenClaw Telegram wildcard group entry and documented pairing-only DM plus allowlist group posture.
 - Added tests for Telegram doctor parsing, policy checks, wildcard rejection, and the Pages-vs-local-env diagnosis.
 - No production dispatch path, wildcard public access, secret values, deploy, or OpenClaw executor activation was added.
+
+## 2026-05-17
+
+- Reproduced the outside-root npm failure: running `npm run setup:openclaw:telegram -- --dry-run` from `/Users/andriilitvinov` makes npm look for `/Users/andriilitvinov/package.json`.
+- Added `scripts/openclaw-telegram-anywhere.mjs` and `npm run setup:openclaw:telegram:anywhere` so Telegram setup can locate the local `codex-links` checkout, cd into it, and run setup plus doctor from any shell directory.
+- Added a regression test for checkout discovery from outside the repo root.
