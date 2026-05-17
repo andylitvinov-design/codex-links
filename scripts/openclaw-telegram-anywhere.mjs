@@ -106,6 +106,11 @@ function parseArgs(argv) {
     enable: argv.includes("--enable"),
     dryRun: argv.includes("--dry-run"),
     skipDoctor: argv.includes("--skip-doctor"),
+    gateway: argv.includes("--gateway") || argv.includes("--start-gateway"),
+    installGateway: argv.includes("--install-gateway"),
+    activateGateway: argv.includes("--activate-gateway"),
+    status: argv.includes("--status"),
+    pairing: argv.includes("--pairing"),
     token: process.env[TOKEN_ENV] || ""
   };
 
@@ -152,6 +157,27 @@ function main() {
   console.log(`status=starting`);
   console.log(`repoRoot=${repoRoot}`);
   console.log(`localTokenPresent=${Boolean(args.token)}`);
+
+  if (args.gateway) {
+    const gateway = runNpm(repoRoot, ["run", "start:openclaw:telegram-gateway"], env);
+    process.exit(gateway.status ?? 1);
+  }
+  if (args.installGateway) {
+    const install = runNpm(repoRoot, ["run", "install:openclaw:telegram-gateway"], env);
+    process.exit(install.status ?? 1);
+  }
+  if (args.activateGateway) {
+    const activate = runNpm(repoRoot, ["run", "activate:openclaw:telegram-gateway"], env);
+    process.exit(activate.status ?? 1);
+  }
+  if (args.status) {
+    const status = runNpm(repoRoot, ["run", "status:openclaw:telegram-gateway"], env);
+    process.exit(status.status ?? 1);
+  }
+  if (args.pairing) {
+    const pairing = runNpm(repoRoot, ["run", "pairing:openclaw:telegram"], env);
+    process.exit(pairing.status ?? 1);
+  }
 
   const setupArgs = ["run", "setup:openclaw:telegram", "--"];
   if (args.enable) setupArgs.push("--enable");

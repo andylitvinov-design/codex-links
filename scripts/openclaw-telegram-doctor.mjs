@@ -3,10 +3,16 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadLocalEnv } from "./openclaw-telegram-setup.mjs";
+import { inspectLaunchd } from "./openclaw-telegram-launchd.mjs";
+import { loadRepoLocalEnv } from "./openclaw-telegram-gateway.mjs";
 
 const PROJECT_NAME = "codex-links";
 const TOKEN_ENV = "TELEGRAM_BOT_TOKEN";
+export const OPENCLAW_TELEGRAM_LINK = "https://t.me/andycodex_openclaw_bot?start=openclaw";
+
+export function formatReadyLink() {
+  return `Open this link:\n${OPENCLAW_TELEGRAM_LINK}`;
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -29,9 +35,19 @@ function summarize(value) {
   return String(value || "")
     .replace(/[\r\n\t]+/g, " ")
     .replace(new RegExp(`${TOKEN_ENV}=[^\\s]+`, "g"), `${TOKEN_ENV}=[redacted]`)
-    .replace(/\d{5,}:[A-Za-z0-9_-]{20,}/g, "[redacted-telegram-token]")
     .replace(/([A-Za-z0-9_-]*token[A-Za-z0-9_-]*)\s*[:=]\s*[^,}\s]+/gi, "$1=[redacted]")
     .slice(0, 260);
+}
+
+function hasSecretRefResolutionError(probe) {
+  const haystack = [
+    probe.gatewayError,
+    probe.stderr_summary,
+    probe.stdout_summary,
+    probe.stderr,
+    probe.stdout
+  ].join(" ");
+  return /SecretRefResolutionError/i.test(haystack) && /TELEGRAM_BOT_TOKEN/i.test(haystack);
 }
 
 export function parseKeyValueLines(text) {
@@ -81,7 +97,57 @@ export function inspectTelegramConfig(config) {
   };
 }
 
-export function buildDiagnosis({ configInspection, localTokenPresent, cloudflareTokenPresent, probe }) {
+export function inspectGatewayStatus(text) {
+  try {
+    const data = JSON.parse(String(text || ""));
+    const scopes = data?.rpc?.auth?.scopes || [];
+    return {
+      serviceLoaded: data?.service?.loaded === true,
+      serviceRunning: data?.service?.runtime?.status === "running" || data?.service?.runtime?.state === "active",
+      rpcOk: data?.rpc?.ok === true,
+      capability: data?.rpc?.capability || "",
+      operatorScopePresent: Array.isArray(scopes) && scopes.some((scope) => String(scope).startsWith("operator.")),
+      summary: data?.rpc?.capability || data?.service?.runtime?.status || ""
+    };
+  } catch {
+    return {
+      serviceLoaded: false,
+      serviceRunning: false,
+      rpcOk: false,
+      capability: "",
+      operatorScopePresent: false,
+      summary: summarize(text)
+    };
+  }
+}
+
+export function inspectPairingState(text) {
+  try {
+    const data = JSON.parse(String(text || ""));
+    const requests = Array.isArray(data?.requests) ? data.requests : [];
+    return {
+      pendingCount: requests.length,
+      paired: requests.length === 0,
+      summary: requests.length ? "pending_pairing_requests" : "ready_for_pairing_link"
+    };
+  } catch {
+    return {
+      pendingCount: 0,
+      paired: false,
+      summary: summarize(text)
+    };
+  }
+}
+
+export function buildDiagnosis({
+  configInspection,
+  localTokenPresent,
+  cloudflareTokenPresent,
+  probe,
+  launchdStatus = { installed: true, running: true },
+  gatewayStatus = { operatorScopePresent: true },
+  pairingState = { paired: true, pendingCount: 0 }
+}) {
   if (configInspection.wildcardGroupPresent) {
     return "OpenClaw Telegram config still contains wildcard group access.";
   }
@@ -94,8 +160,17 @@ export function buildDiagnosis({ configInspection, localTokenPresent, cloudflare
   if (!cloudflareTokenPresent) {
     return "Cloudflare Pages does not list TELEGRAM_BOT_TOKEN for codex-links.";
   }
+  if (hasSecretRefResolutionError(probe)) {
+    return "Direct `openclaw gateway` does not load repo .env. Start gateway through the wrapper.";
+  }
+  if (!launchdStatus.installed) {
+    return "OpenClaw Telegram gateway LaunchAgent is not installed.";
+  }
+  if (!launchdStatus.running) {
+    return "OpenClaw Telegram gateway LaunchAgent is installed but not running.";
+  }
   if (!localTokenPresent) {
-    return "Cloudflare Pages has TELEGRAM_BOT_TOKEN, but the local OpenClaw process environment does not.";
+    return "Cloudflare Pages has TELEGRAM_BOT_TOKEN, but the local OpenClaw gateway environment does not. Add TELEGRAM_BOT_TOKEN to the repo local env file and start gateway through the wrapper.";
   }
   if (probe.gatewayReachable === "false") {
     return `OpenClaw gateway is not reachable locally: ${probe.gatewayError || "unknown"}.`;
@@ -103,19 +178,38 @@ export function buildDiagnosis({ configInspection, localTokenPresent, cloudflare
   if (!configInspection.enabled) {
     return "Telegram is configured safely but remains disabled in OpenClaw.";
   }
+  if (!gatewayStatus.operatorScopePresent) {
+    return "OpenClaw gateway is running, but the current RPC auth has no operator scope.";
+  }
+  if (!pairingState.paired || pairingState.pendingCount > 0) {
+    return "OpenClaw gateway is running, but Telegram is not paired yet.";
+  }
   return "OpenClaw Telegram setup looks ready from non-secret checks.";
 }
 
-export function evaluateDoctor({ config, localTokenPresent, wranglerOutput, probeOutput }) {
+export function evaluateDoctor({
+  config,
+  localTokenPresent,
+  wranglerOutput,
+  probeOutput,
+  launchdStatus,
+  gatewayStatusOutput = "",
+  pairingOutput = ""
+}) {
   const configInspection = inspectTelegramConfig(config);
   const cloudflareSecrets = parseWranglerSecretList(wranglerOutput);
   const probe = parseKeyValueLines(probeOutput);
   const cloudflareTokenPresent = cloudflareSecrets.has(TOKEN_ENV);
+  const gatewayStatus = inspectGatewayStatus(gatewayStatusOutput);
+  const pairingState = inspectPairingState(pairingOutput);
   const rootCause = buildDiagnosis({
     configInspection,
     localTokenPresent,
     cloudflareTokenPresent,
-    probe
+    probe,
+    launchdStatus,
+    gatewayStatus,
+    pairingState
   });
   const ok =
     configInspection.tokenRefOk &&
@@ -125,7 +219,10 @@ export function evaluateDoctor({ config, localTokenPresent, wranglerOutput, prob
     cloudflareTokenPresent &&
     localTokenPresent &&
     probe.gatewayReachable === "true" &&
-    configInspection.enabled;
+    configInspection.enabled &&
+    (launchdStatus?.running ?? true) &&
+    gatewayStatus.operatorScopePresent &&
+    pairingState.paired;
 
   return {
     ok,
@@ -133,7 +230,10 @@ export function evaluateDoctor({ config, localTokenPresent, wranglerOutput, prob
     cloudflareTokenPresent,
     localTokenPresent,
     probe,
-    config: configInspection
+    config: configInspection,
+    launchd: launchdStatus || { installed: true, running: true },
+    gatewayStatus,
+    pairing: pairingState
   };
 }
 
@@ -159,7 +259,6 @@ function main() {
   const json = process.argv.includes("--json");
   const skipCloudflare = process.argv.includes("--skip-cloudflare");
   const skipProbe = process.argv.includes("--skip-probe");
-  loadLocalEnv();
   const openclaw = run("bash", ["-lc", "command -v openclaw"]);
   const binary = openclaw.stdout.trim();
   const version = binary ? run(binary, ["--version"]).stdout.trim() || "needs_verification" : "not_found";
@@ -171,11 +270,18 @@ function main() {
     ? { stdout: "", stderr: "", status: 0 }
     : run("npx", ["wrangler", "pages", "secret", "list", "--project-name", PROJECT_NAME]);
   const probe = skipProbe ? { stdout: "" } : run("bash", ["scripts/probe-openclaw-run.sh"]);
+  const launchdStatus = inspectLaunchd();
+  const gatewayStatus = skipProbe ? { stdout: "" } : run("openclaw", ["gateway", "status", "--json", "--timeout", "3000"]);
+  const pairing = skipProbe ? { stdout: "" } : run("openclaw", ["pairing", "list", "telegram", "--json"]);
+  const localEnv = loadRepoLocalEnv();
   const result = evaluateDoctor({
     config,
-    localTokenPresent: Boolean(process.env[TOKEN_ENV]),
+    localTokenPresent: Boolean(process.env[TOKEN_ENV] || localEnv[TOKEN_ENV]),
     wranglerOutput: wrangler.stdout,
-    probeOutput: probe.stdout
+    probeOutput: probe.stdout,
+    launchdStatus,
+    gatewayStatusOutput: gatewayStatus.stdout,
+    pairingOutput: pairing.stdout
   });
 
   const output = {
@@ -191,8 +297,12 @@ function main() {
     dmPolicy: result.config.dmPolicy,
     groupPolicy: result.config.groupPolicy,
     wildcardGroupPresent: result.config.wildcardGroupPresent,
+    gatewayLaunchdInstalled: result.launchd.installed,
+    gatewayLaunchdRunning: result.launchd.running,
     gatewayReachable: result.probe.gatewayReachable || "needs_verification",
     gatewayError: result.probe.gatewayError || "needs_verification",
+    operatorScopePresent: result.gatewayStatus.operatorScopePresent,
+    telegramPairing: result.pairing.summary,
     rootCause: result.rootCause,
     wranglerCheck: skipCloudflare ? "skipped" : wrangler.status === 0 ? "ok" : summarize(wrangler.stderr || wrangler.error),
     probeCheck: skipProbe ? "skipped" : probe.status === 0 ? "ok" : summarize(probe.stderr || probe.error)
@@ -203,6 +313,9 @@ function main() {
   } else {
     for (const [key, value] of Object.entries(output)) {
       console.log(`${key}=${value}`);
+    }
+    if (result.ok) {
+      console.log(formatReadyLink());
     }
   }
 

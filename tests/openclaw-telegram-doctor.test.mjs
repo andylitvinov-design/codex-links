@@ -6,7 +6,11 @@ import path from "node:path";
 
 import {
   evaluateDoctor,
+  formatReadyLink,
+  inspectGatewayStatus,
+  inspectPairingState,
   inspectTelegramConfig,
+  OPENCLAW_TELEGRAM_LINK,
   parseKeyValueLines,
   parseWranglerSecretList
 } from "../scripts/openclaw-telegram-doctor.mjs";
@@ -14,6 +18,19 @@ import {
   findCodexLinksCheckout,
   isCodexLinksCheckout
 } from "../scripts/openclaw-telegram-anywhere.mjs";
+import {
+  buildGatewayEnv,
+  diagnoseGatewayEnv,
+  loadRepoLocalEnv,
+  parseDotenv,
+  redactSecrets
+} from "../scripts/openclaw-telegram-gateway.mjs";
+import {
+  buildLaunchctlCommands,
+  buildLaunchdPlist,
+  formatLaunchdStatusLines,
+  parseLaunchctlPrint
+} from "../scripts/openclaw-telegram-launchd.mjs";
 
 import {
   looksLikeTelegramToken,
@@ -84,11 +101,40 @@ test("OpenClaw Telegram doctor identifies Pages-local environment split", () => 
     },
     localTokenPresent: false,
     wranglerOutput: "  - TELEGRAM_BOT_TOKEN: Value Encrypted\n",
-    probeOutput: "gatewayReachable=false\ngatewayError=timeout\n"
+    probeOutput: "gatewayReachable=false\ngatewayError=timeout\n",
+    launchdStatus: { installed: true, running: true }
   });
 
   assert.equal(result.ok, false);
-  assert.match(result.rootCause, /local OpenClaw process environment/);
+  assert.match(result.rootCause, /local OpenClaw gateway environment/);
+  assert.match(result.rootCause, /repo local env file/);
+});
+
+test("OpenClaw Telegram doctor diagnoses direct gateway missing repo env clearly", () => {
+  const result = evaluateDoctor({
+    config: {
+      channels: {
+        telegram: {
+          enabled: true,
+          botToken: { source: "env", provider: "default", id: "TELEGRAM_BOT_TOKEN" },
+          dmPolicy: "pairing",
+          groupPolicy: "allowlist",
+          groups: {}
+        }
+      }
+    },
+    localTokenPresent: true,
+    wranglerOutput: "  - TELEGRAM_BOT_TOKEN: Value Encrypted\n",
+    probeOutput:
+      'gatewayReachable=false\ngatewayError=SecretRefResolutionError: Environment variable "TELEGRAM_BOT_TOKEN" is missing or empty.\n',
+    launchdStatus: { installed: true, running: true }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.rootCause,
+    "Direct `openclaw gateway` does not load repo .env. Start gateway through the wrapper."
+  );
 });
 
 test("OpenClaw Telegram doctor reads gateway fields from probe stdout summary", () => {
@@ -166,4 +212,211 @@ test("OpenClaw Telegram anywhere helper finds checkout from outside repo root", 
     }),
     checkout
   );
+});
+
+test("OpenClaw Telegram gateway wrapper loads TELEGRAM_BOT_TOKEN from dotenv", () => {
+  const parsed = parseDotenv("TELEGRAM_BOT_TOKEN=secret-from-env-file\nOTHER=value\n");
+
+  assert.equal(parsed.TELEGRAM_BOT_TOKEN, "secret-from-env-file");
+  assert.equal(parsed.OTHER, "value");
+});
+
+test("OpenClaw Telegram gateway wrapper passes dotenv env to child process env", () => {
+  const env = buildGatewayEnv({
+    baseEnv: { PATH: "/bin" },
+    dotenv: { TELEGRAM_BOT_TOKEN: "secret-from-env-file" }
+  });
+
+  assert.equal(env.TELEGRAM_BOT_TOKEN, "secret-from-env-file");
+  assert.equal(env.PATH, "/bin");
+});
+
+test("OpenClaw Telegram gateway wrapper loads repo local env files", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-links-env-"));
+  fs.writeFileSync(path.join(tmp, ".dev.vars"), "TELEGRAM_BOT_TOKEN=from-dev-vars\n");
+  fs.writeFileSync(path.join(tmp, ".env.local"), "OTHER=from-local\n");
+
+  const env = loadRepoLocalEnv({ repoRoot: tmp });
+
+  assert.equal(env.TELEGRAM_BOT_TOKEN, "from-dev-vars");
+  assert.equal(env.OTHER, "from-local");
+});
+
+test("OpenClaw Telegram gateway wrapper redacts token values", () => {
+  const output = redactSecrets("TELEGRAM_BOT_TOKEN=secret token: secret2 apiToken=secret3");
+
+  assert.doesNotMatch(output, /secret/);
+  assert.match(output, /TELEGRAM_BOT_TOKEN=\[redacted\]/);
+  assert.match(output, /token: \[redacted\]/i);
+  assert.match(output, /apiToken=\[redacted\]/);
+});
+
+test("OpenClaw Telegram gateway wrapper diagnoses missing env for direct gateway", () => {
+  assert.equal(
+    diagnoseGatewayEnv({}),
+    "Direct `openclaw gateway` does not load repo .env. Start gateway through the wrapper."
+  );
+  assert.equal(diagnoseGatewayEnv({ TELEGRAM_BOT_TOKEN: "present" }), "");
+});
+
+test("OpenClaw Telegram launchd plist starts the gateway wrapper without secrets", () => {
+  const plist = buildLaunchdPlist({
+    label: "com.example.openclaw",
+    repoRoot: "/repo",
+    nodeBin: "/usr/bin/node",
+    runScript: "/repo/scripts/openclaw-telegram-gateway.mjs",
+    stdoutPath: "/Users/me/Library/Logs/out.log",
+    stderrPath: "/Users/me/Library/Logs/err.log"
+  });
+
+  assert.match(plist, /<string>\/usr\/bin\/node<\/string>/);
+  assert.match(plist, /openclaw-telegram-gateway\.mjs/);
+  assert.match(plist, /codex-links|com\.example\.openclaw/);
+  assert.doesNotMatch(plist, /TELEGRAM_BOT_TOKEN/);
+  assert.doesNotMatch(plist, /secret/);
+});
+
+test("OpenClaw Telegram launchctl command construction targets user LaunchAgent", () => {
+  const commands = buildLaunchctlCommands({
+    uid: 501,
+    plistPath: "/Users/me/Library/LaunchAgents/com.example.openclaw.plist",
+    label: "com.example.openclaw"
+  });
+
+  assert.deepEqual(commands.bootstrap, [
+    "bootstrap",
+    "gui/501",
+    "/Users/me/Library/LaunchAgents/com.example.openclaw.plist"
+  ]);
+  assert.deepEqual(commands.kickstart, ["kickstart", "-k", "gui/501/com.example.openclaw"]);
+});
+
+test("OpenClaw Telegram launchd status parser detects running service", () => {
+  const status = parseLaunchctlPrint("state = running\npid = 12345\n");
+
+  assert.equal(status.installed, true);
+  assert.equal(status.running, true);
+  assert.equal(status.pid, 12345);
+});
+
+test("OpenClaw Telegram launchd status summary is explicit when service is not running", () => {
+  const lines = formatLaunchdStatusLines({
+    label: "com.example.openclaw",
+    state: {
+      installed: true,
+      running: false,
+      pid: 0,
+      state: "spawn",
+      summary: "ok"
+    }
+  });
+
+  assert.deepEqual(lines, [
+    "label=com.example.openclaw",
+    "installed=true",
+    "running=false",
+    "pid=0",
+    "state=spawn",
+    "summary=ok"
+  ]);
+});
+
+test("OpenClaw Telegram doctor diagnoses gateway lifecycle states", () => {
+  const base = {
+    config: {
+      channels: {
+        telegram: {
+          enabled: true,
+          botToken: { source: "env", provider: "default", id: "TELEGRAM_BOT_TOKEN" },
+          dmPolicy: "pairing",
+          groupPolicy: "allowlist",
+          groups: {}
+        }
+      }
+    },
+    localTokenPresent: true,
+    wranglerOutput: "  - TELEGRAM_BOT_TOKEN: Value Encrypted\n",
+    probeOutput: "gatewayReachable=true\ngatewayError=none\n",
+    gatewayStatusOutput: JSON.stringify({ rpc: { auth: { scopes: ["operator.read"] } } }),
+    pairingOutput: JSON.stringify({ channel: "telegram", requests: [] })
+  };
+
+  assert.match(
+    evaluateDoctor({ ...base, launchdStatus: { installed: false, running: false } }).rootCause,
+    /not installed/
+  );
+  assert.match(
+    evaluateDoctor({ ...base, launchdStatus: { installed: true, running: false } }).rootCause,
+    /installed but not running/
+  );
+  assert.match(
+    evaluateDoctor({
+      ...base,
+      launchdStatus: { installed: true, running: true },
+      pairingOutput: JSON.stringify({ channel: "telegram", requests: [{ code: "123456" }] })
+    }).rootCause,
+    /not paired/
+  );
+});
+
+test("OpenClaw Telegram doctor diagnoses missing operator scope", () => {
+  const result = evaluateDoctor({
+    config: {
+      channels: {
+        telegram: {
+          enabled: true,
+          botToken: { source: "env", provider: "default", id: "TELEGRAM_BOT_TOKEN" },
+          dmPolicy: "pairing",
+          groupPolicy: "allowlist",
+          groups: {}
+        }
+      }
+    },
+    localTokenPresent: true,
+    wranglerOutput: "  - TELEGRAM_BOT_TOKEN: Value Encrypted\n",
+    probeOutput: "gatewayReachable=true\ngatewayError=none\n",
+    launchdStatus: { installed: true, running: true },
+    gatewayStatusOutput: JSON.stringify({ rpc: { auth: { scopes: [] } } }),
+    pairingOutput: JSON.stringify({ channel: "telegram", requests: [] })
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.rootCause, /no operator scope/);
+});
+
+test("OpenClaw Telegram doctor returns final link when gateway is ready", () => {
+  const result = evaluateDoctor({
+    config: {
+      channels: {
+        telegram: {
+          enabled: true,
+          botToken: { source: "env", provider: "default", id: "TELEGRAM_BOT_TOKEN" },
+          dmPolicy: "pairing",
+          groupPolicy: "allowlist",
+          groups: {}
+        }
+      }
+    },
+    localTokenPresent: true,
+    wranglerOutput: "  - TELEGRAM_BOT_TOKEN: Value Encrypted\n",
+    probeOutput: "gatewayReachable=true\ngatewayError=none\n",
+    launchdStatus: { installed: true, running: true },
+    gatewayStatusOutput: JSON.stringify({ rpc: { auth: { scopes: ["operator.read"] } } }),
+    pairingOutput: JSON.stringify({ channel: "telegram", requests: [] })
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(OPENCLAW_TELEGRAM_LINK, "https://t.me/andycodex_openclaw_bot?start=openclaw");
+  assert.equal(
+    formatReadyLink(),
+    "Open this link:\nhttps://t.me/andycodex_openclaw_bot?start=openclaw"
+  );
+});
+
+test("OpenClaw Telegram gateway status parsers read operator scope and pairing", () => {
+  const gateway = inspectGatewayStatus(JSON.stringify({ rpc: { auth: { scopes: ["operator.read"] } } }));
+  const pairing = inspectPairingState(JSON.stringify({ channel: "telegram", requests: [] }));
+
+  assert.equal(gateway.operatorScopePresent, true);
+  assert.equal(pairing.paired, true);
 });
