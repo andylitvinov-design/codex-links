@@ -21,6 +21,7 @@
     "bridge:photo-smoke": "node scripts/smoke-bridge-photo-delivery.mjs",
     "claude:smoke": "node scripts/smoke-claude-delivery.mjs",
     "claude:photo-smoke": "node scripts/smoke-claude-photo-delivery.mjs",
+    "code-copilot:smoke": "node scripts/smoke-code-copilot-bridge.mjs",
     "smoke:delivery": "node scripts/smoke-delivery.mjs",
     "claude:bridge": "zsh scripts/run-claude-bridge.sh",
     "maintenance:run": "node scripts/run-delivery-maintenance.mjs",
