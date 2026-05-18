@@ -1073,6 +1073,7 @@ function normalizeStoredCommandEntry(entry) {
     mergeCommit: normalizeSlackValue(entry.mergeCommit),
     productionUrl: normalizeUrlValue(entry.productionUrl),
     productionVerifiedAt: normalizeDateValue(entry.productionVerifiedAt),
+    deliveryFeedback: normalizeDiagnosticText(entry.deliveryFeedback, 12000),
     deliveryStatus: normalizeDeliveryStatus(entry.deliveryStatus),
     deliveryStatusUpdatedAt: normalizeDateValue(entry.deliveryStatusUpdatedAt),
     desktopMirrorStatus: normalizeDeliveryStatus(entry.desktopMirrorStatus),
@@ -1873,6 +1874,7 @@ export async function markCommandAnswered(env, input = {}) {
       mergeCommit: normalizeSlackValue(input.mergeCommit || command.mergeCommit),
       productionUrl: normalizeUrlValue(input.productionUrl || command.productionUrl),
       productionVerifiedAt: normalizeDateValue(input.productionVerifiedAt || command.productionVerifiedAt),
+      deliveryFeedback: normalizeDiagnosticText(input.deliveryFeedback || command.deliveryFeedback, 12000),
       deliveryStatus: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus),
       deliveryStatusUpdatedAt: normalizeDeliveryStatus(input.deliveryStatus || command.deliveryStatus) !== normalizeDeliveryStatus(command.deliveryStatus)
         ? nowIso

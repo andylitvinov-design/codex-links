@@ -1645,6 +1645,7 @@ export async function onRequest(context) {
       mergeCommit: payload?.mergeCommit,
       productionUrl: payload?.productionUrl,
       productionVerifiedAt: payload?.productionVerifiedAt,
+      deliveryFeedback: payload?.deliveryFeedback,
       deliveryStatus: payload?.deliveryStatus
     });
 

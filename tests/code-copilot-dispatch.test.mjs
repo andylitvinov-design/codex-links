@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { onRequest as commandsEndpoint } from "../functions/api/commands.js";
 import { claimNextCommand, insertCommand } from "../functions/_lib/commands.js";
 import {
   COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY,
@@ -95,4 +96,52 @@ test("Code Copilot bridge command can be claimed", async () => {
     await env.LINKS_STORE.get(COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY, "json"),
     [created.value.id]
   );
+});
+
+test("Code Copilot answer preserves local model feedback for polling UI", async () => {
+  const env = {
+    LINKS_WRITE_TOKEN: "secret",
+    LINKS_STORE: createMemoryStore()
+  };
+  const created = await insertCommand(env, {
+    clientId: "test-client",
+    threadId: "finance",
+    text: "review this prompt",
+    dispatchMode: "code-copilot-bridge",
+    targetExecutionMode: "code-copilot",
+    requestedExecutor: "code-copilot"
+  });
+  const claimed = await claimNextCommand(env, {
+    processorId: "code-copilot-test",
+    dispatchMode: "code-copilot-bridge",
+    textOnly: true
+  });
+
+  assert.equal(created.ok, true);
+  assert.equal(claimed.ok, true);
+
+  const response = await commandsEndpoint({
+    env,
+    request: new Request("https://codex-links.pages.dev/api/commands", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-write-token": "secret"
+      },
+      body: JSON.stringify({
+        action: "answer",
+        id: created.value.id,
+        processorId: "code-copilot-test",
+        actualExecutor: "code-copilot-bridge",
+        progressStage: "answered",
+        deliveryFeedback: "Verdict: pass"
+      })
+    })
+  });
+  const body = await readJson(response);
+
+  assert.equal(response.status, 200);
+  assert.equal(body.command.status, "answered");
+  assert.equal(body.command.actualExecutor, "code-copilot");
+  assert.equal(body.command.deliveryFeedback, "Verdict: pass");
 });
