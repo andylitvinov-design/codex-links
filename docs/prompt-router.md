@@ -23,8 +23,6 @@ Prompt Router can prepare prompts for deeper external review:
 - `claude-code`: independent production verification / deep diagnosis prompt.
 - `code-copilot`: independent second-opinion prompt review.
 
-If no external adapter is configured, these targets return copyable prompt-only fallback.
-
 ## Lamp colors
 
 The verifier returns `lampStatuses` for UI rendering.
@@ -101,7 +99,7 @@ POST /api/prompt-router/send
 
 - `codex`: tries existing `/api/commands` flow with `cloud-via-slack`; falls back to prompt-only.
 - `claude-code`: wraps prompt for independent Claude Code verification; tries existing Claude route; falls back to prompt-only.
-- `code-copilot`: returns copyable second-opinion review prompt until an independent no-API Code Copilot bridge exists.
+- `code-copilot`: creates a `code-copilot-bridge` command when `CODE_COPILOT_BRIDGE_ENABLED=true`; otherwise returns prompt-only.
 - `github-issue`: returns issue-ready prompt until a safe issue adapter exists.
 - `copy`: always returns prompt-only.
 
@@ -112,7 +110,7 @@ If `POST /api/prompt-router/send` creates a command, it returns:
 ```json
 {
   "ok": true,
-  "mode": "codex-dispatch",
+  "mode": "code-copilot-dispatch",
   "commandId": "cmd_...",
   "pollUrl": "/api/commands?id=cmd_...",
   "status": "queued"
@@ -148,13 +146,39 @@ acked
 
 or after the timeout. The user can also stop polling manually.
 
-## Code Copilot behavior
+## Code Copilot Local Bridge
 
 The user decision is: Code Copilot must be a separate independent reviewer agent, without OpenAI API and without extra API-token billing.
 
-Therefore the current MVP does **not** route Code Copilot through Claude and does **not** use OpenAI API.
+The implemented bridge is local-only:
 
-Until a real no-API Code Copilot bridge exists, `target=code-copilot` returns:
+```text
+/prompt-router
+  -> target=code-copilot
+  -> /api/prompt-router/send
+  -> command dispatchMode=code-copilot-bridge
+  -> scripts/code-copilot-bridge.mjs claims command
+  -> local model reviews prompt
+  -> bridge posts answer through /api/commands action=answer
+  -> /prompt-router polls and shows answer
+```
+
+Supported local providers:
+
+- Ollama: `http://127.0.0.1:11434/api/generate`
+- LM Studio: `http://127.0.0.1:1234/v1/chat/completions`
+
+The cloud API does not call OpenAI for Code Copilot.
+
+### Required Cloudflare setting
+
+Enable the code-copilot dispatch path in Cloudflare runtime/config:
+
+```text
+CODE_COPILOT_BRIDGE_ENABLED=true
+```
+
+If this is absent, `target=code-copilot` returns:
 
 ```json
 {
@@ -166,20 +190,50 @@ Until a real no-API Code Copilot bridge exists, `target=code-copilot` returns:
 }
 ```
 
-The UI should display:
+### Local bridge env
 
-```text
-Code Copilot bridge is not configured. Prompt prepared for manual independent review.
+```bash
+CODEX_LINKS_BASE_URL=https://codex-links.pages.dev
+LINKS_WRITE_TOKEN=...
+CODE_COPILOT_LOCAL_PROVIDER=ollama # or lmstudio
+CODE_COPILOT_MODEL=qwen2.5-coder:7b
+CODE_COPILOT_OLLAMA_URL=http://127.0.0.1:11434/api/generate
+CODE_COPILOT_LMSTUDIO_URL=http://127.0.0.1:1234/v1/chat/completions
+CODE_COPILOT_POLL_INTERVAL_MS=5000
 ```
 
-Future Code Copilot bridge requirements:
+Run manually:
 
-- no OpenAI API
-- no extra API billing
-- separate independent reviewer
-- consumes queued command or equivalent no-API bridge input
-- returns answer through the existing `/api/commands` answer/progress lifecycle
-- works with the same `Execution Result` polling panel
+```bash
+CODEX_LINKS_BASE_URL=https://codex-links.pages.dev \
+LINKS_WRITE_TOKEN=... \
+CODE_COPILOT_LOCAL_PROVIDER=ollama \
+CODE_COPILOT_MODEL=qwen2.5-coder:7b \
+node scripts/code-copilot-bridge.mjs
+```
+
+Install as launchd agent:
+
+```bash
+CODEX_LINKS_BASE_URL=https://codex-links.pages.dev \
+LINKS_WRITE_TOKEN=... \
+CODE_COPILOT_LOCAL_PROVIDER=ollama \
+CODE_COPILOT_MODEL=qwen2.5-coder:7b \
+zsh scripts/install-code-copilot-bridge-launch-agent.sh
+```
+
+Logs:
+
+```text
+~/Library/Logs/codex-links-code-copilot-bridge.launchd.log
+~/Library/Logs/codex-links-code-copilot-bridge.launchd.error.log
+```
+
+Smoke local model:
+
+```bash
+npm run code-copilot:smoke
+```
 
 ## Bridge verification
 
@@ -189,14 +243,25 @@ For production confidence, run and record:
 npm run cloud:check
 npm run cloud:smoke
 npm run claude:smoke
+npm run code-copilot:smoke
 ```
 
 Codex route is healthy only if the final executor is the approved Codex route, normally `cloud-via-slack`.
 
 Claude route is healthy only if a Claude command reaches `answered` or returns a clear actionable failure.
 
+Code Copilot route is healthy only if:
+
+- `CODE_COPILOT_BRIDGE_ENABLED=true`
+- local model endpoint responds
+- local bridge claims a `code-copilot-bridge` command
+- command reaches `answered`
+- `/prompt-router` displays the answer in Execution Result
+
 ## Security
 
 Prompt Router redacts common secret patterns before verification, rewrite, and send handling. It logs only safe metadata such as project, repo, category, target, prompt length, and result mode.
+
+Code Copilot bridge logs safe metadata only and does not log raw prompts by default.
 
 It does not introduce a required `OPENAI_API_KEY` path.
