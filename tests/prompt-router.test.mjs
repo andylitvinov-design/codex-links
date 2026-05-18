@@ -95,8 +95,8 @@ test("weak prompt gets lower score than strong Ezohata prompt", () => {
   assert.ok(strong.score >= 8);
 });
 
-test("lamp statuses show green/red/gray quality indicators", () => {
-  const finance = verifyPromptRouterPrompt({ ...financePayload, prompt: "fix analytics" });
+test("lamp statuses show green/yellow/red/gray quality indicators", () => {
+  const finance = verifyPromptRouterPrompt({ ...financePayload, prompt: "fix analytics provider API live" });
   const general = verifyPromptRouterPrompt({
     project: "custom",
     repo: "andylitvinov-design/example",
@@ -105,12 +105,15 @@ test("lamp statuses show green/red/gray quality indicators", () => {
     problem: "button is broken",
     prompt: `Repo: andylitvinov-design/example\n\nUser report:\nbutton is broken\n\n${FAILING_LAYER_PHRASE}`
   });
+  const strong = verifyPromptRouterPrompt({ ...financePayload, prompt: strongPrompt });
 
   assert.equal(finance.ok, true);
   assert.ok(finance.lampStatuses.some((lamp) => lamp.color === "red"));
+  assert.ok(finance.lampStatuses.some((lamp) => lamp.color === "yellow"));
   assert.ok(finance.lampStatuses.some((lamp) => lamp.id === "finance-chain"));
   assert.equal(general.ok, true);
   assert.ok(general.lampStatuses.some((lamp) => lamp.color === "gray"));
+  assert.ok(strong.lampStatuses.some((lamp) => lamp.color === "green"));
 });
 
 test("rewritten prompt includes mandatory failing-layer phrase and Ezohata chain", () => {
