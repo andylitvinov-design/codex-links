@@ -3,12 +3,14 @@ export const DISPATCH_MODE_CLOUD = "cloud";
 export const LEGACY_DISPATCH_MODE_SLACK = "slack-codex-cloud";
 export const DISPATCH_MODE_SLACK = LEGACY_DISPATCH_MODE_SLACK;
 export const DISPATCH_MODE_CLAUDE = "claude-bridge";
+export const DISPATCH_MODE_CODE_COPILOT = "code-copilot-bridge";
 export const CONFIG_DISPATCH_MODE_SLACK = "cloud-via-slack";
 export const CONFIG_DISPATCH_MODE_DIRECT = "direct-openai";
 export const EXECUTOR_ROUTE_BRIDGE = "bridge";
 export const EXECUTOR_ROUTE_CLOUD_SLACK = "cloud-via-slack";
 export const EXECUTOR_ROUTE_DIRECT_OPENAI = "direct-openai";
 export const EXECUTOR_ROUTE_CLAUDE = "claude";
+export const EXECUTOR_ROUTE_CODE_COPILOT = "code-copilot";
 
 function hasOpenAiKey(env) {
   return Boolean(String(env?.OPENAI_API_KEY || "").trim());
@@ -41,6 +43,10 @@ export function normalizeDispatchMode(rawMode) {
     return DISPATCH_MODE_CLAUDE;
   }
 
+  if (mode === DISPATCH_MODE_CODE_COPILOT || mode === EXECUTOR_ROUTE_CODE_COPILOT) {
+    return DISPATCH_MODE_CODE_COPILOT;
+  }
+
   return DISPATCH_MODE_LOCAL;
 }
 
@@ -67,6 +73,10 @@ export function normalizeExecutorRoute(rawMode, fallback = EXECUTOR_ROUTE_BRIDGE
     return EXECUTOR_ROUTE_CLAUDE;
   }
 
+  if (mode === EXECUTOR_ROUTE_CODE_COPILOT || mode === DISPATCH_MODE_CODE_COPILOT) {
+    return EXECUTOR_ROUTE_CODE_COPILOT;
+  }
+
   if (mode === EXECUTOR_ROUTE_BRIDGE || mode === DISPATCH_MODE_LOCAL) {
     return EXECUTOR_ROUTE_BRIDGE;
   }
@@ -89,6 +99,10 @@ export function executorRouteToDispatchMode(route) {
     return DISPATCH_MODE_CLAUDE;
   }
 
+  if (normalized === EXECUTOR_ROUTE_CODE_COPILOT) {
+    return DISPATCH_MODE_CODE_COPILOT;
+  }
+
   return DISPATCH_MODE_LOCAL;
 }
 
@@ -105,6 +119,10 @@ export function dispatchModeToExecutorRoute(mode) {
 
   if (normalized === DISPATCH_MODE_CLAUDE) {
     return EXECUTOR_ROUTE_CLAUDE;
+  }
+
+  if (normalized === DISPATCH_MODE_CODE_COPILOT) {
+    return EXECUTOR_ROUTE_CODE_COPILOT;
   }
 
   return EXECUTOR_ROUTE_BRIDGE;
@@ -128,6 +146,10 @@ export function getConfiguredDispatchMode(env) {
   if (String(env?.COMMAND_DISPATCH_MODE || "").trim()) {
     if (explicit === DISPATCH_MODE_CLAUDE) {
       return DISPATCH_MODE_CLAUDE;
+    }
+
+    if (explicit === DISPATCH_MODE_CODE_COPILOT) {
+      return DISPATCH_MODE_CODE_COPILOT;
     }
 
     if (explicit === DISPATCH_MODE_SLACK) {
@@ -171,8 +193,12 @@ export function getDispatchModeLabel(mode) {
     return "Direct OpenAI cloud";
   }
 
-   if (normalized === DISPATCH_MODE_CLAUDE) {
+  if (normalized === DISPATCH_MODE_CLAUDE) {
     return "Claude Code bridge";
+  }
+
+  if (normalized === DISPATCH_MODE_CODE_COPILOT) {
+    return "Code Copilot bridge";
   }
 
   return "Local bridge";
@@ -191,6 +217,10 @@ export function getExecutorRouteLabel(route) {
 
   if (normalized === EXECUTOR_ROUTE_CLAUDE) {
     return "Claude Code bridge";
+  }
+
+  if (normalized === EXECUTOR_ROUTE_CODE_COPILOT) {
+    return "Code Copilot bridge";
   }
 
   return "Local bridge";
