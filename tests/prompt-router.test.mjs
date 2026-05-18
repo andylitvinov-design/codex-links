@@ -68,9 +68,10 @@ async function readJson(response) {
   return JSON.parse(await response.text());
 }
 
-test("prompt router page renders required buttons, prefill logic, and lamps", async () => {
+test("prompt router page renders required buttons, prefill logic, lamps, and execution result panel", async () => {
   const html = await readFile("public/prompt-router/index.html", "utf8");
   const js = await readFile("public/prompt-router/prompt-router.js", "utf8");
+  const polling = await readFile("public/prompt-router/polling.js", "utf8");
 
   assert.match(html, /Verify Prompt/);
   assert.match(html, /Send to Codex/);
@@ -78,8 +79,15 @@ test("prompt router page renders required buttons, prefill logic, and lamps", as
   assert.match(html, /Copy Prompt/);
   assert.match(html, /Quality lamps/);
   assert.match(html, /id="lampList"/);
+  assert.match(html, /Execution Result/);
+  assert.match(html, /Stop Polling/);
+  assert.match(html, /polling\.js/);
   assert.match(js, /URLSearchParams/);
   assert.match(js, /renderLamps/);
+  assert.match(polling, /startCommandPolling/);
+  assert.match(polling, /stopCommandPolling/);
+  assert.match(polling, /renderExecutionResult/);
+  assert.match(polling, /\/api\/commands\?id=/);
   for (const key of ["project", "repo", "liveUrl", "category", "problem", "prompt"]) {
     assert.match(js, new RegExp(key));
   }
@@ -209,7 +217,7 @@ test("send target claude-code returns copyable Claude wrapper if dispatch unavai
   }
 });
 
-test("send target code-copilot returns second-opinion prompt", async () => {
+test("send target code-copilot returns explicit bridge-not-configured prompt-only status", async () => {
   const response = await sendEndpoint({
     request: jsonRequest("https://codex-links.pages.dev/api/prompt-router/send", {
       ...financePayload,
@@ -221,6 +229,10 @@ test("send target code-copilot returns second-opinion prompt", async () => {
 
   assert.equal(body.ok, true);
   assert.equal(body.mode, "prompt-only");
+  assert.equal(body.target, "code-copilot");
+  assert.equal(body.status, "code_copilot_bridge_not_configured");
+  assert.equal(body.commandId, undefined);
+  assert.equal(body.pollUrl, undefined);
   assert.match(body.prompt, /You are Code Copilot/);
 });
 
@@ -242,6 +254,58 @@ test("send target codex safely falls back when command dispatch is unavailable",
     assert.equal(body.mode, "prompt-only");
     assert.equal(body.target, "codex");
     assert.equal(body.dispatch.attempted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("send target codex success returns commandId and pollUrl", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    command: { id: "cmd_test_1", status: "queued" }
+  }), { status: 201 });
+
+  try {
+    const response = await sendEndpoint({
+      request: jsonRequest("https://codex-links.pages.dev/api/prompt-router/send", {
+        ...financePayload,
+        target: "codex",
+        prompt: strongPrompt
+      })
+    });
+    const body = await readJson(response);
+
+    assert.equal(body.ok, true);
+    assert.equal(body.mode, "codex-dispatch");
+    assert.equal(body.commandId, "cmd_test_1");
+    assert.equal(body.pollUrl, "/api/commands?id=cmd_test_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("send target claude-code success returns commandId and pollUrl", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    command: { id: "cmd_claude_1", status: "queued" }
+  }), { status: 201 });
+
+  try {
+    const response = await sendEndpoint({
+      request: jsonRequest("https://codex-links.pages.dev/api/prompt-router/send", {
+        ...financePayload,
+        target: "claude-code",
+        prompt: strongPrompt
+      })
+    });
+    const body = await readJson(response);
+
+    assert.equal(body.ok, true);
+    assert.equal(body.mode, "claude-dispatch");
+    assert.equal(body.commandId, "cmd_claude_1");
+    assert.equal(body.pollUrl, "/api/commands?id=cmd_claude_1");
   } finally {
     globalThis.fetch = originalFetch;
   }
