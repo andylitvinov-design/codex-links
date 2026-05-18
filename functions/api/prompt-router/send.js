@@ -14,11 +14,25 @@ function normalizeTarget(value) {
   return TARGETS.has(target) ? target : "copy";
 }
 
+function buildDeployMetadata(normalized) {
+  if (!normalized.liveUrl) {
+    return null;
+  }
+
+  return {
+    platform: normalized.liveUrl.includes("vercel.app") ? "vercel" : "web",
+    productionBranch: "main",
+    productionUrl: normalized.liveUrl,
+    smokePath: normalized.liveUrl.includes("ezohata-incoming-ledger") ? "/api/status" : "/"
+  };
+}
+
 function buildCommandPayload(payload, prompt, target) {
   const normalized = normalizePromptRouterPayload(payload);
   const clientId = `prompt-router-${target}`;
   const threadId = normalized.project || "links";
   const requestedExecutor = target === "claude-code" ? "claude" : "cloud-via-slack";
+  const deploy = buildDeployMetadata(normalized);
 
   return {
     clientId,
@@ -28,6 +42,8 @@ function buildCommandPayload(payload, prompt, target) {
     projectCategory: normalized.category,
     targetRepo: normalized.repo,
     targetRepoUrl: normalized.repo ? `https://github.com/${normalized.repo}` : "",
+    targetContextFiles: ["AGENTS.md", "README.md", "STATE.md"],
+    deploy,
     targetExecutionMode: requestedExecutor,
     requestedExecutor,
     dispatchMode: requestedExecutor,
