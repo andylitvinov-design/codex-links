@@ -126,6 +126,25 @@ function includesAny(text, needles) {
   return needles.filter(Boolean).some((needle) => text.includes(String(needle)));
 }
 
+function lampStatusForCheck(check, context, applicable = true) {
+  if (!applicable) {
+    return {
+      id: check.id,
+      label: check.label,
+      status: "not_applicable",
+      color: "gray"
+    };
+  }
+
+  const passed = check.test(context);
+  return {
+    id: check.id,
+    label: check.label,
+    status: passed ? "pass" : "missing",
+    color: passed ? "green" : "red"
+  };
+}
+
 export function isFinanceTask(payload = {}) {
   const joined = [payload.project, payload.repo, payload.liveUrl, payload.category, payload.problem, payload.prompt]
     .map((value) => String(value || "").toLowerCase())
@@ -175,24 +194,21 @@ export function verifyPromptRouterPrompt(payload = {}) {
   }
 
   const context = { ...normalized, prompt };
-  const checks = [...REQUIRED_CHECKS];
+  const generalLampStatuses = REQUIRED_CHECKS.map((check) => lampStatusForCheck(check, context));
+  const financeLampStatuses = FINANCE_REQUIRED_CHECKS.map((check) => lampStatusForCheck(check, context, normalized.finance));
+  const applicableLampStatuses = [...generalLampStatuses, ...financeLampStatuses].filter((entry) => entry.status !== "not_applicable");
+  const allLampStatuses = [...generalLampStatuses, ...financeLampStatuses];
+  const passedChecks = applicableLampStatuses
+    .filter((entry) => entry.status === "pass")
+    .map((entry) => entry.label);
+  const missingRequiredItems = applicableLampStatuses
+    .filter((entry) => entry.status === "missing")
+    .map((entry) => entry.label);
 
-  if (normalized.finance) {
-    checks.push(...FINANCE_REQUIRED_CHECKS);
-  }
-
-  const passedChecks = [];
-  const missingRequiredItems = [];
-
-  for (const check of checks) {
-    if (check.test(context)) {
-      passedChecks.push(check.label);
-    } else {
-      missingRequiredItems.push(check.label);
-    }
-  }
-
-  const score = Math.round((passedChecks.length / checks.length) * 100) / 10;
+  const rawScore = applicableLampStatuses.length
+    ? (passedChecks.length / applicableLampStatuses.length) * 10
+    : 0;
+  const score = Math.round(rawScore * 10) / 10;
   const weaknesses = missingRequiredItems.map((item) => `Missing: ${item}`);
   const recommendations = missingRequiredItems.map((item) => `Add: ${item}`);
   const rewrittenPrompt = buildRewrittenPrompt(normalized, missingRequiredItems);
@@ -206,6 +222,7 @@ export function verifyPromptRouterPrompt(payload = {}) {
     recommendations,
     missingRequiredItems,
     passedChecks,
+    lampStatuses: allLampStatuses,
     rewrittenPrompt
   };
 }
