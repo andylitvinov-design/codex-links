@@ -10,72 +10,86 @@ const REQUIRED_CHECKS = [
   {
     id: "repo",
     label: "Repo is specified",
-    test: ({ prompt, repo }) => includesAny(prompt, [repo, FINANCE_DEFAULT_REPO])
+    test: ({ prompt, repo }) => includesAny(prompt, [repo, FINANCE_DEFAULT_REPO]),
+    partial: ({ prompt }) => /repo|repository|github/i.test(prompt)
   },
   {
     id: "problem",
     label: "User problem/report is included",
-    test: ({ prompt, problem }) => Boolean(String(problem || "").trim()) || /user report|problem|поблем|проблем|ошиб|bug|issue/i.test(prompt)
+    test: ({ prompt, problem }) => Boolean(String(problem || "").trim()) || /user report|problem|поблем|проблем|ошиб|bug|issue/i.test(prompt),
+    partial: ({ prompt }) => /fix|исправ|проверь|debug/i.test(prompt)
   },
   {
     id: "failing-layer-phrase",
     label: `Includes exact phrase: ${FAILING_LAYER_PHRASE}`,
-    test: ({ prompt }) => prompt.includes(FAILING_LAYER_PHRASE)
+    test: ({ prompt }) => prompt.includes(FAILING_LAYER_PHRASE),
+    partial: ({ prompt }) => /failing layer|layer|слой|root cause/i.test(prompt)
   },
   {
     id: "deploy-source",
     label: "Current deploy/source of truth check",
-    test: ({ prompt }) => /deploy|source of truth|commitSha|commit sha|\/api\/status|статус|деплой/i.test(prompt)
+    test: ({ prompt }) => /deploy|source of truth|commitSha|commit sha|\/api\/status|статус|деплой/i.test(prompt),
+    partial: ({ prompt }) => /production|prod|live|commit|версия/i.test(prompt)
   },
   {
     id: "latest-commits",
     label: "Latest PR/commit check",
-    test: ({ prompt }) => /latest PR|latest commit|recent PR|commits?|последн.*PR|последн.*commit|коммит/i.test(prompt)
+    test: ({ prompt }) => /latest PR|latest commit|recent PR|commits?|последн.*PR|последн.*commit|коммит/i.test(prompt),
+    partial: ({ prompt }) => /PR|pull request|commit|branch|ветк/i.test(prompt)
   },
   {
     id: "minimal-patch",
     label: "Minimal safe patch instruction",
-    test: ({ prompt }) => /minimal safe patch|minimal patch|surgical|минимальн/i.test(prompt)
+    test: ({ prompt }) => /minimal safe patch|minimal patch|surgical|минимальн/i.test(prompt),
+    partial: ({ prompt }) => /patch|fix|исправ/i.test(prompt)
   },
   {
     id: "no-secrets",
     label: "No secrets/env changes instruction",
-    test: ({ prompt }) => /no secrets|do not.*secrets|do not.*env|не.*secret|не.*env|секрет/i.test(prompt)
+    test: ({ prompt }) => /no secrets|do not.*secrets|do not.*env|не.*secret|не.*env|секрет/i.test(prompt),
+    partial: ({ prompt }) => /secret|env|token|key|ключ/i.test(prompt)
   },
   {
     id: "no-rewrite",
     label: "No architecture rewrite instruction",
-    test: ({ prompt }) => /no architecture rewrite|do not rewrite architecture|не перепис/i.test(prompt)
+    test: ({ prompt }) => /no architecture rewrite|do not rewrite architecture|не перепис/i.test(prompt),
+    partial: ({ prompt }) => /architecture|архитект/i.test(prompt)
   },
   {
     id: "regression-tests",
     label: "Regression tests required",
-    test: ({ prompt }) => /regression tests?|tests?|тест/i.test(prompt)
+    test: ({ prompt }) => /regression tests?|tests?|тест/i.test(prompt),
+    partial: ({ prompt }) => /check|проверк/i.test(prompt)
   },
   {
     id: "node-test",
     label: "node --test verification command",
-    test: ({ prompt }) => /node\s+--test\s+tests\/\*\.test\.\*/i.test(prompt)
+    test: ({ prompt }) => /node\s+--test\s+tests\/\*\.test\.\*/i.test(prompt),
+    partial: ({ prompt }) => /node --test|node test|tests\/|npm test/i.test(prompt)
   },
   {
     id: "release-guard",
     label: "release guard verification command",
-    test: ({ prompt }) => /scripts\/release-guard\.sh|release-guard/i.test(prompt)
+    test: ({ prompt }) => /scripts\/release-guard\.sh|release-guard/i.test(prompt),
+    partial: ({ prompt }) => /guard|release|smoke/i.test(prompt)
   },
   {
     id: "build-command",
     label: "npm run build if available",
-    test: ({ prompt }) => /npm run build|build,? if available/i.test(prompt)
+    test: ({ prompt }) => /npm run build|build,? if available/i.test(prompt),
+    partial: ({ prompt }) => /build/i.test(prompt)
   },
   {
     id: "live-verification",
     label: "Live verification required",
-    test: ({ prompt }) => /live verification|live verify|production verification|провер.*live|провер.*prod/i.test(prompt)
+    test: ({ prompt }) => /live verification|live verify|production verification|провер.*live|провер.*prod/i.test(prompt),
+    partial: ({ prompt }) => /live|prod|production|browser|site|сайт/i.test(prompt)
   },
   {
     id: "output-format",
     label: "Output format includes root cause/changed files/checks/risks/evidence",
-    test: ({ prompt }) => /root cause/i.test(prompt) && /changed files/i.test(prompt) && /checks/i.test(prompt) && /risks/i.test(prompt)
+    test: ({ prompt }) => /root cause/i.test(prompt) && /changed files/i.test(prompt) && /checks/i.test(prompt) && /risks/i.test(prompt),
+    partial: ({ prompt }) => /root cause|changed files|checks|risks|evidence|отчет/i.test(prompt)
   }
 ];
 
@@ -83,42 +97,50 @@ const FINANCE_REQUIRED_CHECKS = [
   {
     id: "finance-chain",
     label: `Ezohata layer chain: ${EZOHATA_LAYER_CHAIN}`,
-    test: ({ prompt }) => prompt.includes(EZOHATA_LAYER_CHAIN)
+    test: ({ prompt }) => prompt.includes(EZOHATA_LAYER_CHAIN),
+    partial: ({ prompt }) => /UI|API|provider|normalization|ledger|balance|analytics|аналит/i.test(prompt)
   },
   {
     id: "api-status",
     label: "Check /api/status",
-    test: ({ prompt }) => prompt.includes("/api/status")
+    test: ({ prompt }) => prompt.includes("/api/status"),
+    partial: ({ prompt }) => /status|commitSha|health/i.test(prompt)
   },
   {
     id: "content-type-body",
     label: "Check status/content-type/body excerpt",
-    test: ({ prompt }) => /content-type|first 300|body excerpt|status/i.test(prompt)
+    test: ({ prompt }) => /content-type|first 300|body excerpt|status/i.test(prompt),
+    partial: ({ prompt }) => /body|response|endpoint|network|api/i.test(prompt)
   },
   {
     id: "amount-net",
     label: "Preserve amount_net balance invariant",
-    test: ({ prompt }) => /amount_net/i.test(prompt)
+    test: ({ prompt }) => /amount_net/i.test(prompt),
+    partial: ({ prompt }) => /balance|net|баланс/i.test(prompt)
   },
   {
     id: "source-unknown",
     label: "Do not exclude valid amount_net rows because source=unknown",
-    test: ({ prompt }) => /source=unknown|source unknown|unknown source/i.test(prompt)
+    test: ({ prompt }) => /source=unknown|source unknown|unknown source/i.test(prompt),
+    partial: ({ prompt }) => /source|unknown/i.test(prompt)
   },
   {
     id: "provider-transport",
     label: "Provider transport separate from balance logic",
-    test: ({ prompt }) => /provider transport|transport.*balance|provider.*balance/i.test(prompt)
+    test: ({ prompt }) => /provider transport|transport.*balance|provider.*balance/i.test(prompt),
+    partial: ({ prompt }) => /provider|transport|import/i.test(prompt)
   },
   {
     id: "gross-net-fee",
     label: "Preserve gross/net/fee/source semantics",
-    test: ({ prompt }) => /gross.*net.*fee|net.*gross.*fee|fee.*net.*gross/i.test(prompt)
+    test: ({ prompt }) => /gross.*net.*fee|net.*gross.*fee|fee.*net.*gross/i.test(prompt),
+    partial: ({ prompt }) => /gross|net|fee|source/i.test(prompt)
   },
   {
     id: "non-json-errors",
     label: "Provider non-JSON errors become structured JSON",
-    test: ({ prompt }) => /non-JSON|structured JSON|SyntaxError|HTML|plain text/i.test(prompt)
+    test: ({ prompt }) => /non-JSON|structured JSON|SyntaxError|HTML|plain text/i.test(prompt),
+    partial: ({ prompt }) => /JSON|SyntaxError|HTML|provider error/i.test(prompt)
   }
 ];
 
@@ -136,12 +158,29 @@ function lampStatusForCheck(check, context, applicable = true) {
     };
   }
 
-  const passed = check.test(context);
+  if (check.test(context)) {
+    return {
+      id: check.id,
+      label: check.label,
+      status: "pass",
+      color: "green"
+    };
+  }
+
+  if (typeof check.partial === "function" && check.partial(context)) {
+    return {
+      id: check.id,
+      label: check.label,
+      status: "partial",
+      color: "yellow"
+    };
+  }
+
   return {
     id: check.id,
     label: check.label,
-    status: passed ? "pass" : "missing",
-    color: passed ? "green" : "red"
+    status: "missing",
+    color: "red"
   };
 }
 
@@ -201,16 +240,19 @@ export function verifyPromptRouterPrompt(payload = {}) {
   const passedChecks = applicableLampStatuses
     .filter((entry) => entry.status === "pass")
     .map((entry) => entry.label);
+  const partialChecks = applicableLampStatuses
+    .filter((entry) => entry.status === "partial")
+    .map((entry) => entry.label);
   const missingRequiredItems = applicableLampStatuses
-    .filter((entry) => entry.status === "missing")
+    .filter((entry) => entry.status === "missing" || entry.status === "partial")
     .map((entry) => entry.label);
 
   const rawScore = applicableLampStatuses.length
-    ? (passedChecks.length / applicableLampStatuses.length) * 10
+    ? ((passedChecks.length + partialChecks.length * 0.5) / applicableLampStatuses.length) * 10
     : 0;
   const score = Math.round(rawScore * 10) / 10;
-  const weaknesses = missingRequiredItems.map((item) => `Missing: ${item}`);
-  const recommendations = missingRequiredItems.map((item) => `Add: ${item}`);
+  const weaknesses = missingRequiredItems.map((item) => `Missing or partial: ${item}`);
+  const recommendations = missingRequiredItems.map((item) => `Add or strengthen: ${item}`);
   const rewrittenPrompt = buildRewrittenPrompt(normalized, missingRequiredItems);
 
   return {
@@ -222,6 +264,7 @@ export function verifyPromptRouterPrompt(payload = {}) {
     recommendations,
     missingRequiredItems,
     passedChecks,
+    partialChecks,
     lampStatuses: allLampStatuses,
     rewrittenPrompt
   };
