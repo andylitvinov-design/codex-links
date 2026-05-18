@@ -68,7 +68,7 @@ async function readJson(response) {
   return JSON.parse(await response.text());
 }
 
-test("prompt router page renders required buttons and prefill logic", async () => {
+test("prompt router page renders required buttons, prefill logic, and lamps", async () => {
   const html = await readFile("public/prompt-router/index.html", "utf8");
   const js = await readFile("public/prompt-router/prompt-router.js", "utf8");
 
@@ -76,7 +76,10 @@ test("prompt router page renders required buttons and prefill logic", async () =
   assert.match(html, /Send to Codex/);
   assert.match(html, /Send to Claude Code/);
   assert.match(html, /Copy Prompt/);
+  assert.match(html, /Quality lamps/);
+  assert.match(html, /id="lampList"/);
   assert.match(js, /URLSearchParams/);
+  assert.match(js, /renderLamps/);
   for (const key of ["project", "repo", "liveUrl", "category", "problem", "prompt"]) {
     assert.match(js, new RegExp(key));
   }
@@ -90,6 +93,24 @@ test("weak prompt gets lower score than strong Ezohata prompt", () => {
   assert.equal(strong.ok, true);
   assert.ok(weak.score < strong.score, `${weak.score} should be lower than ${strong.score}`);
   assert.ok(strong.score >= 8);
+});
+
+test("lamp statuses show green/red/gray quality indicators", () => {
+  const finance = verifyPromptRouterPrompt({ ...financePayload, prompt: "fix analytics" });
+  const general = verifyPromptRouterPrompt({
+    project: "custom",
+    repo: "andylitvinov-design/example",
+    liveUrl: "",
+    category: "Bug fix",
+    problem: "button is broken",
+    prompt: `Repo: andylitvinov-design/example\n\nUser report:\nbutton is broken\n\n${FAILING_LAYER_PHRASE}`
+  });
+
+  assert.equal(finance.ok, true);
+  assert.ok(finance.lampStatuses.some((lamp) => lamp.color === "red"));
+  assert.ok(finance.lampStatuses.some((lamp) => lamp.id === "finance-chain"));
+  assert.equal(general.ok, true);
+  assert.ok(general.lampStatuses.some((lamp) => lamp.color === "gray"));
 });
 
 test("rewritten prompt includes mandatory failing-layer phrase and Ezohata chain", () => {
@@ -116,7 +137,7 @@ abc123
   assert.match(redacted, /REDACTED_SECRET/);
 });
 
-test("verify endpoint returns score and rewrittenPrompt", async () => {
+test("verify endpoint returns score, lampStatuses, and rewrittenPrompt", async () => {
   const response = await verifyEndpoint({
     request: jsonRequest("https://codex-links.pages.dev/api/prompt-router/verify", {
       ...financePayload,
@@ -128,6 +149,7 @@ test("verify endpoint returns score and rewrittenPrompt", async () => {
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
   assert.equal(typeof body.score, "number");
+  assert.ok(Array.isArray(body.lampStatuses));
   assert.match(body.rewrittenPrompt, /First prove the failing layer before patching\./);
 });
 
