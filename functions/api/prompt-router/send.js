@@ -14,6 +14,11 @@ function normalizeTarget(value) {
   return TARGETS.has(target) ? target : "copy";
 }
 
+function getPollUrl(commandId) {
+  const normalized = String(commandId || "").trim();
+  return normalized ? `/api/commands?id=${encodeURIComponent(normalized)}` : "";
+}
+
 function buildDeployMetadata(normalized) {
   if (!normalized.liveUrl) {
     return null;
@@ -107,6 +112,17 @@ function buildIssuePrompt(payload, prompt) {
   return `Title: Prompt Router task - ${normalized.category}\n\nRepo: ${normalized.repo}\nLive URL: ${normalized.liveUrl}\n\n${prompt}`;
 }
 
+function promptOnlyResponse({ target, prompt, status, dispatch }) {
+  return json({
+    ok: true,
+    mode: "prompt-only",
+    target,
+    prompt,
+    status,
+    ...(dispatch ? { dispatch } : {})
+  });
+}
+
 export async function onRequest(context) {
   const { request } = context;
   const preflight = handleOptions(request);
@@ -147,13 +163,23 @@ export async function onRequest(context) {
 
   console.log("[prompt-router] send", getSafePromptMetadata({ ...payload, target }));
 
-  if (target === "copy" || target === "code-copilot" || target === "github-issue") {
-    return json({
-      ok: true,
-      mode: "prompt-only",
+  if (target === "copy") {
+    return promptOnlyResponse({ target, prompt: finalPrompt, status: "copyable_prompt" });
+  }
+
+  if (target === "code-copilot") {
+    return promptOnlyResponse({
       target,
       prompt: finalPrompt,
-      status: target === "github-issue" ? "github_issue_adapter_not_configured" : "copyable_prompt"
+      status: "code_copilot_bridge_not_configured"
+    });
+  }
+
+  if (target === "github-issue") {
+    return promptOnlyResponse({
+      target,
+      prompt: finalPrompt,
+      status: "github_issue_adapter_not_configured"
     });
   }
 
@@ -161,9 +187,7 @@ export async function onRequest(context) {
     const dispatched = await dispatchViaCommands(context, normalized, finalPrompt, target);
 
     if (!dispatched.ok) {
-      return json({
-        ok: true,
-        mode: "prompt-only",
+      return promptOnlyResponse({
         target,
         prompt: finalPrompt,
         status: dispatched.error || "dispatch_unavailable",
@@ -175,11 +199,13 @@ export async function onRequest(context) {
       });
     }
 
+    const commandId = dispatched.command?.id || "";
     return json({
       ok: true,
       mode: target === "claude-code" ? "claude-dispatch" : "codex-dispatch",
       target,
-      commandId: dispatched.command?.id || "",
+      commandId,
+      pollUrl: getPollUrl(commandId),
       prompt: finalPrompt,
       status: dispatched.command?.status || "queued",
       dispatch: {
@@ -188,9 +214,7 @@ export async function onRequest(context) {
       }
     });
   } catch (error) {
-    return json({
-      ok: true,
-      mode: "prompt-only",
+    return promptOnlyResponse({
       target,
       prompt: finalPrompt,
       status: "dispatch_exception_fallback",
