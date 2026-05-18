@@ -9,6 +9,7 @@ const fields = {
   prompt: $("prompt"),
   rewrittenPrompt: $("rewrittenPrompt"),
   verificationResult: $("verificationResult"),
+  lampList: $("lampList"),
   status: $("status")
 };
 
@@ -44,9 +45,42 @@ function fillFromParams() {
   }
 }
 
+function renderLamps(lampStatuses = []) {
+  if (!fields.lampList) {
+    return;
+  }
+
+  fields.lampList.textContent = "";
+
+  if (!lampStatuses.length) {
+    const empty = document.createElement("div");
+    empty.className = "lamp-row";
+    empty.innerHTML = '<span class="lamp gray"></span><span>No checks yet</span>';
+    fields.lampList.append(empty);
+    return;
+  }
+
+  for (const item of lampStatuses) {
+    const row = document.createElement("div");
+    const color = ["green", "yellow", "red", "gray"].includes(item.color) ? item.color : "gray";
+    row.className = "lamp-row";
+    row.title = item.status || color;
+
+    const lamp = document.createElement("span");
+    lamp.className = `lamp ${color}`;
+
+    const label = document.createElement("span");
+    label.textContent = item.label || item.id || "Unnamed check";
+
+    row.append(lamp, label);
+    fields.lampList.append(row);
+  }
+}
+
 function renderVerification(result) {
   if (!result?.ok) {
     fields.verificationResult.textContent = JSON.stringify(result, null, 2);
+    renderLamps([]);
     return;
   }
 
@@ -66,6 +100,7 @@ function renderVerification(result) {
     "Passed checks:",
     ...(result.passedChecks?.length ? result.passedChecks.map((item) => `- ${item}`) : ["- none"])
   ].join("\n");
+  renderLamps(result.lampStatuses || []);
 }
 
 async function postJson(url, payload) {
@@ -150,3 +185,4 @@ $("copyPrompt").addEventListener("click", () => copyText(fields.prompt.value));
 $("copyRewritten").addEventListener("click", () => copyText(fields.rewrittenPrompt.value || fields.prompt.value));
 
 fillFromParams();
+renderLamps([]);
