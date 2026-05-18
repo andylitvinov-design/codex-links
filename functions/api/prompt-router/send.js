@@ -1,3 +1,4 @@
+import { insertCommand } from "../../_lib/commands.js";
 import { handleOptions, json } from "../../_lib/http.js";
 import {
   buildClaudeVerificationPrompt,
@@ -19,10 +20,12 @@ function getPollUrl(commandId) {
   return normalized ? `/api/commands?id=${encodeURIComponent(normalized)}` : "";
 }
 
+function isCodeCopilotBridgeEnabled(env) {
+  return String(env?.CODE_COPILOT_BRIDGE_ENABLED || "").trim().toLowerCase() === "true";
+}
+
 function buildDeployMetadata(normalized) {
-  if (!normalized.liveUrl) {
-    return null;
-  }
+  if (!normalized.liveUrl) return null;
 
   return {
     platform: normalized.liveUrl.includes("vercel.app") ? "vercel" : "web",
@@ -36,7 +39,12 @@ function buildCommandPayload(payload, prompt, target) {
   const normalized = normalizePromptRouterPayload(payload);
   const clientId = `prompt-router-${target}`;
   const threadId = normalized.project || "links";
-  const requestedExecutor = target === "claude-code" ? "claude" : "cloud-via-slack";
+  const requestedExecutor = target === "claude-code"
+    ? "claude"
+    : target === "code-copilot"
+      ? "code-copilot"
+      : "cloud-via-slack";
+  const dispatchMode = target === "code-copilot" ? "code-copilot-bridge" : requestedExecutor;
   const deploy = buildDeployMetadata(normalized);
 
   return {
@@ -51,7 +59,7 @@ function buildCommandPayload(payload, prompt, target) {
     deploy,
     targetExecutionMode: requestedExecutor,
     requestedExecutor,
-    dispatchMode: requestedExecutor,
+    dispatchMode,
     text: prompt,
     effectivePrompt: prompt,
     source: "prompt-router",
@@ -71,11 +79,8 @@ async function dispatchViaCommands(context, payload, prompt, target) {
   const headers = { "content-type": "application/json" };
 
   if (token) {
-    if (/^Bearer\s+/i.test(token)) {
-      headers.authorization = token;
-    } else {
-      headers["x-write-token"] = token;
-    }
+    if (/^Bearer\s+/i.test(token)) headers.authorization = token;
+    else headers["x-write-token"] = token;
   }
 
   const response = await fetch(commandsUrl, {
@@ -101,10 +106,20 @@ async function dispatchViaCommands(context, payload, prompt, target) {
     };
   }
 
-  return {
-    ok: true,
-    command: body.command || null
-  };
+  return { ok: true, command: body.command || null };
+}
+
+async function createCodeCopilotCommand(context, payload, prompt) {
+  if (!isCodeCopilotBridgeEnabled(context.env)) {
+    return { ok: false, bridgeDisabled: true };
+  }
+
+  const created = await insertCommand(context.env, buildCommandPayload(payload, prompt, "code-copilot"));
+  if (!created.ok) {
+    return { ok: false, error: created.error || "code_copilot_command_create_failed" };
+  }
+
+  return { ok: true, command: created.value };
 }
 
 function buildIssuePrompt(payload, prompt) {
@@ -123,20 +138,33 @@ function promptOnlyResponse({ target, prompt, status, dispatch }) {
   });
 }
 
+function commandDispatchResponse({ target, mode, command, prompt }) {
+  const commandId = command?.id || "";
+  return json({
+    ok: true,
+    mode,
+    target,
+    commandId,
+    pollUrl: getPollUrl(commandId),
+    prompt,
+    status: command?.status || "queued",
+    dispatch: {
+      attempted: true,
+      status: "created"
+    }
+  });
+}
+
 export async function onRequest(context) {
   const { request } = context;
   const preflight = handleOptions(request);
-
-  if (preflight) {
-    return preflight;
-  }
+  if (preflight) return preflight;
 
   if (request.method !== "POST") {
     return json({ ok: false, error: "method_not_allowed" }, { status: 405 });
   }
 
   let payload;
-
   try {
     payload = await request.json();
   } catch {
@@ -152,7 +180,6 @@ export async function onRequest(context) {
   }
 
   let finalPrompt = basePrompt;
-
   if (target === "claude-code") {
     finalPrompt = buildClaudeVerificationPrompt({ ...normalized, prompt: basePrompt });
   } else if (target === "code-copilot") {
@@ -168,24 +195,42 @@ export async function onRequest(context) {
   }
 
   if (target === "code-copilot") {
-    return promptOnlyResponse({
-      target,
-      prompt: finalPrompt,
-      status: "code_copilot_bridge_not_configured"
-    });
+    try {
+      const created = await createCodeCopilotCommand(context, normalized, finalPrompt);
+      if (created.ok) {
+        return commandDispatchResponse({
+          target,
+          mode: "code-copilot-dispatch",
+          command: created.command,
+          prompt: finalPrompt
+        });
+      }
+
+      return promptOnlyResponse({
+        target,
+        prompt: finalPrompt,
+        status: created.bridgeDisabled ? "code_copilot_bridge_not_configured" : (created.error || "code_copilot_dispatch_unavailable")
+      });
+    } catch (error) {
+      return promptOnlyResponse({
+        target,
+        prompt: finalPrompt,
+        status: "code_copilot_dispatch_exception_fallback",
+        dispatch: {
+          attempted: true,
+          status: "exception",
+          excerpt: String(error?.message || error || "Code Copilot dispatch failed.").slice(0, 300)
+        }
+      });
+    }
   }
 
   if (target === "github-issue") {
-    return promptOnlyResponse({
-      target,
-      prompt: finalPrompt,
-      status: "github_issue_adapter_not_configured"
-    });
+    return promptOnlyResponse({ target, prompt: finalPrompt, status: "github_issue_adapter_not_configured" });
   }
 
   try {
     const dispatched = await dispatchViaCommands(context, normalized, finalPrompt, target);
-
     if (!dispatched.ok) {
       return promptOnlyResponse({
         target,
@@ -199,19 +244,11 @@ export async function onRequest(context) {
       });
     }
 
-    const commandId = dispatched.command?.id || "";
-    return json({
-      ok: true,
-      mode: target === "claude-code" ? "claude-dispatch" : "codex-dispatch",
+    return commandDispatchResponse({
       target,
-      commandId,
-      pollUrl: getPollUrl(commandId),
-      prompt: finalPrompt,
-      status: dispatched.command?.status || "queued",
-      dispatch: {
-        attempted: true,
-        status: "created"
-      }
+      mode: target === "claude-code" ? "claude-dispatch" : "codex-dispatch",
+      command: dispatched.command,
+      prompt: finalPrompt
     });
   } catch (error) {
     return promptOnlyResponse({
