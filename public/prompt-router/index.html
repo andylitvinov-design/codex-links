@@ -17,6 +17,7 @@
       --ok: #34d399;
       --warn: #fbbf24;
       --bad: #f87171;
+      --na: #64748b;
     }
 
     body {
@@ -124,6 +125,37 @@
       overflow: auto;
     }
 
+    .lamp-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .lamp-row {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #020617;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .lamp {
+      width: 13px;
+      height: 13px;
+      border-radius: 999px;
+      box-shadow: 0 0 0 3px rgb(255 255 255 / 0.05);
+    }
+
+    .lamp.green { background: var(--ok); }
+    .lamp.yellow { background: var(--warn); }
+    .lamp.red { background: var(--bad); }
+    .lamp.gray { background: var(--na); }
+
     .status {
       margin-top: 12px;
       padding: 10px 12px;
@@ -209,6 +241,8 @@
       <div class="panel">
         <h2>Verification Result</h2>
         <div id="verificationResult" class="result">No verification yet.</div>
+        <h3>Quality lamps</h3>
+        <div id="lampList" class="lamp-list" aria-label="Prompt quality checklist"></div>
         <div class="actions">
           <button id="verifyAgain" class="secondary">Verify Again</button>
         </div>
