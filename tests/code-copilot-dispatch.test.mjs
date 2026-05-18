@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { claimNextCommand, insertCommand } from "../functions/_lib/commands.js";
+import {
+  COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY,
+  COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY
+} from "../functions/_lib/constants.js";
 import { onRequest as sendEndpoint } from "../functions/api/prompt-router/send.js";
 
 function createMemoryStore() {
@@ -69,6 +73,10 @@ test("Code Copilot bridge command can be claimed", async () => {
 
   assert.equal(created.ok, true);
   assert.equal(created.value.dispatchMode, "code-copilot-bridge");
+  assert.deepEqual(
+    await env.LINKS_STORE.get(COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY, "json"),
+    [created.value.id]
+  );
 
   const claimed = await claimNextCommand(env, {
     processorId: "code-copilot-test",
@@ -80,4 +88,11 @@ test("Code Copilot bridge command can be claimed", async () => {
   assert.equal(claimed.value.id, created.value.id);
   assert.equal(claimed.value.status, "processing");
   assert.equal(claimed.value.dispatchMode, "code-copilot-bridge");
+  assert.equal(claimed.value.actualExecutor, "code-copilot");
+  assert.equal(claimed.value.actualDispatchMode, "code-copilot");
+  assert.deepEqual(await env.LINKS_STORE.get(COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY, "json"), []);
+  assert.deepEqual(
+    await env.LINKS_STORE.get(COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY, "json"),
+    [created.value.id]
+  );
 });

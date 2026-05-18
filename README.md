@@ -173,6 +173,7 @@ Quick helpers added to this repo:
 
 - Slack app manifest for legacy maintenance: [integrations/slack/codex-links-app-manifest.yml](/Users/andriilitvinov/projects/MYPROJECTS/links/integrations/slack/codex-links-app-manifest.yml)
 - Local/prod setup check: `npm run cloud:check`
+- Prompt Router and Code Copilot local bridge docs: [docs/prompt-router.md](docs/prompt-router.md)
 - End-to-end text smoke for the default Slack cloud path: `npm run cloud:smoke`
 - End-to-end text smoke for the optional direct path: `CODEX_LINKS_SMOKE_CLOUD_ROUTE=direct npm run cloud:smoke`
 - Cloud production delivery guardian: `npm run cloud:guardian`
@@ -190,7 +191,7 @@ Operational contract for `cloud-via-slack`:
 - For the Slack cloud route, install the separate [OpenAI Codex Slack app](https://slack.com/marketplace/A09F5C369E3-openai-codex) in the target workspace first. After installation, use that app's `@Codex` bot/user ID for `SLACK_CODEX_USER_ID`; do not use the `Codex Links` sender app ID.
 - Set `SLACK_CODEX_DISPATCH_TOKEN` to a Slack user token for the human ChatGPT/Codex account linked to that workspace; bot-originated messages from `Codex Links` trigger the OpenAI Codex "connect your ChatGPT Codex account" prompt instead of starting work.
 - Optional: set `SLACK_ACTOR_PROBE_COOLDOWN_MS=30000` to suppress repeated live actor probes during temporary Slack/Codex disconnects.
-- the local launchd agents in this repo cover only `local-bridge` and `claude-bridge`
+- the local launchd agents in this repo cover `local-bridge`, `claude-bridge`, and the Code Copilot local bridge
 - `cloud:guardian` is the local Mac runner that verifies Cloud PR/merge/live site delivery and mirrors terminal reports into the Codex Desktop `Codex Links Cloud Reports` thread; install its 60s launchd schedule with `scripts/install-cloud-guardian-launch-agent.sh`
 - the Slack/Codex cloud worker is external to this repo; if it stops replying, the route will dispatch to Slack and then fall back to bridge
 
@@ -206,8 +207,9 @@ Local process management:
 
 - local bridge: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-bridge.plist`
 - Claude bridge: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-claude-bridge.plist`
+- Code Copilot bridge: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-code-copilot-bridge.plist`
 - Cloud guardian: `~/Library/LaunchAgents/com.andriilitvinov.codex-links-cloud-guardian.plist`
-- install or refresh launchd agents with `scripts/install-bridge-launch-agent.sh`, `scripts/install-claude-bridge-launch-agent.sh`, and `scripts/install-cloud-guardian-launch-agent.sh`
+- install or refresh launchd agents with `scripts/install-bridge-launch-agent.sh`, `scripts/install-claude-bridge-launch-agent.sh`, `scripts/install-code-copilot-bridge-launch-agent.sh`, and `scripts/install-cloud-guardian-launch-agent.sh`
 
 Useful log paths:
 
@@ -215,6 +217,8 @@ Useful log paths:
 - `~/Library/Logs/codex-links-bridge.error.log`
 - `~/Library/Logs/codex-links-claude-bridge.launchd.log`
 - `~/Library/Logs/codex-links-claude-bridge.launchd.error.log`
+- `~/Library/Logs/codex-links-code-copilot-bridge.launchd.log`
+- `~/Library/Logs/codex-links-code-copilot-bridge.launchd.error.log`
 - `~/Library/Logs/codex-links-cloud-guardian.launchd.log`
 - `~/Library/Logs/codex-links-cloud-guardian.launchd.error.log`
 

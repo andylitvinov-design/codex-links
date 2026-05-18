@@ -163,6 +163,8 @@ The implemented bridge is local-only:
   -> /prompt-router polls and shows answer
 ```
 
+Code Copilot commands use dedicated KV queue and processing indexes for `code-copilot-bridge`. The normal claim path reads those indexes first, and the existing snapshot scan remains as defensive recovery if an index is stale.
+
 Supported local providers:
 
 - Ollama: `http://127.0.0.1:11434/api/generate`
@@ -254,7 +256,7 @@ Code Copilot route is healthy only if:
 
 - `CODE_COPILOT_BRIDGE_ENABLED=true`
 - local model endpoint responds
-- local bridge claims a `code-copilot-bridge` command
+- local bridge claims a `code-copilot-bridge` command from the Code Copilot queue
 - command reaches `answered`
 - `/prompt-router` displays the answer in Execution Result
 
@@ -265,3 +267,5 @@ Prompt Router redacts common secret patterns before verification, rewrite, and s
 Code Copilot bridge logs safe metadata only and does not log raw prompts by default.
 
 It does not introduce a required `OPENAI_API_KEY` path.
+
+The launchd installer writes `LINKS_WRITE_TOKEN` into the local plist `EnvironmentVariables`, matching the existing local bridge pattern. Treat the machine account as trusted, keep the plist private to the operator machine, and prefer a future Keychain, chmod-600 env file, or `launchctl setenv` flow if this bridge is installed on a less trusted Mac.

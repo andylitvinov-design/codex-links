@@ -1,6 +1,8 @@
 import {
   COMMAND_PROCESSING_LEASE_MS,
   COMMAND_ACTIVE_STORAGE_KEY,
+  COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY,
+  COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY,
   COMMAND_CLAUDE_PROCESSING_STORAGE_KEY,
   COMMAND_CLAUDE_QUEUE_STORAGE_KEY,
   COMMAND_CLIENT_INDEX_PREFIX,
@@ -14,11 +16,13 @@ import {
 } from "./constants.js";
 import {
   DISPATCH_MODE_CLAUDE,
+  DISPATCH_MODE_CODE_COPILOT,
   DISPATCH_MODE_CLOUD,
   DISPATCH_MODE_LOCAL,
   DISPATCH_MODE_SLACK,
   EXECUTOR_ROUTE_BRIDGE,
   EXECUTOR_ROUTE_CLAUDE,
+  EXECUTOR_ROUTE_CODE_COPILOT,
   EXECUTOR_ROUTE_CLOUD_SLACK,
   EXECUTOR_ROUTE_DIRECT_OPENAI,
   dispatchModeToExecutorRoute,
@@ -198,6 +202,14 @@ function isClaudeProcessingCommand(command) {
   return command?.dispatchMode === DISPATCH_MODE_CLAUDE && normalizeCommandStatus(command?.status) === "processing";
 }
 
+function isCodeCopilotQueueCommand(command) {
+  return command?.dispatchMode === DISPATCH_MODE_CODE_COPILOT && normalizeCommandStatus(command?.status) === "queued";
+}
+
+function isCodeCopilotProcessingCommand(command) {
+  return command?.dispatchMode === DISPATCH_MODE_CODE_COPILOT && normalizeCommandStatus(command?.status) === "processing";
+}
+
 async function appendIndexedCommandId(env, key, id) {
   const normalizedId = String(id || "").trim();
 
@@ -221,6 +233,8 @@ async function rebuildCommandIndexes(env, commands) {
   const localProcessingIds = [];
   const claudeQueueIds = [];
   const claudeProcessingIds = [];
+  const codeCopilotQueueIds = [];
+  const codeCopilotProcessingIds = [];
   const clientIds = new Map();
 
   for (const command of normalized) {
@@ -257,6 +271,14 @@ async function rebuildCommandIndexes(env, commands) {
     if (isClaudeProcessingCommand(command)) {
       claudeProcessingIds.push(command.id);
     }
+
+    if (isCodeCopilotQueueCommand(command)) {
+      codeCopilotQueueIds.push(command.id);
+    }
+
+    if (isCodeCopilotProcessingCommand(command)) {
+      codeCopilotProcessingIds.push(command.id);
+    }
   }
 
   await Promise.all([
@@ -266,6 +288,8 @@ async function rebuildCommandIndexes(env, commands) {
     writeIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY, localProcessingIds),
     writeIdIndex(env, COMMAND_CLAUDE_QUEUE_STORAGE_KEY, claudeQueueIds),
     writeIdIndex(env, COMMAND_CLAUDE_PROCESSING_STORAGE_KEY, claudeProcessingIds),
+    writeIdIndex(env, COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY, codeCopilotQueueIds),
+    writeIdIndex(env, COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY, codeCopilotProcessingIds),
     ...[...clientIds.entries()].map(([clientId, ids]) => writeIdIndex(env, commandClientIndexKey(clientId), ids))
   ]);
 }
@@ -280,12 +304,22 @@ async function persistCommand(env, command) {
   await appendIndexedCommandId(env, COMMANDS_RECENT_STORAGE_KEY, normalized.id);
   await appendIndexedCommandId(env, commandClientIndexKey(normalized.clientId), normalized.id);
 
-  const [activeIds, queueIds, processingIds, claudeQueueIds, claudeProcessingIds] = await Promise.all([
+  const [
+    activeIds,
+    queueIds,
+    processingIds,
+    claudeQueueIds,
+    claudeProcessingIds,
+    codeCopilotQueueIds,
+    codeCopilotProcessingIds
+  ] = await Promise.all([
     readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY).catch(() => []),
     readIdIndex(env, COMMAND_LOCAL_QUEUE_STORAGE_KEY).catch(() => []),
     readIdIndex(env, COMMAND_LOCAL_PROCESSING_STORAGE_KEY).catch(() => []),
     readIdIndex(env, COMMAND_CLAUDE_QUEUE_STORAGE_KEY).catch(() => []),
-    readIdIndex(env, COMMAND_CLAUDE_PROCESSING_STORAGE_KEY).catch(() => [])
+    readIdIndex(env, COMMAND_CLAUDE_PROCESSING_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY).catch(() => []),
+    readIdIndex(env, COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY).catch(() => [])
   ]);
 
   await Promise.all([
@@ -323,6 +357,20 @@ async function persistCommand(env, command) {
       isClaudeProcessingCommand(normalized)
         ? [...claudeProcessingIds, normalized.id]
         : claudeProcessingIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY,
+      isCodeCopilotQueueCommand(normalized)
+        ? [...codeCopilotQueueIds, normalized.id]
+        : codeCopilotQueueIds.filter((id) => id !== normalized.id)
+    ),
+    writeIdIndex(
+      env,
+      COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY,
+      isCodeCopilotProcessingCommand(normalized)
+        ? [...codeCopilotProcessingIds, normalized.id]
+        : codeCopilotProcessingIds.filter((id) => id !== normalized.id)
     )
   ]);
 
@@ -1409,23 +1457,40 @@ export async function acknowledgeCommands(env, ids) {
 export async function claimNextCommand(env, input = {}) {
   const requestedDispatchMode = normalizeDispatchValue(input.dispatchMode || DISPATCH_MODE_LOCAL);
   const isClaudeProcessor = requestedDispatchMode === DISPATCH_MODE_CLAUDE;
+  const isCodeCopilotProcessor = requestedDispatchMode === DISPATCH_MODE_CODE_COPILOT;
   const textOnly = Boolean(input.textOnly);
-  const processorId = String(input.processorId || "").trim().slice(0, 120) || (isClaudeProcessor ? "claude-bridge" : "bridge");
+  const processorId = String(input.processorId || "").trim().slice(0, 120)
+    || (isClaudeProcessor ? "claude-bridge" : (isCodeCopilotProcessor ? "code-copilot-bridge" : "bridge"));
   const leaseMs = Math.max(5_000, Number(input.leaseMs) || COMMAND_PROCESSING_LEASE_MS);
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
   const leaseUntil = new Date(now + leaseMs).toISOString();
+  const queueStorageKey = isClaudeProcessor
+    ? COMMAND_CLAUDE_QUEUE_STORAGE_KEY
+    : (isCodeCopilotProcessor ? COMMAND_CODE_COPILOT_QUEUE_STORAGE_KEY : COMMAND_LOCAL_QUEUE_STORAGE_KEY);
+  const processingStorageKey = isClaudeProcessor
+    ? COMMAND_CLAUDE_PROCESSING_STORAGE_KEY
+    : (isCodeCopilotProcessor ? COMMAND_CODE_COPILOT_PROCESSING_STORAGE_KEY : COMMAND_LOCAL_PROCESSING_STORAGE_KEY);
+  const queuePredicate = isClaudeProcessor
+    ? isClaudeQueueCommand
+    : (isCodeCopilotProcessor ? isCodeCopilotQueueCommand : isLocalQueueCommand);
+  const processingPredicate = isClaudeProcessor
+    ? isClaudeProcessingCommand
+    : (isCodeCopilotProcessor ? isCodeCopilotProcessingCommand : isLocalProcessingCommand);
+  const claimedExecutor = isClaudeProcessor
+    ? EXECUTOR_ROUTE_CLAUDE
+    : (isCodeCopilotProcessor ? EXECUTOR_ROUTE_CODE_COPILOT : EXECUTOR_ROUTE_BRIDGE);
 
   const [queuedCommands, processingCommands] = await Promise.all([
     readNormalizedIndexedCommands(
       env,
-      isClaudeProcessor ? COMMAND_CLAUDE_QUEUE_STORAGE_KEY : COMMAND_LOCAL_QUEUE_STORAGE_KEY,
-      isClaudeProcessor ? isClaudeQueueCommand : isLocalQueueCommand
+      queueStorageKey,
+      queuePredicate
     ),
     readNormalizedIndexedCommands(
       env,
-      isClaudeProcessor ? COMMAND_CLAUDE_PROCESSING_STORAGE_KEY : COMMAND_LOCAL_PROCESSING_STORAGE_KEY,
-      isClaudeProcessor ? isClaudeProcessingCommand : isLocalProcessingCommand
+      processingStorageKey,
+      processingPredicate
     )
   ]);
   const getActiveThreadKeys = async (commands) => {
@@ -1473,9 +1538,7 @@ export async function claimNextCommand(env, input = {}) {
 
   if (!candidate) {
     const snapshotCommands = await readCommands(env);
-    activeThreadKeys = await getActiveThreadKeys(snapshotCommands.filter((command) =>
-      isClaudeProcessor ? isClaudeProcessingCommand(command) : isLocalProcessingCommand(command)
-    ));
+    activeThreadKeys = await getActiveThreadKeys(snapshotCommands.filter((command) => processingPredicate(command)));
     candidate = snapshotCommands.find((command) => isClaimableLocalQueued(command)) || null;
 
     if (!candidate) {
@@ -1492,8 +1555,8 @@ export async function claimNextCommand(env, input = {}) {
     progressStage: "accepted",
     progressUpdatedAt: nowIso,
     firstAckAt: candidate.firstAckAt || nowIso,
-    actualExecutor: isClaudeProcessor ? EXECUTOR_ROUTE_CLAUDE : EXECUTOR_ROUTE_BRIDGE,
-    actualDispatchMode: isClaudeProcessor ? EXECUTOR_ROUTE_CLAUDE : EXECUTOR_ROUTE_BRIDGE,
+    actualExecutor: claimedExecutor,
+    actualDispatchMode: claimedExecutor,
     dispatchStartedAt: candidate.dispatchStartedAt || nowIso,
     bridgeClaimedAt: candidate.bridgeClaimedAt || nowIso,
     firstExecutorAckSeenAt: candidate.firstExecutorAckSeenAt || nowIso,

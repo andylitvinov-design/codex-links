@@ -259,6 +259,24 @@ test("send target codex safely falls back when command dispatch is unavailable",
   }
 });
 
+test("send target github-issue returns issue prompt fallback", async () => {
+  const response = await sendEndpoint({
+    request: jsonRequest("https://codex-links.pages.dev/api/prompt-router/send", {
+      ...financePayload,
+      target: "github-issue",
+      prompt: strongPrompt
+    })
+  });
+  const body = await readJson(response);
+
+  assert.equal(body.ok, true);
+  assert.equal(body.mode, "prompt-only");
+  assert.equal(body.target, "github-issue");
+  assert.equal(body.status, "github_issue_adapter_not_configured");
+  assert.match(body.prompt, /Title: Prompt Router task - Finance balance issue/);
+  assert.match(body.prompt, /Repo: andylitvinov-design\/finance/);
+});
+
 test("send target codex success returns commandId and pollUrl", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
