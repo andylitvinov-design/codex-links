@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prompt Router</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-soft: #1f2937;
+      --text: #f8fafc;
+      --muted: #cbd5e1;
+      --border: #334155;
+      --accent: #60a5fa;
+      --ok: #34d399;
+      --warn: #fbbf24;
+      --bad: #f87171;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    main {
+      width: min(1120px, calc(100vw - 24px));
+      margin: 0 auto;
+      padding: 22px 0 36px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(1.6rem, 5vw, 2.4rem);
+    }
+
+    p {
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 16px 60px rgb(0 0 0 / 0.24);
+    }
+
+    label {
+      display: block;
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel-soft);
+      color: var(--text);
+      padding: 10px 12px;
+      font: inherit;
+    }
+
+    textarea {
+      min-height: 190px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92rem;
+    }
+
+    .field {
+      margin-bottom: 12px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 14px 0 0;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #07111f;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #334155;
+      color: var(--text);
+    }
+
+    button.warn {
+      background: var(--warn);
+    }
+
+    .result {
+      white-space: pre-wrap;
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      color: var(--muted);
+      min-height: 120px;
+      overflow: auto;
+    }
+
+    .status {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #020617;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .status.ok { border-color: var(--ok); }
+    .status.warn { border-color: var(--warn); }
+    .status.bad { border-color: var(--bad); }
+
+    @media (max-width: 820px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .actions button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Prompt Router</h1>
+      <p>Verify, rewrite, and route Ezohata Debugger prompts to Codex, Claude Code, or copy fallback.</p>
+    </header>
+
+    <section class="panel" aria-label="Task settings">
+      <div class="grid">
+        <div class="field">
+          <label for="project">Project</label>
+          <select id="project">
+            <option value="finance">Ezohata Ledger / finance</option>
+            <option value="links">Codex Links</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="category">Category</label>
+          <select id="category">
+            <option>Finance balance issue</option>
+            <option>Bug fix</option>
+            <option>Regression check</option>
+            <option>Live deploy mismatch</option>
+            <option>Provider/API issue</option>
+            <option>UI rendering issue</option>
+            <option>Prompt verification only</option>
+            <option>Claude deep diagnosis</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="field">
+          <label for="repo">Repo</label>
+          <input id="repo" value="andylitvinov-design/finance" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="liveUrl">Live URL</label>
+          <input id="liveUrl" value="https://ezohata-incoming-ledger.vercel.app" autocomplete="off">
+        </div>
+      </div>
+      <div class="field">
+        <label for="problem">Problem</label>
+        <textarea id="problem" placeholder="Paste the user report or short bug description here."></textarea>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top: 14px;">
+      <div class="panel">
+        <h2>Original Prompt</h2>
+        <textarea id="prompt" placeholder="Paste Ezohata Debugger / Codex prompt here."></textarea>
+        <div class="actions">
+          <button id="verifyPrompt">Verify Prompt</button>
+          <button id="rewritePrompt" class="secondary">Rewrite Prompt</button>
+          <button id="copyPrompt" class="secondary">Copy Prompt</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Verification Result</h2>
+        <div id="verificationResult" class="result">No verification yet.</div>
+        <div class="actions">
+          <button id="verifyAgain" class="secondary">Verify Again</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 14px;">
+      <h2>Rewritten Prompt</h2>
+      <textarea id="rewrittenPrompt" placeholder="Verified/rewrite prompt will appear here."></textarea>
+      <div class="actions">
+        <button id="sendCodex">Send to Codex</button>
+        <button id="sendClaude" class="warn">Send to Claude Code</button>
+        <button id="sendCopilot" class="secondary">Send to Code Copilot Review</button>
+        <button id="createIssue" class="secondary">Create GitHub Issue</button>
+        <button id="copyRewritten" class="secondary">Copy Rewritten</button>
+      </div>
+      <div id="status" class="status">Ready.</div>
+    </section>
+  </main>
+
+  <script src="./prompt-router.js" type="module"></script>
+</body>
+</html>
