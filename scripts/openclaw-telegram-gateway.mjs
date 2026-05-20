@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 import process from "node:process";
 
-const TOKEN_PATTERN = /\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g;
 const DEFAULT_HEARTBEAT_MS = 60_000;
 
 function redact(value = "") {
   return String(value)
-    .replace(TOKEN_PATTERN, "[REDACTED_TELEGRAM_BOT_TOKEN]")
     .replace(/(TELEGRAM_BOT_TOKEN=)[^\s]+/g, "$1[REDACTED]");
 }
 
@@ -62,29 +60,33 @@ async function verifyTelegramToken(token) {
 async function main() {
   const token = process.env.TELEGRAM_BOT_TOKEN || "";
   const verification = await verifyTelegramToken(token);
-  if (!verification.ok) {
+  if (!verification.ok && verification.status === "missing_token") {
     log("startup_failed", verification);
     process.exitCode = 2;
     return;
   }
 
-  log("startup_ok", verification);
+  if (!verification.ok) {
+    log("startup_degraded", verification);
+  } else {
+    log("startup_ok", verification);
+  }
+
   const heartbeatMs = Number(process.env.OPENCLAW_TELEGRAM_HEARTBEAT_MS || DEFAULT_HEARTBEAT_MS);
   const interval = setInterval(() => {
     log("heartbeat", { status: "running" });
   }, Number.isFinite(heartbeatMs) && heartbeatMs >= 10_000 ? heartbeatMs : DEFAULT_HEARTBEAT_MS);
-  interval.unref?.();
 
   process.on("SIGTERM", () => {
+    clearInterval(interval);
     log("shutdown", { signal: "SIGTERM" });
     process.exit(0);
   });
   process.on("SIGINT", () => {
+    clearInterval(interval);
     log("shutdown", { signal: "SIGINT" });
     process.exit(0);
   });
-
-  await new Promise(() => {});
 }
 
 export { redact, verifyTelegramToken };
