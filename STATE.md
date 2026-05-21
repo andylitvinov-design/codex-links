@@ -1,8 +1,19 @@
 # STATE
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: finish the OpenClaw/ChatGPT deploy-status feedback loop without making OpenClaw a production executor
-- next step: merge PR #155 after checks pass, then verify whether Cloudflare Pages auto-deployed any merged main changes before claiming live production state
+- current task: finish Local Secret Vault for issue #160 without exposing secrets or making OpenClaw a production executor
+- next step: paste the real Telegram token through `npm run setup:openclaw:telegram-token`, then verify `running=true`, `pid>0`, Telegram `/status`, and `/codex` from an allowed chat
+
+## 2026-05-21 Local Secret Vault
+
+- repo used: `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`, branch `codex/local-secret-vault-160`, synced to `origin/main` commit `993d9cd7ff25dc41b3d13068b928ed7131251a00`
+- root cause proof before patching: the starting dirty branch was `codex/openclaw-telegram-gateway-160` at `15ee579a8e40283b06cc9dd68add99a33e90cd69` and lacked `scripts/local-secret-vault.mjs`, `tests/local-secret-vault.test.mjs`, `secrets:local`, and `setup:openclaw:telegram-token`; after fast-forwarding `main`, the starter vault files appeared
+- safety preservation: the dirty starting state was saved in stash `safety: openclaw telegram gateway 160 dirty state before local secret vault` and branch `codex/safety-openclaw-telegram-160-20260521`
+- vault status: local server binds to `127.0.0.1` only, opens `/secrets`, supports Telegram Bot Token, Codex Links Write Token, Monobank Token, and Custom Secret, and returns metadata-only/redacted JSON
+- storage status: mocked tests prove Keychain write through `security add-generic-password -U`; no secret is returned in JSON, written to plist, or printed by tests
+- Telegram apply status: mocked tests prove launchd seeding plus existing OpenClaw repair/status flow; local live repair still reports `token_source=missing`, `plistHasToken=false`, `running=false`, `pid=0`
+- Monobank status: store-only; no import/sync command is run by the vault
+- blocked before closing #160: real Telegram token is still absent from shell, launchd, and Keychain; allowed chat ID and Codex Links write token were also not present in shell or launchd during this run
 
 ## 2026-05-12 OpenClaw Readiness
 
