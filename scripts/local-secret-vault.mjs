@@ -42,9 +42,18 @@ const SECRET_REGISTRY = Object.freeze({
 
 function redact(value = "") {
   return String(value)
+    .replace(/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TELEGRAM_BOT_TOKEN]")
     .replace(/(TOKEN=)[^\s]+/gi, "$1[REDACTED]")
     .replace(/(token\s+)[^\s]+/gi, "$1[REDACTED]")
     .replace(/(-w\s+)[^\s]+/g, "$1[REDACTED]");
+}
+
+function htmlEscape(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function safeJson(data, status = 200) {
@@ -58,9 +67,10 @@ function safeJson(data, status = 200) {
   };
 }
 
-function htmlPage() {
-  const options = Object.values(SECRET_REGISTRY)
-    .map((entry) => `<option value="${entry.id}">${entry.label}</option>`)
+function htmlPage(options = {}) {
+  const selectedSecretType = SECRET_REGISTRY[options.selectedSecretType] ? options.selectedSecretType : "telegram_bot_token";
+  const optionTags = Object.values(SECRET_REGISTRY)
+    .map((entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === selectedSecretType ? " selected" : ""}>${htmlEscape(entry.label)}</option>`)
     .join("\n");
   return `<!doctype html>
 <html lang="en">
@@ -82,7 +92,7 @@ function htmlPage() {
   <p class="note">Local-only page. Secrets are saved to macOS Keychain. Values are not sent to GitHub, ChatGPT, Cloudflare, or Vercel.</p>
   <form id="form">
     <label>Secret type</label>
-    <select id="secretType">${options}</select>
+    <select id="secretType">${optionTags}</select>
     <div id="customFields" hidden>
       <label>Custom Keychain service</label>
       <input id="customService" autocomplete="off" />
@@ -166,8 +176,9 @@ function resolveSecretConfig(payload = {}) {
   return { ok: true, value: entry };
 }
 
-async function saveToKeychain(config, secret) {
-  const result = await runCommand("security", [
+async function saveToKeychain(config, secret, options = {}) {
+  const run = options.runCommand || runCommand;
+  const result = await run("security", [
     "add-generic-password",
     "-U",
     "-s", config.service,
@@ -180,23 +191,52 @@ async function saveToKeychain(config, secret) {
   };
 }
 
-async function applySecret(config, secret) {
+function parseJsonFromOutput(output = "") {
+  const text = String(output || "");
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+function summarizeTelegramApply({ seeded, repair, status }) {
+  const repairData = parseJsonFromOutput(repair.stdout || repair.stderr || "");
+  const statusData = parseJsonFromOutput(status.stdout || status.stderr || "");
+  const finalStatus = statusData?.after || statusData?.status || statusData || {};
+  return {
+    applied: Boolean(seeded.ok && repair.ok),
+    launchdSeeded: Boolean(seeded.ok),
+    repairOk: Boolean(repair.ok),
+    statusOk: Boolean(status.ok),
+    keychainUsed: Boolean(repairData?.keychain_used || repairData?.keychainUsed),
+    plistHasToken: Boolean(finalStatus?.plistHasToken),
+    running: Boolean(finalStatus?.running),
+    pid: Number(finalStatus?.pid || 0),
+    tokenPresent: Boolean(finalStatus?.tokenPresent),
+    status: finalStatus?.running && Number(finalStatus?.pid || 0) > 0 ? "running" : "needs_action",
+    statusExcerpt: statusData ? "" : redact((status.stdout || status.stderr || "").slice(0, 600))
+  };
+}
+
+async function applySecret(config, secret, options = {}) {
+  const run = options.runCommand || runCommand;
   if (config.apply === "openclaw-telegram") {
-    const seeded = await runCommand("launchctl", ["setenv", config.account, secret]);
-    const repair = await runCommand("npm", ["run", "repair:openclaw:telegram-gateway"], { timeoutMs: 30000 });
-    const status = await runCommand("npm", ["run", "status:openclaw:telegram-gateway"], { timeoutMs: 15000 });
+    const seeded = await run("launchctl", ["setenv", config.account, secret]);
+    const repair = await run("npm", ["run", "repair:openclaw:telegram-gateway"], { timeoutMs: 30000 });
+    const status = await run("npm", ["run", "status:openclaw:telegram-gateway"], { timeoutMs: 15000 });
+    const summary = summarizeTelegramApply({ seeded, repair, status });
     return {
-      applied: seeded.ok && repair.ok,
       keychainService: config.service,
       keychainAccount: config.account,
-      launchdSeeded: seeded.ok,
-      repairOk: repair.ok,
-      statusOk: status.ok,
-      statusExcerpt: redact((status.stdout || status.stderr || "").slice(0, 1200))
+      ...summary
     };
   }
   if (config.apply === "launchd-env") {
-    const seeded = await runCommand("launchctl", ["setenv", config.account, secret]);
+    const seeded = await run("launchctl", ["setenv", config.account, secret]);
     return {
       applied: seeded.ok,
       keychainService: config.service,
@@ -213,15 +253,15 @@ async function applySecret(config, secret) {
   };
 }
 
-async function handleSave(payload = {}) {
+async function handleSave(payload = {}, options = {}) {
   const secret = String(payload.secret || "");
   if (!secret.trim()) return safeJson({ ok: false, error: "Secret value is required." }, 400);
   const resolved = resolveSecretConfig(payload);
   if (!resolved.ok) return safeJson({ ok: false, error: resolved.error }, 400);
   const config = resolved.value;
-  const saved = await saveToKeychain(config, secret);
+  const saved = await saveToKeychain(config, secret, options);
   if (!saved.ok) return safeJson({ ok: false, saved: false, error: saved.error }, 500);
-  const applied = await applySecret(config, secret);
+  const applied = await applySecret(config, secret, options);
   return safeJson({
     ok: true,
     saved: true,
@@ -243,13 +283,13 @@ function send(response, result) {
   response.end(result.body || "");
 }
 
-function createVaultServer() {
+function createVaultServer(options = {}) {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url || "/", "http://127.0.0.1");
       if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/secrets")) {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-        response.end(htmlPage());
+        response.end(htmlPage({ selectedSecretType: options.selectedSecretType }));
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/secrets/catalog") {
@@ -257,7 +297,7 @@ function createVaultServer() {
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/secrets/save") {
-        send(response, await handleSave(await readRequestJson(request)));
+        send(response, await handleSave(await readRequestJson(request), options));
         return;
       }
       send(response, safeJson({ ok: false, error: "Not found." }, 404));
@@ -277,7 +317,7 @@ async function openBrowser(url) {
 async function startServer(options = {}) {
   const host = options.host || DEFAULT_HOST;
   if (host !== DEFAULT_HOST) throw new Error("Secret Vault must bind only to 127.0.0.1.");
-  const server = createVaultServer();
+  const server = createVaultServer({ selectedSecretType: options.selectedSecretType });
   server.listen(options.port || DEFAULT_PORT, host);
   await once(server, "listening");
   const address = server.address();
@@ -287,15 +327,37 @@ async function startServer(options = {}) {
   return { server, url };
 }
 
+function parseCliArgs(argv = process.argv.slice(2)) {
+  const result = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (value === "--secret") {
+      result.selectedSecretType = argv[index + 1] || "";
+      index += 1;
+    }
+  }
+  return result;
+}
+
 export {
   SECRET_REGISTRY,
+  applySecret,
+  htmlPage,
+  parseCliArgs,
+  parseJsonFromOutput,
   redact,
   resolveSecretConfig,
+  saveToKeychain,
+  summarizeTelegramApply,
   handleSave,
   createVaultServer,
   startServer
 };
 
 if (import.meta.url === new URL(process.argv[1], "file:").href) {
-  await startServer({ port: Number(process.env.SECRET_VAULT_PORT || DEFAULT_PORT) || DEFAULT_PORT });
+  const args = parseCliArgs();
+  await startServer({
+    port: Number(process.env.SECRET_VAULT_PORT || DEFAULT_PORT) || DEFAULT_PORT,
+    selectedSecretType: args.selectedSecretType
+  });
 }

@@ -5,9 +5,46 @@ import {
   SECRET_REGISTRY,
   createVaultServer,
   handleSave,
+  htmlPage,
   redact,
   resolveSecretConfig
 } from "../scripts/local-secret-vault.mjs";
+
+const TEST_SECRET = "123456:TEST_SECRET_VALUE_SHOULD_NOT_LEAK";
+
+function makeRunner(responses = {}) {
+  const calls = [];
+  const runCommand = async (command, args, options = {}) => {
+    calls.push({ command, args, options });
+    const key = `${command} ${args.join(" ")}`;
+    if (responses[key]) return responses[key];
+    if (command === "security") return { ok: true, code: 0, stdout: "", stderr: "" };
+    if (command === "launchctl") return { ok: true, code: 0, stdout: "", stderr: "" };
+    if (command === "npm" && args.includes("repair:openclaw:telegram-gateway")) {
+      return {
+        ok: true,
+        code: 0,
+        stdout: JSON.stringify({ ok: true, keychain_used: true }),
+        stderr: ""
+      };
+    }
+    if (command === "npm" && args.includes("status:openclaw:telegram-gateway")) {
+      return {
+        ok: true,
+        code: 0,
+        stdout: JSON.stringify({
+          running: true,
+          pid: 4321,
+          tokenPresent: true,
+          plistHasToken: false
+        }),
+        stderr: ""
+      };
+    }
+    return { ok: true, code: 0, stdout: "", stderr: "" };
+  };
+  return { calls, runCommand };
+}
 
 test("registry includes scoped Telegram, Codex Links, Monobank, and custom secrets", () => {
   assert.equal(SECRET_REGISTRY.telegram_bot_token.service, "openclaw-telegram-gateway");
@@ -53,4 +90,63 @@ test("catalog endpoint exposes metadata only", async () => {
   assert.equal(data.ok, true);
   assert.ok(data.secrets.find((entry) => entry.id === "telegram_bot_token"));
   assert.doesNotMatch(JSON.stringify(data), /secret-value/);
+});
+
+test("telegram secret can be preselected in the UI", () => {
+  const html = htmlPage({ selectedSecretType: "telegram_bot_token" });
+  assert.match(html, /<option value="telegram_bot_token" selected>Telegram Bot Token<\/option>/);
+});
+
+test("saving a secret writes only to Keychain and redacts the response", async () => {
+  const { calls, runCommand } = makeRunner();
+  const response = await handleSave({
+    secretType: "custom_secret",
+    customService: "local-test-service",
+    customAccount: "LOCAL_TEST_TOKEN",
+    secret: TEST_SECRET
+  }, { runCommand });
+  const data = JSON.parse(response.body);
+
+  assert.equal(response.status, 200);
+  assert.equal(data.saved, true);
+  assert.equal(data.mode, "store-only");
+  assert.deepEqual(calls.map((call) => call.command), ["security"]);
+  assert.deepEqual(calls[0].args.slice(0, 7), ["add-generic-password", "-U", "-s", "local-test-service", "-a", "LOCAL_TEST_TOKEN", "-w"]);
+  assert.equal(calls[0].args[7], TEST_SECRET);
+  assert.doesNotMatch(response.body, new RegExp(TEST_SECRET.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("telegram apply seeds launchd, runs repair/status, and returns redacted parsed status", async () => {
+  const { calls, runCommand } = makeRunner();
+  const response = await handleSave({
+    secretType: "telegram_bot_token",
+    secret: TEST_SECRET
+  }, { runCommand });
+  const data = JSON.parse(response.body);
+
+  assert.deepEqual(calls.map((call) => call.command), ["security", "launchctl", "npm", "npm"]);
+  assert.deepEqual(calls[1].args.slice(0, 2), ["setenv", "TELEGRAM_BOT_TOKEN"]);
+  assert.equal(calls[1].args[2], TEST_SECRET);
+  assert.equal(data.keychainUsed, true);
+  assert.equal(data.plistHasToken, false);
+  assert.equal(data.running, true);
+  assert.equal(data.pid, 4321);
+  assert.equal(data.tokenPresent, true);
+  assert.equal(data.status, "running");
+  assert.doesNotMatch(response.body, new RegExp(TEST_SECRET.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("Monobank token is store-only and does not run imports or OpenClaw repair", async () => {
+  const { calls, runCommand } = makeRunner();
+  const response = await handleSave({
+    secretType: "monobank_token",
+    secret: TEST_SECRET
+  }, { runCommand });
+  const data = JSON.parse(response.body);
+
+  assert.equal(data.mode, "store-only");
+  assert.deepEqual(calls.map((call) => call.command), ["security"]);
+  assert.equal(calls[0].args[3], "ezohata-finance");
+  assert.equal(calls[0].args[5], "MONOBANK_TOKEN");
+  assert.doesNotMatch(JSON.stringify(calls.map((call) => call.args.join(" "))), /import|sync|openclaw|repair/i);
 });

@@ -16,6 +16,7 @@
     "check:openclaw": "bash scripts/check-openclaw.sh",
     "probe:openclaw": "bash scripts/probe-openclaw-run.sh",
     "doctor:openclaw:telegram": "node scripts/openclaw-telegram-launchd.mjs doctor",
+    "install:openclaw:telegram-gateway": "node scripts/openclaw-telegram-launchd.mjs install",
     "status:openclaw:telegram-gateway": "node scripts/openclaw-telegram-launchd.mjs status",
     "start:openclaw:telegram-gateway": "node scripts/openclaw-telegram-launchd.mjs start",
     "repair:openclaw:telegram-gateway": "node scripts/openclaw-telegram-launchd.mjs repair",
