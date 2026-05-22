@@ -1,8 +1,18 @@
 # STATE
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: finish Local Secret Vault for issue #160 without exposing secrets or making OpenClaw a production executor
-- next step: paste the real Telegram token through `npm run setup:openclaw:telegram-token`, then verify `running=true`, `pid>0`, Telegram `/status`, and `/codex` from an allowed chat
+- current task: finalize issue #160 with live OpenClaw Telegram gateway proof and basic bot menu/help
+- next step: merge PR #164 after final checks and close issue #160 only if the PR/merge and live proofs are complete
+
+## 2026-05-22 OpenClaw Telegram Finalization
+
+- repo used: `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`, branch `codex/local-secret-vault-160`, PR #164
+- command visibility proof: `GET https://codex-links.pages.dev/api/commands?id=d9f46619-beab-4594-96bc-c33d6e5d7e02` returns `clientId=telegram:6108895831`; current status is `failed` because the local bridge guardrail skipped it for `min-interval-between-starts`, so Telegram gateway creation is proven and the failure is downstream bridge execution
+- poller proof: an older LaunchAgent from `/Users/andriilitvinov/projects/MYPROJECTS/links` produced Telegram `409 Conflict`; it was booted out, leaving only `/Users/andriilitvinov/projects/MYPROJECTS/codex-links/scripts/openclaw-telegram-gateway.mjs` active
+- live gateway status: `running=true`, `plistHasToken=false`, `tokenPresent=true`; token and write token are supplied via Keychain/launchd env, not plist or repo files
+- bot menu status: `/start`, `/help`, `/status`, and `/codex` were verified through the real Telegram bot API; `/codex` created command `6790b188-0adb-42d2-b760-7ac9905ec2d6` with `clientId=telegram:6108895831`
+- menu implementation: gateway handles `/start`, `/help`, `/status`, `/vault`, `/projects`, `/version`, and `/codex <task>`; Telegram `setMyCommands` returned HTTP 200; no token values are sent in bot replies
+- safety status: Monobank remains store-only, no `.env` was committed, no token was put into plist, and `/api/commands` architecture was not rewritten
 
 ## 2026-05-21 Local Secret Vault
 

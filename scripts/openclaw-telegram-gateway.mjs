@@ -8,8 +8,18 @@ const DEFAULT_BASE_URL = "https://codex-links.pages.dev";
 const DEFAULT_HEARTBEAT_MS = 60_000;
 const DEFAULT_POLL_TIMEOUT_SECONDS = 25;
 const DEFAULT_POLL_INTERVAL_MS = 1000;
+const GATEWAY_VERSION = "2026-05-22-menu-v1";
 const STATE_DIR = join(homedir(), "Library", "Application Support", "openclaw-telegram-gateway");
 const STATE_PATH = join(STATE_DIR, "state.json");
+const TELEGRAM_BOT_COMMANDS = [
+  { command: "start", description: "Show welcome and available commands" },
+  { command: "help", description: "Show command list and examples" },
+  { command: "status", description: "Show gateway status" },
+  { command: "codex", description: "Create a Codex Links command" },
+  { command: "vault", description: "Show local Secret Vault URL" },
+  { command: "projects", description: "Show supported projects" },
+  { command: "version", description: "Show gateway version" }
+];
 
 function redact(value = "") {
   return String(value)
@@ -52,8 +62,13 @@ function normalizeCommandText(text = "") {
   return String(match[1] || "").trim();
 }
 
-function isStatusCommand(text = "") {
-  return /^\/status(?:@\w+)?(?:\s+|$)/i.test(String(text || "").trim());
+function getTelegramCommand(text = "") {
+  const match = String(text || "").trim().match(/^\/([a-z0-9_]+)(?:@\w+)?(?:\s+|$)/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function isCommand(text = "", command = "") {
+  return getTelegramCommand(text) === String(command || "").toLowerCase();
 }
 
 function getWriteToken(env = process.env) {
@@ -147,6 +162,89 @@ async function sendTelegramMessage({ token, chatId, text, fetchImpl = fetch }) {
   };
 }
 
+async function setTelegramBotCommands({ token, fetchImpl = fetch }) {
+  if (!token) return { ok: false, status: "skipped", reason: "missing_token" };
+  if (process.env.OPENCLAW_TELEGRAM_SKIP_SET_COMMANDS === "1") {
+    return { ok: true, status: "skipped" };
+  }
+  const { response, data, text } = await requestJson(`${getTelegramApiBase(token)}/setMyCommands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ commands: TELEGRAM_BOT_COMMANDS })
+  }, fetchImpl);
+  return {
+    ok: response.ok && data?.ok !== false,
+    status: response.ok ? "configured" : "telegram_api_error",
+    httpStatus: response.status,
+    description: redact(data?.description || text.slice(0, 160) || "")
+  };
+}
+
+function buildWelcomeText() {
+  return [
+    "Codex Links Telegram gateway is running.",
+    "",
+    "Commands:",
+    "/help - command list and examples",
+    "/status - gateway status",
+    "/codex <task> - create a Codex Links command",
+    "/vault - local Secret Vault link",
+    "/projects - supported projects",
+    "/version - gateway version"
+  ].join("\n");
+}
+
+function buildHelpText() {
+  return [
+    "Codex Links commands:",
+    "/start - welcome",
+    "/help - this help",
+    "/status - gateway status",
+    "/codex <task> - create a Codex Links command",
+    "/vault - local Secret Vault info",
+    "/projects - supported/default project",
+    "/version - gateway metadata",
+    "",
+    "Examples:",
+    "/codex check issue #160",
+    "/codex summarize latest delivery status"
+  ].join("\n");
+}
+
+function buildStatusText({ env = process.env } = {}) {
+  return [
+    "running",
+    `baseUrl=${getBaseUrl(env)}`,
+    `writeTokenConfigured=${Boolean(getWriteToken(env))}`,
+    `allowedChatCount=${parseAllowedChatIds(env.OPENCLAW_TELEGRAM_ALLOWED_CHAT_IDS).size}`
+  ].join("\n");
+}
+
+function buildVaultText() {
+  return [
+    "Local Secret Vault:",
+    "http://127.0.0.1:8789/secrets",
+    "Stores configured secrets locally and returns redacted metadata only."
+  ].join("\n");
+}
+
+function buildProjectsText() {
+  return [
+    "Default project: links",
+    "Repo: andylitvinov-design/codex-links",
+    "Target: Cloudflare Pages codex-links"
+  ].join("\n");
+}
+
+function buildVersionText({ env = process.env } = {}) {
+  return [
+    `gatewayVersion=${GATEWAY_VERSION}`,
+    "status=running",
+    `baseUrl=${getBaseUrl(env)}`,
+    `writeTokenConfigured=${Boolean(getWriteToken(env))}`
+  ].join("\n");
+}
+
 function buildCommandPayload({ taskText, chatId, messageId, username, dispatchMode }) {
   const payload = {
     text: taskText,
@@ -219,14 +317,39 @@ async function handleTelegramUpdate(update, options = {}) {
     return { ok: true, status: "ignored", reason: "no_message" };
   }
 
+  if (isCommand(text, "start")) {
+    await sendTelegramMessage({ token, chatId, text: buildWelcomeText(), fetchImpl });
+    return { ok: true, status: "start_replied" };
+  }
+
+  if (isCommand(text, "help")) {
+    await sendTelegramMessage({ token, chatId, text: buildHelpText(), fetchImpl });
+    return { ok: true, status: "help_replied" };
+  }
+
   if (!isAllowedChat(chatId, allowedChatIds)) {
     log("update_skipped", { reason: "unauthorized_chat", chatId: String(chatId), messageId });
     return { ok: true, status: "skipped", reason: "unauthorized_chat" };
   }
 
-  if (isStatusCommand(text)) {
-    await sendTelegramMessage({ token, chatId, text: "running", fetchImpl });
+  if (isCommand(text, "status")) {
+    await sendTelegramMessage({ token, chatId, text: buildStatusText({ env }), fetchImpl });
     return { ok: true, status: "status_replied" };
+  }
+
+  if (isCommand(text, "vault")) {
+    await sendTelegramMessage({ token, chatId, text: buildVaultText(), fetchImpl });
+    return { ok: true, status: "vault_replied" };
+  }
+
+  if (isCommand(text, "projects")) {
+    await sendTelegramMessage({ token, chatId, text: buildProjectsText(), fetchImpl });
+    return { ok: true, status: "projects_replied" };
+  }
+
+  if (isCommand(text, "version")) {
+    await sendTelegramMessage({ token, chatId, text: buildVersionText({ env }), fetchImpl });
+    return { ok: true, status: "version_replied" };
   }
 
   const taskText = normalizeCommandText(text);
@@ -308,6 +431,14 @@ async function main() {
     log("startup_ok", verification);
   }
 
+  const commandSetup = await setTelegramBotCommands({ token });
+  log("bot_commands", {
+    status: commandSetup.status,
+    ok: commandSetup.ok,
+    httpStatus: commandSetup.httpStatus || 0,
+    description: commandSetup.description || commandSetup.reason || ""
+  });
+
   const allowedChatIds = parseAllowedChatIds(process.env.OPENCLAW_TELEGRAM_ALLOWED_CHAT_IDS);
   log("config", {
     allowedChatCount: allowedChatIds.size,
@@ -334,19 +465,29 @@ async function main() {
 }
 
 export {
+  GATEWAY_VERSION,
   STATE_PATH,
+  TELEGRAM_BOT_COMMANDS,
+  buildHelpText,
   buildCommandPayload,
+  buildProjectsText,
+  buildStatusText,
+  buildVaultText,
+  buildVersionText,
+  buildWelcomeText,
   createCodexCommand,
   getBaseUrl,
+  getTelegramCommand,
   getWriteToken,
   handleTelegramUpdate,
   isAllowedChat,
-  isStatusCommand,
+  isCommand,
   normalizeCommandText,
   parseAllowedChatIds,
   pollTelegramOnce,
   redact,
   sendTelegramMessage,
+  setTelegramBotCommands,
   verifyTelegramToken
 };
 

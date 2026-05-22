@@ -1,5 +1,14 @@
 # LOG
 
+## 2026-05-22
+
+- Proved the failing layer before patching: live command `d9f46619-beab-4594-96bc-c33d6e5d7e02` is visible from `GET /api/commands`, has `clientId=telegram:6108895831`, and failed after creation because the local bridge guardrail skipped it for `min-interval-between-starts`.
+- Proved the Telegram poller conflict layer: logs showed Telegram `409 Conflict` from duplicate `getUpdates`; `pgrep` found the canonical `/MYPROJECTS/codex-links` gateway plus an older `/MYPROJECTS/links` gateway. Booted out the older LaunchAgent and confirmed only the canonical gateway remained active.
+- Restarted the canonical gateway from `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`; status is running with `plistHasToken=false`, `tokenPresent=true`, and bot command registration returned HTTP 200 without storing token values in plist or repo files.
+- Added basic Telegram menu/help handling in `scripts/openclaw-telegram-gateway.mjs`: `/start`, `/help`, `/status`, `/vault`, `/projects`, `/version`, and `/codex <task>`. Sensitive commands stay allowlisted; `/start` and `/help` remain safe public onboarding replies.
+- Live Telegram proof through the real bot API: `/start` returned welcome, `/help` returned command list, `/status` returned gateway status, and `/codex` created command `6790b188-0adb-42d2-b760-7ac9905ec2d6` with `clientId=telegram:6108895831`.
+- Verification: `node --check scripts/openclaw-telegram-gateway.mjs`, `node --test tests/openclaw-telegram-gateway.test.mjs`, `node --check scripts/local-secret-vault.mjs`, `node --test tests/local-secret-vault.test.mjs`, and `git diff --check` passed.
+
 ## 2026-05-21
 
 - Worked in `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`, remote `andylitvinov-design/codex-links`; saved the dirty starting branch state before syncing `main`.

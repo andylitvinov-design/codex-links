@@ -4,10 +4,16 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
+  buildHelpText,
   buildCommandPayload,
+  buildProjectsText,
+  buildVaultText,
+  buildVersionText,
+  buildWelcomeText,
   createCodexCommand,
   handleTelegramUpdate,
-  normalizeCommandText
+  normalizeCommandText,
+  setTelegramBotCommands
 } from "../scripts/openclaw-telegram-gateway.mjs";
 
 function makeUpdate({ chatId = "123", text = "/codex fix bug", username = "andy", messageId = 42 } = {}) {
@@ -38,6 +44,43 @@ test("plain text is rejected when prefix is required", () => {
   assert.equal(normalizeCommandText("fix bug"), "");
 });
 
+test("/start returns welcome without secret material", async () => {
+  const calls = [];
+  const result = await handleTelegramUpdate(makeUpdate({ chatId: "999", text: "/start" }), {
+    token: "test-token",
+    allowedChatIds: new Set(["123"]),
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ ok: true, result: {} });
+    }
+  });
+
+  assert.equal(result.status, "start_replied");
+  assert.equal(calls.length, 1);
+  const body = JSON.parse(calls[0].options.body);
+  assert.match(body.text, /Codex Links Telegram gateway is running/);
+  assert.match(body.text, /\/codex <task>/);
+  assert.doesNotMatch(body.text, /test-token|write-secret|[0-9]{6,}:/);
+});
+
+test("/help returns command list and examples without secret material", async () => {
+  const calls = [];
+  const result = await handleTelegramUpdate(makeUpdate({ text: "/help" }), {
+    token: "test-token",
+    allowedChatIds: new Set(["123"]),
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ ok: true, result: {} });
+    }
+  });
+
+  assert.equal(result.status, "help_replied");
+  const body = JSON.parse(calls[0].options.body);
+  assert.match(body.text, /Codex Links commands/);
+  assert.match(body.text, /\/vault/);
+  assert.doesNotMatch(body.text, /test-token|write-secret|[0-9]{6,}:/);
+});
+
 test("unauthorized chat ID is skipped and does not create command", async () => {
   const calls = [];
   const result = await handleTelegramUpdate(makeUpdate({ chatId: "999" }), {
@@ -56,6 +99,69 @@ test("unauthorized chat ID is skipped and does not create command", async () => 
   assert.equal(result.status, "skipped");
   assert.equal(result.reason, "unauthorized_chat");
   assert.equal(calls.length, 0);
+});
+
+test("/vault returns local Secret Vault info without secrets", async () => {
+  const calls = [];
+  const result = await handleTelegramUpdate(makeUpdate({ text: "/vault" }), {
+    token: "test-token",
+    allowedChatIds: new Set(["123"]),
+    env: {
+      LINKS_WRITE_TOKEN: "write-secret",
+      OPENCLAW_TELEGRAM_ALLOWED_CHAT_IDS: "123"
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ ok: true, result: {} });
+    }
+  });
+
+  assert.equal(result.status, "vault_replied");
+  const body = JSON.parse(calls[0].options.body);
+  assert.match(body.text, /http:\/\/127\.0\.0\.1:8789\/secrets/);
+  assert.match(body.text, /redacted metadata/);
+  assert.doesNotMatch(body.text, /write-secret|test-token|[0-9]{6,}:/);
+});
+
+test("/projects returns default project info", async () => {
+  const calls = [];
+  const result = await handleTelegramUpdate(makeUpdate({ text: "/projects" }), {
+    token: "test-token",
+    allowedChatIds: new Set(["123"]),
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ ok: true, result: {} });
+    }
+  });
+
+  assert.equal(result.status, "projects_replied");
+  const body = JSON.parse(calls[0].options.body);
+  assert.match(body.text, /Default project: links/);
+  assert.match(body.text, /andylitvinov-design\/codex-links/);
+});
+
+test("/version returns metadata without secrets", async () => {
+  const calls = [];
+  const result = await handleTelegramUpdate(makeUpdate({ text: "/version" }), {
+    token: "test-token",
+    allowedChatIds: new Set(["123"]),
+    env: {
+      LINKS_WRITE_TOKEN: "write-secret",
+      CODEX_LINKS_BASE_URL: "https://codex-links.example",
+      OPENCLAW_TELEGRAM_ALLOWED_CHAT_IDS: "123"
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ ok: true, result: {} });
+    }
+  });
+
+  assert.equal(result.status, "version_replied");
+  const body = JSON.parse(calls[0].options.body);
+  assert.match(body.text, /gatewayVersion=/);
+  assert.match(body.text, /status=running/);
+  assert.match(body.text, /writeTokenConfigured=true/);
+  assert.doesNotMatch(body.text, /write-secret|test-token|[0-9]{6,}:/);
 });
 
 test("authorized /codex message creates a Codex Links command with a safe payload", async () => {
@@ -123,6 +229,44 @@ test("buildCommandPayload keeps Telegram metadata bounded and non-secret", () =>
   assert.doesNotMatch(JSON.stringify(payload), /TOKEN|secret|123456:/i);
 });
 
+test("bot command registration sends Telegram command menu", async () => {
+  const calls = [];
+  const result = await setTelegramBotCommands({
+    token: "test-token",
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return jsonResponse({ ok: true, result: true });
+    }
+  });
+
+  assert.equal(result.status, "configured");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/setMyCommands$/);
+  const body = JSON.parse(calls[0].options.body);
+  assert.deepEqual(body.commands.map((entry) => entry.command), [
+    "start",
+    "help",
+    "status",
+    "codex",
+    "vault",
+    "projects",
+    "version"
+  ]);
+  assert.doesNotMatch(calls[0].options.body, /test-token|write-secret|[0-9]{6,}:/);
+});
+
+test("static reply builders do not include secret-shaped text", () => {
+  for (const text of [
+    buildWelcomeText(),
+    buildHelpText(),
+    buildVaultText(),
+    buildProjectsText(),
+    buildVersionText({ env: { LINKS_WRITE_TOKEN: "write-secret" } })
+  ]) {
+    assert.doesNotMatch(text, /write-secret|[0-9]{6,}:[A-Za-z0-9_-]{20,}/);
+  }
+});
+
 test("gateway does not exit immediately after startup when Telegram API verify is skipped", async () => {
   const child = spawn(process.execPath, ["scripts/openclaw-telegram-gateway.mjs"], {
     cwd: process.cwd(),
@@ -130,6 +274,7 @@ test("gateway does not exit immediately after startup when Telegram API verify i
       ...process.env,
       TELEGRAM_BOT_TOKEN: "test-token",
       OPENCLAW_TELEGRAM_SKIP_API_VERIFY: "1",
+      OPENCLAW_TELEGRAM_SKIP_SET_COMMANDS: "1",
       OPENCLAW_TELEGRAM_POLL_INTERVAL_MS: "250",
       OPENCLAW_TELEGRAM_ALLOWED_CHAT_IDS: "123"
     },
