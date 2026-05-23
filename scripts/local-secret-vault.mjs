@@ -9,9 +9,26 @@ const DEFAULT_PORT = 8789;
 const DEFAULT_TIMEOUT_MS = 15000;
 
 const SECRET_REGISTRY = Object.freeze({
+  hermes_telegram_bot_token: Object.freeze({
+    id: "hermes_telegram_bot_token",
+    label: "Hermes / Telegram Bot Token",
+    project: "Hermes",
+    service: "hermes-cloud",
+    account: "TELEGRAM_BOT_TOKEN",
+    apply: "store-only"
+  }),
+  hermes_telegram_allowed_user_ids: Object.freeze({
+    id: "hermes_telegram_allowed_user_ids",
+    label: "Hermes / Telegram Allowed User IDs",
+    project: "Hermes",
+    service: "hermes-cloud",
+    account: "TELEGRAM_ALLOWED_USER_IDS",
+    apply: "store-only"
+  }),
   telegram_bot_token: Object.freeze({
     id: "telegram_bot_token",
     label: "Telegram Bot Token",
+    project: "OpenClaw",
     service: "openclaw-telegram-gateway",
     account: "TELEGRAM_BOT_TOKEN",
     apply: "openclaw-telegram"
@@ -19,6 +36,7 @@ const SECRET_REGISTRY = Object.freeze({
   codex_links_write_token: Object.freeze({
     id: "codex_links_write_token",
     label: "Codex Links Write Token",
+    project: "Codex Links",
     service: "codex-links",
     account: "LINKS_WRITE_TOKEN",
     apply: "launchd-env"
@@ -26,6 +44,7 @@ const SECRET_REGISTRY = Object.freeze({
   monobank_token: Object.freeze({
     id: "monobank_token",
     label: "Monobank Token",
+    project: "Finance",
     service: "ezohata-finance",
     account: "MONOBANK_TOKEN",
     apply: "store-only"
@@ -33,6 +52,7 @@ const SECRET_REGISTRY = Object.freeze({
   custom_secret: Object.freeze({
     id: "custom_secret",
     label: "Custom Secret",
+    project: "Custom",
     service: "",
     account: "",
     apply: "store-only",
@@ -68,7 +88,7 @@ function safeJson(data, status = 200) {
 }
 
 function htmlPage(options = {}) {
-  const selectedSecretType = SECRET_REGISTRY[options.selectedSecretType] ? options.selectedSecretType : "telegram_bot_token";
+  const selectedSecretType = SECRET_REGISTRY[options.selectedSecretType] ? options.selectedSecretType : "hermes_telegram_bot_token";
   const optionTags = Object.values(SECRET_REGISTRY)
     .map((entry) => `<option value="${htmlEscape(entry.id)}"${entry.id === selectedSecretType ? " selected" : ""}>${htmlEscape(entry.label)}</option>`)
     .join("\n");
@@ -191,6 +211,21 @@ async function saveToKeychain(config, secret, options = {}) {
   };
 }
 
+async function readFromKeychain(config, options = {}) {
+  const run = options.runCommand || runCommand;
+  const result = await run("security", [
+    "find-generic-password",
+    "-s", config.service,
+    "-a", config.account,
+    "-w"
+  ]);
+  return {
+    ok: result.ok,
+    value: result.ok ? String(result.stdout || "").trimEnd() : "",
+    error: result.ok ? "" : redact(result.stderr || result.stdout)
+  };
+}
+
 function parseJsonFromOutput(output = "") {
   const text = String(output || "");
   const start = text.indexOf("{");
@@ -272,6 +307,36 @@ async function handleSave(payload = {}, options = {}) {
   });
 }
 
+function resolveProjectSecret(project, account) {
+  const normalizedProject = String(project || "").trim().toLowerCase();
+  const normalizedAccount = String(account || "").trim();
+  return Object.values(SECRET_REGISTRY).find((entry) => {
+    return String(entry.project || "").toLowerCase() === normalizedProject && entry.account === normalizedAccount && !entry.custom;
+  });
+}
+
+async function handleRead(payload = {}, options = {}) {
+  const project = String(payload.project || "").trim();
+  const names = Array.isArray(payload.names) ? payload.names.map((name) => String(name || "").trim()).filter(Boolean) : [];
+  if (!project) return safeJson({ ok: false, error: "Project is required." }, 400);
+  if (!names.length) return safeJson({ ok: false, error: "At least one secret name is required." }, 400);
+
+  const secrets = {};
+  for (const name of names) {
+    const config = resolveProjectSecret(project, name);
+    if (!config) {
+      secrets[name] = { present: false, error: "Secret is not registered for project." };
+      continue;
+    }
+    const result = await readFromKeychain(config, options);
+    secrets[name] = result.ok
+      ? { present: true, value: result.value }
+      : { present: false, error: result.error || "Secret is not present." };
+  }
+
+  return safeJson({ ok: true, project, secrets });
+}
+
 async function readRequestJson(request) {
   let body = "";
   for await (const chunk of request) body += chunk;
@@ -293,11 +358,15 @@ function createVaultServer(options = {}) {
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/secrets/catalog") {
-        send(response, safeJson({ ok: true, secrets: Object.values(SECRET_REGISTRY).map(({ id, label, service, account, apply, custom }) => ({ id, label, service, account, apply, custom: Boolean(custom) })) }));
+        send(response, safeJson({ ok: true, secrets: Object.values(SECRET_REGISTRY).map(({ id, label, project, service, account, apply, custom }) => ({ id, label, project, service, account, apply, custom: Boolean(custom) })) }));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/secrets/save") {
         send(response, await handleSave(await readRequestJson(request), options));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/secrets/read") {
+        send(response, await handleRead(await readRequestJson(request), options));
         return;
       }
       send(response, safeJson({ ok: false, error: "Not found." }, 404));
@@ -351,6 +420,8 @@ export {
   summarizeTelegramApply,
   handleSave,
   createVaultServer,
+  handleRead,
+  readFromKeychain,
   startServer
 };
 

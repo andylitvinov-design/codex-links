@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   SECRET_REGISTRY,
   createVaultServer,
+  handleRead,
   handleSave,
   htmlPage,
   redact,
@@ -47,6 +48,11 @@ function makeRunner(responses = {}) {
 }
 
 test("registry includes scoped Telegram, Codex Links, Monobank, and custom secrets", () => {
+  assert.equal(SECRET_REGISTRY.hermes_telegram_bot_token.project, "Hermes");
+  assert.equal(SECRET_REGISTRY.hermes_telegram_bot_token.service, "hermes-cloud");
+  assert.equal(SECRET_REGISTRY.hermes_telegram_bot_token.account, "TELEGRAM_BOT_TOKEN");
+  assert.equal(SECRET_REGISTRY.hermes_telegram_allowed_user_ids.project, "Hermes");
+  assert.equal(SECRET_REGISTRY.hermes_telegram_allowed_user_ids.account, "TELEGRAM_ALLOWED_USER_IDS");
   assert.equal(SECRET_REGISTRY.telegram_bot_token.service, "openclaw-telegram-gateway");
   assert.equal(SECRET_REGISTRY.telegram_bot_token.account, "TELEGRAM_BOT_TOKEN");
   assert.equal(SECRET_REGISTRY.codex_links_write_token.service, "codex-links");
@@ -88,13 +94,14 @@ test("catalog endpoint exposes metadata only", async () => {
   const data = await response.json();
   server.close();
   assert.equal(data.ok, true);
+  assert.ok(data.secrets.find((entry) => entry.id === "hermes_telegram_bot_token" && entry.project === "Hermes"));
   assert.ok(data.secrets.find((entry) => entry.id === "telegram_bot_token"));
   assert.doesNotMatch(JSON.stringify(data), /secret-value/);
 });
 
-test("telegram secret can be preselected in the UI", () => {
-  const html = htmlPage({ selectedSecretType: "telegram_bot_token" });
-  assert.match(html, /<option value="telegram_bot_token" selected>Telegram Bot Token<\/option>/);
+test("Hermes Telegram secret is the default UI selection", () => {
+  const html = htmlPage();
+  assert.match(html, /<option value="hermes_telegram_bot_token" selected>Hermes \/ Telegram Bot Token<\/option>/);
 });
 
 test("saving a secret writes only to Keychain and redacts the response", async () => {
@@ -149,4 +156,34 @@ test("Monobank token is store-only and does not run imports or OpenClaw repair",
   assert.equal(calls[0].args[3], "ezohata-finance");
   assert.equal(calls[0].args[5], "MONOBANK_TOKEN");
   assert.doesNotMatch(JSON.stringify(calls.map((call) => call.args.join(" "))), /import|sync|openclaw|repair/i);
+});
+
+test("Hermes read endpoint returns configured Keychain values without logging", async () => {
+  const { calls, runCommand } = makeRunner({
+    "security find-generic-password -s hermes-cloud -a TELEGRAM_BOT_TOKEN -w": {
+      ok: true,
+      code: 0,
+      stdout: `${TEST_SECRET}\n`,
+      stderr: ""
+    },
+    "security find-generic-password -s hermes-cloud -a TELEGRAM_ALLOWED_USER_IDS -w": {
+      ok: true,
+      code: 0,
+      stdout: "1001,1002\n",
+      stderr: ""
+    }
+  });
+
+  const response = await handleRead({
+    project: "Hermes",
+    names: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USER_IDS"]
+  }, { runCommand });
+  const data = JSON.parse(response.body);
+
+  assert.equal(response.status, 200);
+  assert.equal(data.secrets.TELEGRAM_BOT_TOKEN.present, true);
+  assert.equal(data.secrets.TELEGRAM_BOT_TOKEN.value, TEST_SECRET);
+  assert.equal(data.secrets.TELEGRAM_ALLOWED_USER_IDS.value, "1001,1002");
+  assert.deepEqual(calls.map((call) => call.command), ["security", "security"]);
+  assert.doesNotMatch(JSON.stringify(calls), new RegExp(TEST_SECRET.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
