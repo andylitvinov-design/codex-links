@@ -252,6 +252,57 @@ YouTube Data API provider:
 
 Paste the YouTube API key only into the local vault provider selector. Do not commit it, do not put it in docs, and do not expose it as `VITE_YOUTUBE_API_KEY` or any other frontend-bundled variable. The future YouTube inventory fetch should use this key only from server-side scripts/actions. In Google Cloud, restrict the key to YouTube Data API v3.
 
+## How to add Reiki Supabase migration secrets
+
+Start the wallet:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+SECRET_VAULT_PORT=8790 npm run secrets:local
+```
+
+Open:
+
+```text
+http://127.0.0.1:8790/secrets
+```
+
+Add both entries in the `Secret type` selector:
+
+1. Choose `Reiki Yggdrasil / Supabase - SUPABASE_ACCESS_TOKEN`, paste into `Secret value`, then save.
+2. Choose `Reiki Yggdrasil / Supabase - SUPABASE_PROJECT_REF`, paste into `Secret value`, then save.
+
+Shortcut for the same Reiki Supabase flow:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+npm run secrets:reiki:supabase
+```
+
+Metadata-only status check while the wallet is running:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+npm run secrets:reiki:supabase:status
+```
+
+Expected output shape:
+
+```text
+SUPABASE_ACCESS_TOKEN: configured
+SUPABASE_PROJECT_REF: configured
+```
+
+Reiki Supabase provider:
+
+- Provider label: `Reiki Yggdrasil / Supabase`
+- Required secret names: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`
+- Keychain service: `reiki-yggdrasil-supabase`
+- Status endpoint: `GET /api/secrets/status` returns only `configured|missing` metadata for `supabase_access_token_status` and `supabase_project_ref_status`.
+- Local runner handoff: `POST /api/secrets/read` can return values only to local scripts that request project `Reiki Yggdrasil / Supabase`; never print the returned values.
+
+Use these values only for local/server-side Codex and migration runner actions. Do not commit them, do not put them in docs, and do not expose either value as `VITE_*` or any other frontend-bundled variable.
+
 ## Slack Cloud Worker Ops
 
 Operational contract for `cloud-via-slack`:

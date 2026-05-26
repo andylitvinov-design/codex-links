@@ -1,8 +1,17 @@
 # STATE
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: make the YouTube Data API Local Secret Vault setup clear and runnable on port `8790`
-- next step: use metadata-only wallet status plus `YOUTUBE_API_KEY` from secure local/server-side storage for the ai-projects-brain Reiki YouTube inventory fetch
+- current task: add Reiki Yggdrasil Supabase migration secrets to the Local Secret Vault
+- next step: use metadata-only wallet status plus local `/api/secrets/read` values from secure storage for the Reiki Supabase migration runner
+
+## 2026-05-26 Reiki Supabase Wallet Entry
+
+- repo used: `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`, branch `codex/reiki-supabase-wallet`
+- wallet status: Local Secret Vault remains local-only at `http://127.0.0.1:8790/secrets` and saves Reiki Supabase values to macOS Keychain through the server-side `security add-generic-password` path
+- provider added: `Reiki Yggdrasil / Supabase`, required secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF`
+- status behavior: `/api/secrets/status` reports only `configured|missing` metadata for `supabase_access_token_status` and `supabase_project_ref_status`
+- helper commands: `npm run secrets:reiki:supabase` starts the Reiki Supabase wallet flow on port `8790`; `npm run secrets:reiki:supabase:status` prints only the two secret names with configured/missing
+- safety status: no secret values in docs, no `VITE_*` exposure, replace uses Keychain `add-generic-password -U`, and delete uses Keychain service/account only
 
 ## 2026-05-26 YouTube Data API Wallet Entry
 

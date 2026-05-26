@@ -2,6 +2,11 @@
 
 ## 2026-05-26
 
+- Added `Reiki Yggdrasil / Supabase` as a Local Secret Vault section with store-only entries for `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF` under Keychain service `reiki-yggdrasil-supabase`.
+- Added metadata-only Reiki Supabase status through `/api/secrets/status`, plus `npm run secrets:reiki:supabase` and `npm run secrets:reiki:supabase:status`.
+- Added a delete action to the Local Secret Vault UI/API so stored secrets can be updated, replaced, or deleted without printing values.
+- Updated README/STATE documentation with the exact local wallet URL, paste flow, secret names, and the rule that migration secrets must stay out of frontend-bundled variables.
+
 - Identified `scripts/local-secret-vault.mjs` as the existing wallet implementation for project API keys. It is local-only, binds to `127.0.0.1`, and writes to macOS Keychain without returning secret values.
 - Added `YouTube Data API` as a store-only provider for `YOUTUBE_API_KEY`, with `YOUTUBE_CHANNEL_HANDLE` documented as an optional/default variable using `@shamanic_academy`.
 - Added non-secret YouTube status metadata through `/api/secrets/catalog` and `/api/secrets/status`: configured/missing for the key and configured/default for the channel handle.
