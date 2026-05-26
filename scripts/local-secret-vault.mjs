@@ -49,6 +49,49 @@ const SECRET_REGISTRY = Object.freeze({
     account: "MONOBANK_TOKEN",
     apply: "store-only"
   }),
+  youtube_api_key: Object.freeze({
+    id: "youtube_api_key",
+    label: "YouTube Data API",
+    project: "Reiki Yggdrasil",
+    service: "youtube-data-api",
+    account: "YOUTUBE_API_KEY",
+    apply: "store-only",
+    statusKey: "youtube_api_key_status",
+    purpose: "Fetch public YouTube channel video inventory for @shamanic_academy and store normalized metadata in ai-projects-brain for Reiki Yggdrasil.",
+    optionalVars: Object.freeze([
+      Object.freeze({
+        name: "YOUTUBE_CHANNEL_HANDLE",
+        statusKey: "youtube_channel_handle",
+        defaultValue: "@shamanic_academy"
+      })
+    ]),
+    note: "Do not expose this key in frontend. Use server-side scripts/actions only.",
+    help: "Use this key only for YouTube Data API v3."
+  }),
+  reiki_supabase_access_token: Object.freeze({
+    id: "reiki_supabase_access_token",
+    label: "Reiki Yggdrasil / Supabase - SUPABASE_ACCESS_TOKEN",
+    project: "Reiki Yggdrasil / Supabase",
+    service: "reiki-yggdrasil-supabase",
+    account: "SUPABASE_ACCESS_TOKEN",
+    apply: "store-only",
+    statusKey: "supabase_access_token_status",
+    purpose: "Authenticate local Codex and migration runner actions that apply committed Reiki Yggdrasil Supabase migrations.",
+    note: "Do not print or commit this token. Use it only as a server-side/local environment variable.",
+    help: "Paste the Supabase personal access token here; status surfaces show only configured or missing."
+  }),
+  reiki_supabase_project_ref: Object.freeze({
+    id: "reiki_supabase_project_ref",
+    label: "Reiki Yggdrasil / Supabase - SUPABASE_PROJECT_REF",
+    project: "Reiki Yggdrasil / Supabase",
+    service: "reiki-yggdrasil-supabase",
+    account: "SUPABASE_PROJECT_REF",
+    apply: "store-only",
+    statusKey: "supabase_project_ref_status",
+    purpose: "Select the Supabase project for local Codex and migration runner actions.",
+    note: "Treat this value as sensitive for this project. Logs and UI status must show only configured or missing.",
+    help: "Paste the Supabase project ref here; status surfaces never return the value."
+  }),
   custom_secret: Object.freeze({
     id: "custom_secret",
     label: "Custom Secret",
@@ -87,6 +130,43 @@ function safeJson(data, status = 200) {
   };
 }
 
+function publicSecretMetadata(entry) {
+  const { id, label, project, service, account, apply, custom, purpose, optionalVars, note, help, statusKey } = entry;
+  return {
+    id,
+    label,
+    project,
+    service,
+    account,
+    apply,
+    custom: Boolean(custom),
+    purpose,
+    optionalVars,
+    note,
+    help,
+    statusKey
+  };
+}
+
+async function getSecretStatus(entry, options = {}) {
+  if (entry.custom) return null;
+  const result = await readFromKeychain(entry, options);
+  const status = {
+    id: entry.id,
+    account: entry.account,
+    status: result.ok ? "configured" : "missing"
+  };
+  if (entry.statusKey) {
+    status[entry.statusKey] = status.status;
+  }
+  for (const optional of entry.optionalVars || []) {
+    const value = String(process.env[optional.name] || "").trim();
+    status[optional.statusKey || optional.name] = value ? "configured" : "default";
+    status[`${optional.name}_default`] = optional.defaultValue;
+  }
+  return status;
+}
+
 function htmlPage(options = {}) {
   const selectedSecretType = SECRET_REGISTRY[options.selectedSecretType] ? options.selectedSecretType : "hermes_telegram_bot_token";
   const optionTags = Object.values(SECRET_REGISTRY)
@@ -105,6 +185,8 @@ function htmlPage(options = {}) {
     button { margin-top: 20px; cursor: pointer; }
     pre { background: #111; color: #f7f7f7; padding: 14px; overflow: auto; border-radius: 8px; white-space: pre-wrap; }
     .note { color: #555; }
+    .details { margin-top: 18px; padding: 14px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
+    .details p { margin: 8px 0; }
   </style>
 </head>
 <body>
@@ -113,6 +195,7 @@ function htmlPage(options = {}) {
   <form id="form">
     <label>Secret type</label>
     <select id="secretType">${optionTags}</select>
+    <section id="secretDetails" class="details" aria-live="polite"></section>
     <div id="customFields" hidden>
       <label>Custom Keychain service</label>
       <input id="customService" autocomplete="off" />
@@ -122,13 +205,59 @@ function htmlPage(options = {}) {
     <label>Secret value</label>
     <input id="secret" type="password" autocomplete="off" autofocus />
     <button type="submit">Save to Keychain + Apply</button>
+    <button type="button" id="deleteSecret">Delete selected secret</button>
   </form>
   <h2>Status</h2>
   <pre id="status">waiting</pre>
   <script>
     const type = document.getElementById('secretType');
     const custom = document.getElementById('customFields');
-    type.addEventListener('change', () => { custom.hidden = type.value !== 'custom_secret'; });
+    const details = document.getElementById('secretDetails');
+    let catalog = [];
+    let statuses = {};
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+    function renderDetails() {
+      custom.hidden = type.value !== 'custom_secret';
+      const entry = catalog.find((item) => item.id === type.value);
+      if (!entry) {
+        details.textContent = 'metadata loading...';
+        return;
+      }
+      const status = statuses[entry.id]?.status || 'needs verification';
+      const optionalRows = (entry.optionalVars || []).map((item) => {
+        const valueStatus = statuses[entry.id]?.[item.statusKey || item.name] || 'default';
+        return '<p><strong>' + escapeHtml(item.name) + ':</strong> ' + escapeHtml(valueStatus) + ' (default ' + escapeHtml(item.defaultValue) + ')</p>';
+      }).join('');
+      details.innerHTML = [
+        '<p><strong>Provider:</strong> ' + escapeHtml(entry.label) + '</p>',
+        '<p><strong>Status:</strong> ' + escapeHtml(status) + '</p>',
+        '<p><strong>Secret name:</strong> ' + escapeHtml(entry.account || 'custom') + '</p>',
+        optionalRows,
+        entry.purpose ? '<p><strong>Purpose:</strong> ' + escapeHtml(entry.purpose) + '</p>' : '',
+        entry.note ? '<p><strong>Note:</strong> ' + escapeHtml(entry.note) + '</p>' : '',
+        entry.help ? '<p><strong>Help:</strong> ' + escapeHtml(entry.help) + '</p>' : ''
+      ].join('');
+    }
+    async function loadCatalog() {
+      const res = await fetch('/api/secrets/catalog');
+      const json = await res.json();
+      catalog = json.secrets || [];
+      statuses = json.statuses || {};
+      renderDetails();
+    }
+    type.addEventListener('change', renderDetails);
+    loadCatalog().catch(() => {
+      details.textContent = 'metadata unavailable';
+      custom.hidden = type.value !== 'custom_secret';
+    });
     document.getElementById('form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const status = document.getElementById('status');
@@ -146,6 +275,24 @@ function htmlPage(options = {}) {
       const json = await res.json();
       document.getElementById('secret').value = '';
       status.textContent = JSON.stringify(json, null, 2);
+      await loadCatalog();
+    });
+    document.getElementById('deleteSecret').addEventListener('click', async () => {
+      const status = document.getElementById('status');
+      status.textContent = 'deleting...';
+      const res = await fetch('/api/secrets/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          secretType: type.value,
+          customService: document.getElementById('customService').value,
+          customAccount: document.getElementById('customAccount').value
+        })
+      });
+      const json = await res.json();
+      document.getElementById('secret').value = '';
+      status.textContent = JSON.stringify(json, null, 2);
+      await loadCatalog();
     });
   </script>
 </body>
@@ -222,6 +369,19 @@ async function readFromKeychain(config, options = {}) {
   return {
     ok: result.ok,
     value: result.ok ? String(result.stdout || "").trimEnd() : "",
+    error: result.ok ? "" : redact(result.stderr || result.stdout)
+  };
+}
+
+async function deleteFromKeychain(config, options = {}) {
+  const run = options.runCommand || runCommand;
+  const result = await run("security", [
+    "delete-generic-password",
+    "-s", config.service,
+    "-a", config.account
+  ]);
+  return {
+    ok: result.ok,
     error: result.ok ? "" : redact(result.stderr || result.stdout)
   };
 }
@@ -307,6 +467,28 @@ async function handleSave(payload = {}, options = {}) {
   });
 }
 
+async function handleDelete(payload = {}, options = {}) {
+  const resolved = resolveSecretConfig(payload);
+  if (!resolved.ok) return safeJson({ ok: false, error: resolved.error }, 400);
+  const config = resolved.value;
+  const deleted = await deleteFromKeychain(config, options);
+  if (!deleted.ok) return safeJson({
+    ok: false,
+    deleted: false,
+    secretType: config.id,
+    keychainService: config.service,
+    keychainAccount: config.account,
+    error: deleted.error || "Secret was not deleted."
+  }, 500);
+  return safeJson({
+    ok: true,
+    deleted: true,
+    secretType: config.id,
+    keychainService: config.service,
+    keychainAccount: config.account
+  });
+}
+
 function resolveProjectSecret(project, account) {
   const normalizedProject = String(project || "").trim().toLowerCase();
   const normalizedAccount = String(account || "").trim();
@@ -358,11 +540,35 @@ function createVaultServer(options = {}) {
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/secrets/catalog") {
-        send(response, safeJson({ ok: true, secrets: Object.values(SECRET_REGISTRY).map(({ id, label, project, service, account, apply, custom }) => ({ id, label, project, service, account, apply, custom: Boolean(custom) })) }));
+        const secrets = Object.values(SECRET_REGISTRY);
+        const statuses = {};
+        for (const entry of secrets) {
+          const status = await getSecretStatus(entry, options);
+          if (status) statuses[entry.id] = status;
+        }
+        send(response, safeJson({ ok: true, secrets: secrets.map(publicSecretMetadata), statuses }));
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/secrets/status") {
+        const youtube = await getSecretStatus(SECRET_REGISTRY.youtube_api_key, options);
+        const reikiSupabaseAccessToken = await getSecretStatus(SECRET_REGISTRY.reiki_supabase_access_token, options);
+        const reikiSupabaseProjectRef = await getSecretStatus(SECRET_REGISTRY.reiki_supabase_project_ref, options);
+        send(response, safeJson({
+          ok: true,
+          youtube,
+          reikiSupabase: {
+            supabase_access_token_status: reikiSupabaseAccessToken.supabase_access_token_status,
+            supabase_project_ref_status: reikiSupabaseProjectRef.supabase_project_ref_status
+          }
+        }));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/secrets/save") {
         send(response, await handleSave(await readRequestJson(request), options));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/secrets/delete") {
+        send(response, await handleDelete(await readRequestJson(request), options));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/secrets/read") {
@@ -403,21 +609,62 @@ function parseCliArgs(argv = process.argv.slice(2)) {
     if (value === "--secret") {
       result.selectedSecretType = argv[index + 1] || "";
       index += 1;
+    } else if (value === "--status") {
+      result.status = true;
+      if (argv[index + 1] && !String(argv[index + 1]).startsWith("--")) {
+        result.statusTarget = argv[index + 1];
+        index += 1;
+      }
     }
   }
   return result;
 }
 
+function formatYoutubeStatus(data = {}) {
+  const youtube = data.youtube || {};
+  const keyStatus = youtube.youtube_api_key_status === "configured" ? "configured" : "missing";
+  const handleStatus = youtube.youtube_channel_handle === "configured" ? "configured" : "default";
+  return [
+    `YouTube API key: ${keyStatus}`,
+    `Channel handle: ${handleStatus}`
+  ].join("\n");
+}
+
+function formatReikiSupabaseStatus(data = {}) {
+  const reikiSupabase = data.reikiSupabase || {};
+  const accessTokenStatus = reikiSupabase.supabase_access_token_status === "configured" ? "configured" : "missing";
+  const projectRefStatus = reikiSupabase.supabase_project_ref_status === "configured" ? "configured" : "missing";
+  return [
+    `SUPABASE_ACCESS_TOKEN: ${accessTokenStatus}`,
+    `SUPABASE_PROJECT_REF: ${projectRefStatus}`
+  ].join("\n");
+}
+
+async function printSecretStatus(options = {}) {
+  const port = Number(options.port || process.env.SECRET_VAULT_PORT || 8790) || 8790;
+  const url = `http://127.0.0.1:${port}/api/secrets/status`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Secret Vault status returned HTTP ${response.status}.`);
+  const data = await response.json();
+  const statusTarget = String(options.statusTarget || "youtube").trim();
+  console.log(statusTarget === "reiki_supabase" ? formatReikiSupabaseStatus(data) : formatYoutubeStatus(data));
+}
+
 export {
   SECRET_REGISTRY,
   applySecret,
+  deleteFromKeychain,
+  formatReikiSupabaseStatus,
+  formatYoutubeStatus,
   htmlPage,
   parseCliArgs,
   parseJsonFromOutput,
+  printSecretStatus,
   redact,
   resolveSecretConfig,
   saveToKeychain,
   summarizeTelegramApply,
+  handleDelete,
   handleSave,
   createVaultServer,
   handleRead,
@@ -427,8 +674,12 @@ export {
 
 if (import.meta.url === new URL(process.argv[1], "file:").href) {
   const args = parseCliArgs();
-  await startServer({
-    port: Number(process.env.SECRET_VAULT_PORT || DEFAULT_PORT) || DEFAULT_PORT,
-    selectedSecretType: args.selectedSecretType
-  });
+  if (args.status) {
+    await printSecretStatus({ statusTarget: args.statusTarget });
+  } else {
+    await startServer({
+      port: Number(process.env.SECRET_VAULT_PORT || DEFAULT_PORT) || DEFAULT_PORT,
+      selectedSecretType: args.selectedSecretType
+    });
+  }
 }

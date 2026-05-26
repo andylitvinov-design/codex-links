@@ -1,8 +1,26 @@
 # STATE
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: finalize issue #160 with live OpenClaw Telegram gateway proof and basic bot menu/help
-- next step: merge PR #164 after final checks and close issue #160 only if the PR/merge and live proofs are complete
+- current task: add Reiki Yggdrasil Supabase migration secrets to the Local Secret Vault
+- next step: use metadata-only wallet status plus local `/api/secrets/read` values from secure storage for the Reiki Supabase migration runner
+
+## 2026-05-26 Reiki Supabase Wallet Entry
+
+- repo used: `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`, branch `codex/reiki-supabase-wallet`
+- wallet status: Local Secret Vault remains local-only at `http://127.0.0.1:8790/secrets` and saves Reiki Supabase values to macOS Keychain through the server-side `security add-generic-password` path
+- provider added: `Reiki Yggdrasil / Supabase`, required secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF`
+- status behavior: `/api/secrets/status` reports only `configured|missing` metadata for `supabase_access_token_status` and `supabase_project_ref_status`
+- helper commands: `npm run secrets:reiki:supabase` starts the Reiki Supabase wallet flow on port `8790`; `npm run secrets:reiki:supabase:status` prints only the two secret names with configured/missing
+- safety status: no secret values in docs, no `VITE_*` exposure, replace uses Keychain `add-generic-password -U`, and delete uses Keychain service/account only
+
+## 2026-05-26 YouTube Data API Wallet Entry
+
+- repo used: `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`, branch `codex/fix-youtube-wallet-runbook-and-inventory`
+- wallet status: Local Secret Vault remains local-only at `http://127.0.0.1:8790/secrets` for the YouTube runbook and saves values to macOS Keychain through the server-side `security add-generic-password` path
+- provider added: `YouTube Data API`, required secret `YOUTUBE_API_KEY`, optional handle `YOUTUBE_CHANNEL_HANDLE`, default `@shamanic_academy`
+- status behavior: `/api/secrets/status` reports only configured/missing/default metadata for YouTube and never returns the actual key
+- helper commands: `npm run secrets:youtube` starts the YouTube wallet flow on port `8790`; `npm run secrets:youtube:status` prints only `YouTube API key: configured|missing` and `Channel handle: configured|default`
+- safety status: no `VITE_YOUTUBE_API_KEY`, no frontend-bundled secret value, no YouTube API call, and no secret value committed
 
 ## 2026-05-22 OpenClaw Telegram Finalization
 

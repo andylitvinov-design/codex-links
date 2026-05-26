@@ -181,6 +181,128 @@ Quick helpers added to this repo:
 
 If you do not want to manage Cloudflare Pages settings manually, `cloud:save-config` can store non-secret runtime settings in KV using only `LINKS_WRITE_TOKEN`. Keep `OPENAI_API_KEY` in the Pages environment; do not store it in KV.
 
+## Local Secret Vault
+
+Local wallet URL:
+
+```bash
+SECRET_VAULT_NO_OPEN=1 npm run secrets:local
+```
+
+The server prints `http://127.0.0.1:8789/secrets` and binds only to `127.0.0.1`. It saves selected values to macOS Keychain with `security add-generic-password`; it does not commit, print, or send secret values to GitHub, ChatGPT, Cloudflare, or Vercel.
+
+If port `8789` is already occupied, use the stable YouTube setup port:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+SECRET_VAULT_PORT=8790 npm run secrets:local
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8790/secrets
+```
+
+Shortcut for the same YouTube flow:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+npm run secrets:youtube
+```
+
+## How to add YouTube API key
+
+1. Start the wallet:
+
+   ```bash
+   cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+   SECRET_VAULT_PORT=8790 npm run secrets:local
+   ```
+
+2. Open `http://127.0.0.1:8790/secrets`.
+3. choose provider: YouTube Data API
+4. paste key into Secret value
+5. click Save
+6. check: http://127.0.0.1:8790/api/secrets/status
+7. expected: youtube_api_key_status should be configured
+
+Metadata-only CLI check while the wallet is running:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+npm run secrets:youtube:status
+```
+
+Expected output shape:
+
+```text
+YouTube API key: configured
+Channel handle: default
+```
+
+YouTube Data API provider:
+
+- Provider label: `YouTube Data API`
+- Required secret name: `YOUTUBE_API_KEY`
+- Optional channel handle variable: `YOUTUBE_CHANNEL_HANDLE`
+- Default channel handle: `@shamanic_academy`
+- Keychain service: `youtube-data-api`
+- Status endpoint: `GET /api/secrets/status` returns `youtube_api_key_status: configured|missing` and `youtube_channel_handle: configured|default`; it never returns the key value.
+
+Paste the YouTube API key only into the local vault provider selector. Do not commit it, do not put it in docs, and do not expose it as `VITE_YOUTUBE_API_KEY` or any other frontend-bundled variable. The future YouTube inventory fetch should use this key only from server-side scripts/actions. In Google Cloud, restrict the key to YouTube Data API v3.
+
+## How to add Reiki Supabase migration secrets
+
+Start the wallet:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+SECRET_VAULT_PORT=8790 npm run secrets:local
+```
+
+Open:
+
+```text
+http://127.0.0.1:8790/secrets
+```
+
+Add both entries in the `Secret type` selector:
+
+1. Choose `Reiki Yggdrasil / Supabase - SUPABASE_ACCESS_TOKEN`, paste into `Secret value`, then save.
+2. Choose `Reiki Yggdrasil / Supabase - SUPABASE_PROJECT_REF`, paste into `Secret value`, then save.
+
+Shortcut for the same Reiki Supabase flow:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+npm run secrets:reiki:supabase
+```
+
+Metadata-only status check while the wallet is running:
+
+```bash
+cd /Users/andriilitvinov/projects/MYPROJECTS/codex-links
+npm run secrets:reiki:supabase:status
+```
+
+Expected output shape:
+
+```text
+SUPABASE_ACCESS_TOKEN: configured
+SUPABASE_PROJECT_REF: configured
+```
+
+Reiki Supabase provider:
+
+- Provider label: `Reiki Yggdrasil / Supabase`
+- Required secret names: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`
+- Keychain service: `reiki-yggdrasil-supabase`
+- Status endpoint: `GET /api/secrets/status` returns only `configured|missing` metadata for `supabase_access_token_status` and `supabase_project_ref_status`.
+- Local runner handoff: `POST /api/secrets/read` can return values only to local scripts that request project `Reiki Yggdrasil / Supabase`; never print the returned values.
+
+Use these values only for local/server-side Codex and migration runner actions. Do not commit them, do not put them in docs, and do not expose either value as `VITE_*` or any other frontend-bundled variable.
+
 ## Slack Cloud Worker Ops
 
 Operational contract for `cloud-via-slack`:
