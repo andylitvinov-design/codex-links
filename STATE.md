@@ -1,8 +1,17 @@
 # STATE
 
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: finalize issue #160 with live OpenClaw Telegram gateway proof and basic bot menu/help
-- next step: merge PR #164 after final checks and close issue #160 only if the PR/merge and live proofs are complete
+- current task: make the YouTube Data API Local Secret Vault setup clear and runnable on port `8790`
+- next step: use metadata-only wallet status plus `YOUTUBE_API_KEY` from secure local/server-side storage for the ai-projects-brain Reiki YouTube inventory fetch
+
+## 2026-05-26 YouTube Data API Wallet Entry
+
+- repo used: `/Users/andriilitvinov/projects/MYPROJECTS/codex-links`, branch `codex/fix-youtube-wallet-runbook-and-inventory`
+- wallet status: Local Secret Vault remains local-only at `http://127.0.0.1:8790/secrets` for the YouTube runbook and saves values to macOS Keychain through the server-side `security add-generic-password` path
+- provider added: `YouTube Data API`, required secret `YOUTUBE_API_KEY`, optional handle `YOUTUBE_CHANNEL_HANDLE`, default `@shamanic_academy`
+- status behavior: `/api/secrets/status` reports only configured/missing/default metadata for YouTube and never returns the actual key
+- helper commands: `npm run secrets:youtube` starts the YouTube wallet flow on port `8790`; `npm run secrets:youtube:status` prints only `YouTube API key: configured|missing` and `Channel handle: configured|default`
+- safety status: no `VITE_YOUTUBE_API_KEY`, no frontend-bundled secret value, no YouTube API call, and no secret value committed
 
 ## 2026-05-22 OpenClaw Telegram Finalization
 

@@ -21,6 +21,8 @@
     "start:openclaw:telegram-gateway": "node scripts/openclaw-telegram-launchd.mjs start",
     "repair:openclaw:telegram-gateway": "node scripts/openclaw-telegram-launchd.mjs repair",
     "secrets:local": "node scripts/local-secret-vault.mjs",
+    "secrets:youtube": "SECRET_VAULT_PORT=8790 node scripts/local-secret-vault.mjs --secret youtube_api_key",
+    "secrets:youtube:status": "SECRET_VAULT_PORT=8790 node scripts/local-secret-vault.mjs --status",
     "setup:openclaw:telegram-token": "node scripts/local-secret-vault.mjs --secret telegram_bot_token",
     "feedback:verify": "node scripts/openclaw-feedback-loop.mjs",
     "cloud:preview-check": "node scripts/check-preview-cloud-status.mjs",

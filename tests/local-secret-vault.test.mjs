@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   SECRET_REGISTRY,
   createVaultServer,
+  formatYoutubeStatus,
   handleRead,
   handleSave,
   htmlPage,
@@ -47,7 +48,7 @@ function makeRunner(responses = {}) {
   return { calls, runCommand };
 }
 
-test("registry includes scoped Telegram, Codex Links, Monobank, and custom secrets", () => {
+test("registry includes scoped Telegram, Codex Links, Monobank, YouTube, and custom secrets", () => {
   assert.equal(SECRET_REGISTRY.hermes_telegram_bot_token.project, "Hermes");
   assert.equal(SECRET_REGISTRY.hermes_telegram_bot_token.service, "hermes-cloud");
   assert.equal(SECRET_REGISTRY.hermes_telegram_bot_token.account, "TELEGRAM_BOT_TOKEN");
@@ -58,6 +59,11 @@ test("registry includes scoped Telegram, Codex Links, Monobank, and custom secre
   assert.equal(SECRET_REGISTRY.codex_links_write_token.service, "codex-links");
   assert.equal(SECRET_REGISTRY.monobank_token.service, "ezohata-finance");
   assert.equal(SECRET_REGISTRY.monobank_token.account, "MONOBANK_TOKEN");
+  assert.equal(SECRET_REGISTRY.youtube_api_key.label, "YouTube Data API");
+  assert.equal(SECRET_REGISTRY.youtube_api_key.service, "youtube-data-api");
+  assert.equal(SECRET_REGISTRY.youtube_api_key.account, "YOUTUBE_API_KEY");
+  assert.equal(SECRET_REGISTRY.youtube_api_key.optionalVars[0].name, "YOUTUBE_CHANNEL_HANDLE");
+  assert.equal(SECRET_REGISTRY.youtube_api_key.optionalVars[0].defaultValue, "@shamanic_academy");
   assert.equal(SECRET_REGISTRY.custom_secret.custom, true);
 });
 
@@ -86,7 +92,8 @@ test("empty secret is rejected before storage", async () => {
 });
 
 test("catalog endpoint exposes metadata only", async () => {
-  const server = createVaultServer();
+  const { runCommand } = makeRunner();
+  const server = createVaultServer({ runCommand });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port, address } = server.address();
   assert.equal(address, "127.0.0.1");
@@ -96,7 +103,48 @@ test("catalog endpoint exposes metadata only", async () => {
   assert.equal(data.ok, true);
   assert.ok(data.secrets.find((entry) => entry.id === "hermes_telegram_bot_token" && entry.project === "Hermes"));
   assert.ok(data.secrets.find((entry) => entry.id === "telegram_bot_token"));
+  const youtube = data.secrets.find((entry) => entry.id === "youtube_api_key");
+  assert.equal(youtube.label, "YouTube Data API");
+  assert.equal(youtube.account, "YOUTUBE_API_KEY");
+  assert.equal(youtube.optionalVars[0].name, "YOUTUBE_CHANNEL_HANDLE");
+  assert.equal(data.statuses.youtube_api_key.youtube_api_key_status, "configured");
+  assert.equal(data.statuses.youtube_api_key.youtube_channel_handle, "default");
   assert.doesNotMatch(JSON.stringify(data), /secret-value/);
+});
+
+test("YouTube status endpoint reports configured or missing without returning the key", async () => {
+  const { runCommand } = makeRunner({
+    "security find-generic-password -s youtube-data-api -a YOUTUBE_API_KEY -w": {
+      ok: true,
+      code: 0,
+      stdout: `${TEST_SECRET}\n`,
+      stderr: ""
+    }
+  });
+  const server = createVaultServer({ runCommand });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/api/secrets/status`);
+  const data = await response.json();
+  server.close();
+
+  assert.equal(data.ok, true);
+  assert.equal(data.youtube.youtube_api_key_status, "configured");
+  assert.equal(data.youtube.youtube_channel_handle, "default");
+  assert.equal(data.youtube.YOUTUBE_CHANNEL_HANDLE_default, "@shamanic_academy");
+  assert.doesNotMatch(JSON.stringify(data), new RegExp(TEST_SECRET.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("YouTube status formatter prints only safe configured/default fields", () => {
+  const text = formatYoutubeStatus({
+    youtube: {
+      youtube_api_key_status: "configured",
+      youtube_channel_handle: "default"
+    }
+  });
+
+  assert.equal(text, "YouTube API key: configured\nChannel handle: default");
+  assert.doesNotMatch(text, /YOUTUBE_API_KEY|youtube-data-api|secret/i);
 });
 
 test("Hermes Telegram secret is the default UI selection", () => {
@@ -156,6 +204,24 @@ test("Monobank token is store-only and does not run imports or OpenClaw repair",
   assert.equal(calls[0].args[3], "ezohata-finance");
   assert.equal(calls[0].args[5], "MONOBANK_TOKEN");
   assert.doesNotMatch(JSON.stringify(calls.map((call) => call.args.join(" "))), /import|sync|openclaw|repair/i);
+});
+
+test("YouTube Data API key is store-only and does not expose VITE-prefixed env", async () => {
+  const { calls, runCommand } = makeRunner();
+  const response = await handleSave({
+    secretType: "youtube_api_key",
+    secret: TEST_SECRET
+  }, { runCommand });
+  const data = JSON.parse(response.body);
+
+  assert.equal(data.mode, "store-only");
+  assert.equal(data.keychainService, "youtube-data-api");
+  assert.equal(data.keychainAccount, "YOUTUBE_API_KEY");
+  assert.deepEqual(calls.map((call) => call.command), ["security"]);
+  assert.equal(calls[0].args[3], "youtube-data-api");
+  assert.equal(calls[0].args[5], "YOUTUBE_API_KEY");
+  assert.doesNotMatch(response.body, new RegExp(TEST_SECRET.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(JSON.stringify(SECRET_REGISTRY.youtube_api_key), /VITE_YOUTUBE_API_KEY/);
 });
 
 test("Hermes read endpoint returns configured Keychain values without logging", async () => {

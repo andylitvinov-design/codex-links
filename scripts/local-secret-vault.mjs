@@ -49,6 +49,25 @@ const SECRET_REGISTRY = Object.freeze({
     account: "MONOBANK_TOKEN",
     apply: "store-only"
   }),
+  youtube_api_key: Object.freeze({
+    id: "youtube_api_key",
+    label: "YouTube Data API",
+    project: "Reiki Yggdrasil",
+    service: "youtube-data-api",
+    account: "YOUTUBE_API_KEY",
+    apply: "store-only",
+    statusKey: "youtube_api_key_status",
+    purpose: "Fetch public YouTube channel video inventory for @shamanic_academy and store normalized metadata in ai-projects-brain for Reiki Yggdrasil.",
+    optionalVars: Object.freeze([
+      Object.freeze({
+        name: "YOUTUBE_CHANNEL_HANDLE",
+        statusKey: "youtube_channel_handle",
+        defaultValue: "@shamanic_academy"
+      })
+    ]),
+    note: "Do not expose this key in frontend. Use server-side scripts/actions only.",
+    help: "Use this key only for YouTube Data API v3."
+  }),
   custom_secret: Object.freeze({
     id: "custom_secret",
     label: "Custom Secret",
@@ -87,6 +106,43 @@ function safeJson(data, status = 200) {
   };
 }
 
+function publicSecretMetadata(entry) {
+  const { id, label, project, service, account, apply, custom, purpose, optionalVars, note, help, statusKey } = entry;
+  return {
+    id,
+    label,
+    project,
+    service,
+    account,
+    apply,
+    custom: Boolean(custom),
+    purpose,
+    optionalVars,
+    note,
+    help,
+    statusKey
+  };
+}
+
+async function getSecretStatus(entry, options = {}) {
+  if (entry.custom) return null;
+  const result = await readFromKeychain(entry, options);
+  const status = {
+    id: entry.id,
+    account: entry.account,
+    status: result.ok ? "configured" : "missing"
+  };
+  if (entry.statusKey) {
+    status[entry.statusKey] = status.status;
+  }
+  for (const optional of entry.optionalVars || []) {
+    const value = String(process.env[optional.name] || "").trim();
+    status[optional.statusKey || optional.name] = value ? "configured" : "default";
+    status[`${optional.name}_default`] = optional.defaultValue;
+  }
+  return status;
+}
+
 function htmlPage(options = {}) {
   const selectedSecretType = SECRET_REGISTRY[options.selectedSecretType] ? options.selectedSecretType : "hermes_telegram_bot_token";
   const optionTags = Object.values(SECRET_REGISTRY)
@@ -105,6 +161,8 @@ function htmlPage(options = {}) {
     button { margin-top: 20px; cursor: pointer; }
     pre { background: #111; color: #f7f7f7; padding: 14px; overflow: auto; border-radius: 8px; white-space: pre-wrap; }
     .note { color: #555; }
+    .details { margin-top: 18px; padding: 14px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
+    .details p { margin: 8px 0; }
   </style>
 </head>
 <body>
@@ -113,6 +171,7 @@ function htmlPage(options = {}) {
   <form id="form">
     <label>Secret type</label>
     <select id="secretType">${optionTags}</select>
+    <section id="secretDetails" class="details" aria-live="polite"></section>
     <div id="customFields" hidden>
       <label>Custom Keychain service</label>
       <input id="customService" autocomplete="off" />
@@ -128,7 +187,52 @@ function htmlPage(options = {}) {
   <script>
     const type = document.getElementById('secretType');
     const custom = document.getElementById('customFields');
-    type.addEventListener('change', () => { custom.hidden = type.value !== 'custom_secret'; });
+    const details = document.getElementById('secretDetails');
+    let catalog = [];
+    let statuses = {};
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+    function renderDetails() {
+      custom.hidden = type.value !== 'custom_secret';
+      const entry = catalog.find((item) => item.id === type.value);
+      if (!entry) {
+        details.textContent = 'metadata loading...';
+        return;
+      }
+      const status = statuses[entry.id]?.status || 'needs verification';
+      const optionalRows = (entry.optionalVars || []).map((item) => {
+        const valueStatus = statuses[entry.id]?.[item.statusKey || item.name] || 'default';
+        return '<p><strong>' + escapeHtml(item.name) + ':</strong> ' + escapeHtml(valueStatus) + ' (default ' + escapeHtml(item.defaultValue) + ')</p>';
+      }).join('');
+      details.innerHTML = [
+        '<p><strong>Provider:</strong> ' + escapeHtml(entry.label) + '</p>',
+        '<p><strong>Status:</strong> ' + escapeHtml(status) + '</p>',
+        '<p><strong>Secret name:</strong> ' + escapeHtml(entry.account || 'custom') + '</p>',
+        optionalRows,
+        entry.purpose ? '<p><strong>Purpose:</strong> ' + escapeHtml(entry.purpose) + '</p>' : '',
+        entry.note ? '<p><strong>Note:</strong> ' + escapeHtml(entry.note) + '</p>' : '',
+        entry.help ? '<p><strong>Help:</strong> ' + escapeHtml(entry.help) + '</p>' : ''
+      ].join('');
+    }
+    async function loadCatalog() {
+      const res = await fetch('/api/secrets/catalog');
+      const json = await res.json();
+      catalog = json.secrets || [];
+      statuses = json.statuses || {};
+      renderDetails();
+    }
+    type.addEventListener('change', renderDetails);
+    loadCatalog().catch(() => {
+      details.textContent = 'metadata unavailable';
+      custom.hidden = type.value !== 'custom_secret';
+    });
     document.getElementById('form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const status = document.getElementById('status');
@@ -146,6 +250,7 @@ function htmlPage(options = {}) {
       const json = await res.json();
       document.getElementById('secret').value = '';
       status.textContent = JSON.stringify(json, null, 2);
+      await loadCatalog();
     });
   </script>
 </body>
@@ -358,7 +463,18 @@ function createVaultServer(options = {}) {
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/secrets/catalog") {
-        send(response, safeJson({ ok: true, secrets: Object.values(SECRET_REGISTRY).map(({ id, label, project, service, account, apply, custom }) => ({ id, label, project, service, account, apply, custom: Boolean(custom) })) }));
+        const secrets = Object.values(SECRET_REGISTRY);
+        const statuses = {};
+        for (const entry of secrets) {
+          const status = await getSecretStatus(entry, options);
+          if (status) statuses[entry.id] = status;
+        }
+        send(response, safeJson({ ok: true, secrets: secrets.map(publicSecretMetadata), statuses }));
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/secrets/status") {
+        const youtube = await getSecretStatus(SECRET_REGISTRY.youtube_api_key, options);
+        send(response, safeJson({ ok: true, youtube }));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/secrets/save") {
@@ -403,17 +519,40 @@ function parseCliArgs(argv = process.argv.slice(2)) {
     if (value === "--secret") {
       result.selectedSecretType = argv[index + 1] || "";
       index += 1;
+    } else if (value === "--status") {
+      result.status = true;
     }
   }
   return result;
 }
 
+function formatYoutubeStatus(data = {}) {
+  const youtube = data.youtube || {};
+  const keyStatus = youtube.youtube_api_key_status === "configured" ? "configured" : "missing";
+  const handleStatus = youtube.youtube_channel_handle === "configured" ? "configured" : "default";
+  return [
+    `YouTube API key: ${keyStatus}`,
+    `Channel handle: ${handleStatus}`
+  ].join("\n");
+}
+
+async function printYoutubeStatus(options = {}) {
+  const port = Number(options.port || process.env.SECRET_VAULT_PORT || 8790) || 8790;
+  const url = `http://127.0.0.1:${port}/api/secrets/status`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Secret Vault status returned HTTP ${response.status}.`);
+  const data = await response.json();
+  console.log(formatYoutubeStatus(data));
+}
+
 export {
   SECRET_REGISTRY,
   applySecret,
+  formatYoutubeStatus,
   htmlPage,
   parseCliArgs,
   parseJsonFromOutput,
+  printYoutubeStatus,
   redact,
   resolveSecretConfig,
   saveToKeychain,
@@ -427,8 +566,12 @@ export {
 
 if (import.meta.url === new URL(process.argv[1], "file:").href) {
   const args = parseCliArgs();
-  await startServer({
-    port: Number(process.env.SECRET_VAULT_PORT || DEFAULT_PORT) || DEFAULT_PORT,
-    selectedSecretType: args.selectedSecretType
-  });
+  if (args.status) {
+    await printYoutubeStatus();
+  } else {
+    await startServer({
+      port: Number(process.env.SECRET_VAULT_PORT || DEFAULT_PORT) || DEFAULT_PORT,
+      selectedSecretType: args.selectedSecretType
+    });
+  }
 }
