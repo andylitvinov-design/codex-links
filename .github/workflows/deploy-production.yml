@@ -1,0 +1,99 @@
+name: Deploy Production Fallback
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy"
+        required: false
+        default: "main"
+      expected_sha:
+        description: "Expected commit SHA to verify before deploy"
+        required: false
+        default: ""
+      reason:
+        description: "Why this fallback deploy was triggered"
+        required: false
+        default: "fallback production deploy"
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: production-deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_URL: https://codex-links.pages.dev/
+      VERSION_URL: https://codex-links.pages.dev/version.json
+
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Print checked-out commit
+        run: |
+          echo "ref=${{ inputs.ref }}"
+          echo "reason=${{ inputs.reason }}"
+          echo "expected_sha=${{ inputs.expected_sha }}"
+          echo "actual_sha=$(git rev-parse HEAD)"
+          git log -1 --oneline
+
+      - name: Verify expected SHA if provided
+        if: ${{ inputs.expected_sha != '' }}
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_SHA" != "${{ inputs.expected_sha }}" ]; then
+            echo "Expected SHA does not match checked-out SHA"
+            echo "expected=${{ inputs.expected_sha }}"
+            echo "actual=$ACTUAL_SHA"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Deploy to Cloudflare Pages production
+        run: npm run deploy
+
+      - name: Wait for Cloudflare Pages propagation
+        run: sleep 60
+
+      - name: Verify production URL responds
+        run: curl -fsS --retry 6 --retry-delay 10 "$PRODUCTION_URL" >/dev/null
+
+      - name: Verify version endpoint responds
+        run: curl -fsS --retry 6 --retry-delay 10 "$VERSION_URL" | tee /tmp/version.json
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "## Production Deploy Fallback"
+            echo "- Repository: ${{ github.repository }}"
+            echo "- Platform: Cloudflare Pages"
+            echo "- Ref: ${{ inputs.ref }}"
+            echo "- Expected SHA: ${{ inputs.expected_sha }}"
+            echo "- Actual SHA: $(git rev-parse HEAD)"
+            echo "- Reason: ${{ inputs.reason }}"
+            echo "- Production URL: $PRODUCTION_URL"
+            echo "- Version URL: $VERSION_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
