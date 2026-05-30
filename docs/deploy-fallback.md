@@ -40,6 +40,30 @@ Which maps to:
 wrangler pages deploy public --project-name codex-links
 ```
 
+## Live version self-check
+
+Before and after fallback deploy, agents must check the current live version themselves.
+
+Local protocol:
+
+```text
+docs/deploy-version-check.md
+```
+
+For this project, the primary live marker is:
+
+```text
+GET https://codex-links.pages.dev/version.json
+```
+
+Current `version.json` exposes a build marker, not a commit SHA. Agents must distinguish:
+
+```text
+version marker proof != commit-level live proof
+```
+
+Agents must check production URL, version URL, workflow output and relevant public asset markers themselves. Do not ask Andrey to check the current live version manually.
+
 ## When to use
 
 Use fallback deploy when:
@@ -102,7 +126,8 @@ Before fallback deploy:
 3. Identify expected commit SHA.
 4. Confirm changes are committed and pushed.
 5. Check production URL and version URL.
-6. If production is stale, trigger deploy-production.yml.
+6. Compare live version marker with expected build marker when available.
+7. If production is stale, trigger deploy-production.yml.
 ```
 
 After fallback deploy:
@@ -112,6 +137,7 @@ After fallback deploy:
 2. Re-check https://codex-links.pages.dev/version.json.
 3. Verify changed public assets if the task touched UI.
 4. Report workflow result and live verification.
+5. If exact live commit cannot be proven, state that commit-level proof requires commit metadata in version.json or build-info.json.
 ```
 
 ## Hard rules
@@ -124,9 +150,13 @@ production verification third
 
 Never ask the user to run local deployment until this fallback workflow has been attempted and diagnosed.
 
+Never ask the user to check the current live version manually when production/version URLs are available.
+
 Never run fallback deploy until the target commit is committed, pushed and identified.
 
 Never claim production is updated without checking production after deploy.
+
+Never claim commit-level live verification for this project until version/build-info metadata exposes commit SHA.
 
 ## Minimal final report
 
@@ -143,6 +173,20 @@ Live status:
 Remaining issue:
 ```
 
+Every deploy-related report must also include:
+
+```text
+Live version check:
+- Production URL:
+- Version URL:
+- Expected SHA:
+- Expected build marker:
+- Live SHA/build marker:
+- Match: yes/no/unknown
+- Evidence source:
+- If unknown, why:
+```
+
 ## Source standard
 
 Cross-project standard lives in:
@@ -157,4 +201,5 @@ Relevant docs:
 docs/github-actions-vercel-deploy-fallback-plan.md
 docs/deploy-fallback-agent-autodeploy-protocol.md
 docs/deploy-fallback-branch-propagation-policy.md
+docs/deploy-version-check-protocol.md
 ```
