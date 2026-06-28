@@ -1,5 +1,5 @@
 # Agent Memory Candidates
 
-Candidate lessons created by learn-pass go here.
+Used by learn-pass and memory-review.
 
-Do not treat these as active rules until promoted.
+Not active memory.
