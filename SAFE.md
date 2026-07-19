@@ -1,181 +1,149 @@
 # SAFE.md — codex-links
 
-Last verified date: 2026-06-28
+Last reviewed: 2026-07-19
 
-Purpose: compact safety map for `/safe` sweeps. Store environment variable names only; never store values.
+Purpose: compact repo-level safety map for `/safe`. Store environment-variable names only; never store values, tokens, private payloads, photos, cookies, or provider responses.
 
-## 1. Project boundary
+## Project boundary
 
-- Project name: codex-links
 - Canonical repo: `andylitvinov-design/codex-links`
-- Live URL: https://codex-links.pages.dev
-- Related live URL: https://codex-save-cjb.pages.dev (`codex-save/` subproject)
-- Preview URL: needs verification
-- Hosting provider: Cloudflare Pages
-- Production branch/source: `main` per `AGENTS.md`
-- Project memory file: `ai-projects-brain/projects/codex-links/PROJECT.md`
-- Boundary: Slack/Codex Cloud command bridge, reports surface, inbox UI, delivery timeline, and `codex-save` diagnostics. Do not confuse code fixes with external worker/account linkage.
+- Production URL: `https://codex-links.pages.dev`
+- Related subproject: `codex-save/`, deployed separately at `https://codex-save-cjb.pages.dev`
+- Hosting: Cloudflare Pages Functions
+- Production branch/source: `main`; exact deployed SHA needs live verification
+- Static output: `public`
+- Primary storage binding: `LINKS_STORE`
+- Project memory: `ai-projects-brain/projects/codex-links/PROJECT.md`
 
-## 2. Public surface
+This repo owns the inbox UI, delivery timeline, reports, Slack-backed Codex Cloud command bridge, optional Direct OpenAI path, local/Claude bridge routes, and `codex-save` diagnostics/remediation. Do not confuse a code-path fix with external Slack/OpenAI/worker account readiness.
 
-| Surface | Path / endpoint | Public or auth required | Data accepted | Abuse/cost risk | Owner |
-| --- | --- | --- | --- | --- | --- |
-| Inbox / dashboard UI | `/` | public page; write actions token-gated | none or UI actions | low unless write endpoints exposed | Andrey |
-| Version file | `/version.json` | public | none | stale deploy/version mismatch | Andrey |
-| Reports API | `/api/reports` | token required for writes | report payloads | spam/stale reporting if token weak | Andrey |
-| Delivery/commands APIs | `/api/delivery`, `/api/commands` | token/admin expected | command payloads | command abuse, paid API/Slack cost | Andrey |
-| codex-save UI | `codex-save/` deployed to codex-save Pages | public UI, remediation actions guarded | diagnostics/remediation requests | real command creation risk | Andrey |
+## Main surfaces
 
-## 3. Private/admin surface
+| Surface | Path / endpoint | Access | Main risk |
+| --- | --- | --- | --- |
+| Inbox / timeline UI | `/` | public | command creation, private operational text, broken delivery states |
+| Command API | `/api/commands` | mixed public reads and state-changing writes | unauthorized command dispatch, duplicate work, provider/API cost |
+| Delivery API | `/api/delivery` | public read subset plus protected operations | internal delivery metadata exposure, lifecycle mutation |
+| Reports API/UI | `/api/reports` and report timeline | public read/write rules vary | stale/private reports, payload spam |
+| Admin maintenance | `/api/admin/*` | token required | command mutation or redispatch |
+| Slack callbacks/events | function routes | signing/token verification required | replay, forged events, private Slack data |
+| `codex-save` remediation | separate Pages project | operator action | creating real commands unintentionally |
 
-| Surface | Path / endpoint | Required role/session | Server-side guard | Data returned | Owner |
-| --- | --- | --- | --- | --- | --- |
-| Command dispatch | `functions/api/commands.js` | `LINKS_WRITE_TOKEN` / admin token expected | token verification | command status | Andrey |
-| Delivery | `functions/api/delivery.js` | token/admin expected | token verification | delivery status | Andrey |
-| Reports write | `functions/api/reports.js` | write token expected | token verification | stored report status | Andrey |
-| Dispatch library | `functions/_lib/dispatch.js` | internal server function | env/token guard | provider dispatch result | Andrey |
-| codex-save remediation | `codex-save/` + functions/KV | admin/write token expected | token/KV checks | diagnostics/remediation state | Andrey |
+## Environment-variable names
 
-## 4. Critical frontend journeys
+Known names include:
 
-| Journey | Route(s) | Main user actions | Mobile required? | Expected safe result | Last checked |
-| --- | --- | --- | --- | --- | --- |
-| Inbox home | `/` | open, refresh, navigate reports/delivery | yes | no blank screen, no stale version mismatch | needs verification |
-| Command delivery | `/api/commands`, `/api/delivery` via UI/API | unauthorized request, valid token request, retry | yes | unauthorized blocked; valid path does not duplicate commands | needs verification |
-| Reports | `/api/reports`, report UI | publish/read report, bad token, malformed payload | yes | safe error, no raw token/provider output | needs verification |
-| codex-save diagnostics | codex-save live site | diagnose, cancel, remediation action | yes | no accidental real command without explicit guarded action | needs verification |
+- `LINKS_WRITE_TOKEN`
+- `ADMIN_TOKEN`
+- `COMMAND_DISPATCH_MODE`
+- `OPENAI_API_KEY`
+- `CLOUD_BRIDGE_BASE_URL`
+- `CLOUD_BRIDGE_SHARED_SECRET`
+- `SLACK_BOT_TOKEN`
+- `SLACK_CODEX_DISPATCH_TOKEN`
+- `SLACK_SIGNING_SECRET`
+- `SLACK_CODEX_CHANNEL_ID`
+- `SLACK_CODEX_USER_ID`
+- `SLACK_CODEX_MENTION`
+- `LINKS_STORE`
+- `SAVE_STORE`
 
-## 5. Data inventory
+All tokens, signing secrets, shared secrets, and provider keys are server-only. Query-string token compatibility is sensitive because URLs can leak through history, logs, screenshots, and referrers; prefer headers for new clients.
 
-| Data type | Stored where | Sensitive? | Retention/delete notes | Export/delete status |
-| --- | --- | --- | --- | --- |
-| Command payloads/status | Cloudflare Functions/KV or static data, needs verification | yes | needs verification | needs verification |
-| Reports | reports storage/KV/static output, needs verification | medium | needs verification | needs verification |
-| Slack/Codex dispatch metadata | function logs/provider responses | yes | do not log tokens/private payloads | needs verification |
-| Local secret vault references | local scripts only | yes | names only in repo | needs verification |
+## Required `/safe` routing
 
-## 6. Environment variable names
+1. Command creation/delivery concern → `functions/api/commands.js`, `functions/_lib/commands.js`, `functions/_lib/security.js`, dispatch/provider helpers, `public/app.js`, and focused tests.
+2. Slack concern → Slack event/dispatch files, signing validation, actor checks, replay behavior, safe logs, timeout/fallback policy.
+3. Direct OpenAI concern → server-only route, authorization, quotas/timeouts, prompt/data retention, safe provider errors.
+4. Reports concern → reports API/storage, public serialization, dashboard source links, stale/empty/error states.
+5. `codex-save` concern → remediation confirmation, token boundary, KV binding, and proof that no command is created accidentally.
+6. Release concern → `public/version.json`, `public/index.html`, `public/app.js`, Cloudflare config, release smoke, and rollback helper.
 
-| Env name | Public browser-safe? | Required where | Purpose | Notes |
-| --- | --- | --- | --- | --- |
-| `LINKS_WRITE_TOKEN` | no | Cloudflare/GitHub secret | write authorization | never store value |
-| `ADMIN_TOKEN` | no | Cloudflare secret | admin authorization | never store value |
-| `COMMAND_DISPATCH_MODE` | no | Cloudflare env | dispatch mode | name only |
-| `OPENAI_API_KEY` | no | Cloudflare secret | optional direct OpenAI path | paid API; never store value |
-| `CLOUD_BRIDGE_BASE_URL` | no | Cloudflare env | cloud bridge route | value not stored here |
-| `CLOUD_BRIDGE_SHARED_SECRET` | no | Cloudflare secret | bridge auth | never store value |
-| `SLACK_BOT_TOKEN` | no | Cloudflare secret | Slack dispatch | never store value |
-| `SLACK_CODEX_DISPATCH_TOKEN` | no | Cloudflare secret | Codex Cloud dispatch | never store value |
-| `SLACK_SIGNING_SECRET` | no | Cloudflare secret | Slack verification | never store value |
-| `SLACK_CODEX_CHANNEL_ID` | no | Cloudflare env | target channel | value not stored here |
-| `SLACK_CODEX_USER_ID` | no | Cloudflare env | target user | value not stored here |
-| `SLACK_CODEX_MENTION` | no | Cloudflare env | mention text | value not stored here |
-| `SAVE_STORE` | no | Cloudflare KV binding | codex-save data | binding name only |
+## Confirmed high-risk finding on current `main`
 
-## 7. Auth and roles
+The default `POST /api/commands` create path currently reaches command insertion and asynchronous dispatch without calling the shared `isAuthorized()` guard. The public UI also submits this create request without a write token. By contrast, maintenance/mutation actions such as acknowledge, answer, claim, requeue, dispatch, and replace explicitly require authorization.
 
-- Auth provider: token-based Cloudflare Functions; Slack signing checks where relevant.
-- Roles: owner/admin/write-token clients.
-- Admin identifiers stored where: env/token configuration; values never committed.
-- Login/logout tested: not applicable unless UI auth exists.
-- Direct API access tested: needs verification.
+Risk: an unauthenticated caller may be able to create work for Slack-backed Codex Cloud, Direct OpenAI, Claude/local bridge, or a repository-changing target. This can create command spam, external side effects, duplicate work, or provider cost.
 
-## 8. Database / storage safety
+Do **not** add a one-line global token requirement blindly: the current public UI has no authenticated write-token exchange, so that patch would break the primary command journey. The safe repair must define and test an owner authentication or short-lived server-issued command capability, then fail closed on unauthenticated creation. Until that is implemented and live-verified, treat public command creation as an open high-severity risk.
 
-- Database provider: Cloudflare KV/static files, exact bindings need verification.
-- User-data tables: not applicable.
-- RLS/policies status: not applicable.
-- Storage buckets: Cloudflare KV/assets; access rules need verification.
-- Service-role usage: none expected.
+A separate related check is required for unauthenticated `GET /api/commands?id=...` and all public serializers: they must not expose photo data, temp paths, local workspace paths, Slack/provider diagnostics, tokens, or internal error detail.
 
-## 9. Bot, rate-limit, and API-cost controls
+## Security and reliability checks
 
-| Endpoint/form | Risk | Current control | Missing control | Priority |
-| --- | --- | --- | --- | --- |
-| `/api/commands` | command spam / paid provider cost | token expected | verify rate limit/replay/idempotency | high |
-| `/api/delivery` | duplicate command lifecycle actions | token expected | verify duplicate submit/idempotency | high |
-| `/api/reports` | spam/stale report writes | write token expected | verify payload limit and safe errors | medium |
-| codex-save remediation | accidental real commands | expected guarded remediation flow | verify confirmation/cancel states | high |
+For the selected route verify:
 
-## 10. Frontend UX safety and polish
+- every state-changing action has a server-side authorization/capability check;
+- public read scopes return only an explicit safe field allowlist;
+- command creation has payload size limits, server validation, abuse/rate controls, and duplicate/idempotency behavior;
+- photo uploads validate type/size and never expose raw data URLs or temporary paths on public responses;
+- Slack callbacks verify signatures/timestamps and reject replay;
+- provider retries/timeouts/fallbacks cannot multiply paid calls or create duplicate commands;
+- repo-changing requests retain explicit target-repo routing and do not silently dispatch to the wrong repository;
+- logs omit tokens, auth headers, complete prompts/photos, private Slack payloads, and raw provider responses;
+- public errors are neutral while actionable internal diagnostics remain server-side;
+- version triplet/release checks stay aligned before production claims;
+- rollback and KV/export status are known before risky lifecycle/storage changes.
 
-- Route error boundary exists: needs verification.
-- API safe error wrapper exists: needs verification in `functions/api/*`.
-- Raw provider/database errors hidden from users: needs verification.
-- Loading/empty/success/error/unauthorized states exist: needs verification.
-- Duplicate submit guard exists: needs verification for command/report/remediation flows.
-- Double-click behavior checked: needs verification.
-- Back/refresh behavior checked: needs verification.
-- Mobile layout checked: needs verification.
-- Desktop layout checked: needs verification.
-- Visual polish known issues: version triplet alignment must remain intact.
-- Last browser smoke check: needs verification.
-
-## 11. Headers and browser baseline
-
-- CSP or CSP plan: needs verification.
-- X-Content-Type-Options: needs verification.
-- Referrer-Policy: needs verification.
-- Permissions-Policy: needs verification.
-- Frame protection: needs verification.
-- CORS policy: verify functions restrict non-public write origins/headers.
-- HSTS status: needs live verification before claiming.
-
-## 12. Dependency and supply-chain checks
-
-- Package manager: npm.
-- Lockfile present: needs verification.
-- Dependency audit command: `npm audit` when dependencies are installed.
-- Secret scan command: needs verification.
-- Agent skills / workflow packages present: command bridge and local helper scripts; optional skill-safety route for scripts that dispatch agents.
-- Known accepted findings baseline: none.
-
-## 13. Observability and incident response
-
-- Error logging provider: Cloudflare Pages Functions logs and GitHub Actions.
-- Deployment logs location: Cloudflare Pages / `.github/workflows/deploy-production.yml`.
-- Health check URL: live home and `/version.json`.
-- Rollback method: `npm run rollback:prepare` plus revert/redeploy from `main`; exact last-good commit needs verification.
-- Backup status: GitHub history/KV export needs verification.
-- Last known good deploy/commit: needs verification.
-- Incident contact / owner: Andrey.
-
-## 14. Safe verification commands
-
-```bash
-npm test
-npm run smoke:release
-npm run cloud:check
-```
-
-## 15. Frontend smoke checks
+## Frontend UX smoke checks
 
 ```text
-- Open live home page and /version.json.
-- Check desktop and mobile layout.
-- Try protected write endpoints without token and confirm safe unauthorized response.
-- Verify reports and delivery pages do not show raw provider errors or tokens.
-- Double-click/refresh retry any safe UI submit action and confirm no duplicate command/report.
-- For codex-save, verify diagnose/cancel/remediation confirmation states before any real command side effect.
+- Open `/` on mobile and desktop; hard refresh and use back/forward.
+- Submit empty, text-only, photo, and invalid/oversized photo states.
+- Double-click submit and retry after a simulated failure; confirm one command only.
+- Check bridge, Claude, Slack cloud, and Direct OpenAI route-unavailable states.
+- Confirm pending controls disable and delivery stages remain understandable.
+- Open no-results/empty report and message states.
+- Confirm no raw error, stack trace, private path, token, data URL, or internal provider payload is visible.
+- For codex-save, verify cancel/confirmation before any remediation creates a real command.
 ```
 
-## 16. Known risks / needs verification
+## Headers / CORS / browser baseline
 
-- `needs verification`: live Cloudflare Pages deploy source and latest SHA.
-- `needs verification`: token guards on all write endpoints.
-- `needs verification`: duplicate command/report/remediation idempotency.
-- `needs verification`: headers/CORS baseline.
+- CSP or staged CSP plan: needs verification.
+- `X-Content-Type-Options`, referrer policy, Permissions-Policy, and frame protection: needs live response verification.
+- CORS: public read routes and protected mutation routes must be distinguished; CORS is not an authorization control.
+- HSTS: verify live behavior before documenting as passed.
 
-## 17. Last /safe result
+## Verification commands
 
-- Date: 2026-06-28
-- Routes selected: Cloudflare API/functions + frontend route + Slack/command bridge + paid API/provider cost + frontend UX + rollback/observability.
-- Frontend routes/actions checked: code/doc-only in this PR; live browser checks not completed.
+```bash
+npm ci
+npm test
+npm audit --audit-level=high
+npm run smoke:release
+npm run cloud:check
+git diff --check
+```
+
+For an auth/capability repair, add focused regressions proving:
+
+- anonymous create fails closed;
+- the intended owner UI can create exactly one command;
+- invalid/expired/replayed capability fails;
+- existing protected actions remain protected;
+- public reads contain no private fields;
+- Slack/Direct OpenAI/local fallback is not dispatched after authorization failure.
+
+Do not run real provider/Slack command smoke unless explicitly scoped and safe; it can create external work or cost.
+
+## Observability, rollback, and backup
+
+- Logs: Cloudflare Pages Functions and GitHub Actions; Slack/provider dashboards when relevant.
+- Health: `/`, `/version.json`, safe read endpoints, release smoke, cloud setup check.
+- Rollback: focused revert or `npm run rollback:prepare`, then reviewed redeploy.
+- Backup: Git history; Cloudflare KV export/retention remains `needs verification`.
+- Incident owner: Andrey.
+
+## Last `/safe` result
+
+- Date: 2026-07-19
+- Routes: Cloudflare command bridge, auth/abuse/cost, public serialization, frontend interaction, release/rollback.
 - Critical findings: none proven.
-- High findings: none proven.
-- Fixes applied: repo-level safety map added.
-- PRs opened: this PR.
-- Checks run: project memory, AGENTS, package scripts review.
-- Checks not run: npm tests, Cloudflare live smoke, authenticated/tokened flows.
-- Live verified: needs verification.
-- Next action: run live smoke and token-guard checks before merge/deploy.
+- High findings: unauthenticated default command-create path can reach dispatch; safe replacement auth/capability flow is not present in the public UI.
+- Fix applied: safety map corrected so future agents do not assume command creation is token-gated.
+- Code fix not applied: a one-line token guard would break the current public UI and was therefore not considered a safe minimal patch.
+- Checks run: targeted source review of command handler, shared token helper, public submit flow, package scripts, Cloudflare config, and README.
+- Checks not run: dependency install/tests, live API/browser/header smoke, real Slack/OpenAI/bridge dispatch.
+- Live verified: no — network/DNS access was unavailable in this run.
+- Next action: design and implement a short-lived owner command capability or authenticated owner session in a focused PR, with anonymous-create and no-dispatch regressions.
