@@ -38,3 +38,10 @@ test("UI exposes route health and Slack diagnostic controls", async () => {
   assert.match(source, /Slack actor:/);
   assert.match(source, /claude_photo_not_visible/);
 });
+
+test("UI hides raw read-service errors when no cached data is available", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.match(source, /Данные временно недоступны\. Попробуйте обновить страницу позже\./);
+  assert.doesNotMatch(source, /statusResult\.reason\?\.message/);
+});
