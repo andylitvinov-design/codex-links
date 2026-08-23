@@ -56,7 +56,7 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260516-1306";
+const BUILD_VERSION = "20260823-0903";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
@@ -4217,7 +4217,7 @@ async function refreshAll() {
   if (statusResult.status === "rejected" && hasCachedData) {
     setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
   } else if (statusResult.status === "rejected") {
-    setCommandStatusMessage(String(statusResult.reason?.message || "Не удалось обновить состояние."), { tone: "error" });
+    setCommandStatusMessage("Данные временно недоступны. Попробуйте обновить страницу позже.", { tone: "error" });
   } else if (reposError) {
     setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
   } else {
