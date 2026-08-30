@@ -19,6 +19,7 @@ npm run save:deploy
 ## Required Bindings
 
 - KV namespace bound as `SAVE_STORE`
+- `LINKS_WRITE_TOKEN` or `ADMIN_TOKEN` for the remediation endpoint; diagnostics remain read-only/public
 
 ## Optional Environment Variables
 
@@ -28,3 +29,7 @@ npm run save:deploy
 - `CODEX_SAVE_TARGET_REPO`
 - `CODEX_SAVE_TARGET_REPO_URL`
 - `CODEX_SAVE_TARGET_WORKSPACE_PATH`
+
+## Remediation Authorization
+
+`POST /api/remediation/run` creates a real agent command and therefore fails closed unless the request supplies `X-Write-Token` matching server-side `LINKS_WRITE_TOKEN` or `ADMIN_TOKEN`. Never place either value in repository files, URLs, public JavaScript, logs, or reports.
