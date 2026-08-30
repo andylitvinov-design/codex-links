@@ -28,3 +28,12 @@ export function handleOptions(request) {
 
   return null;
 }
+
+export function isWriteAuthorized(request, env = {}) {
+  const provided = String(request?.headers?.get?.("x-write-token") || "").trim();
+  const accepted = [env.LINKS_WRITE_TOKEN, env.ADMIN_TOKEN]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  return Boolean(provided) && accepted.includes(provided);
+}
