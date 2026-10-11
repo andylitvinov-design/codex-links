@@ -56,11 +56,11 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260823-0903";
+const BUILD_VERSION = "20261011-0902";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
-const IDLE_POLL_INTERVAL_MS = 12000;
+const IDLE_POLL_INTERVAL_MS = 60000;
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
   window.location.hostname.endsWith(".codex-links.pages.dev")
@@ -4096,7 +4096,7 @@ function noteNewDeliveryItems(previousMessages, nextMessages, previousReports, n
 
 async function fetchDeliverySnapshot(options = {}) {
   const url = new URL("/api/delivery", window.location.origin);
-  url.searchParams.set("scope", "public");
+  url.searchParams.set("clientId", storage.clientId);
   if (options.activeOnly) {
     url.searchParams.set("activeOnly", "1");
   }
@@ -4197,10 +4197,11 @@ async function fetchMenuRepos() {
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
-async function refreshAll() {
+async function refreshAll(options = {}) {
+  const shouldRefreshRepos = options.refreshRepos === true || state.menuRepos.length === 0;
   const results = await Promise.allSettled([
     fetchDeliverySnapshot(),
-    fetchMenuRepos()
+    shouldRefreshRepos ? fetchMenuRepos() : Promise.resolve()
   ]);
 
   const statusResult = results[0];
@@ -4390,6 +4391,12 @@ async function submitCommand(event) {
 function startPolling() {
   if (state.commandPoller) {
     window.clearInterval(state.commandPoller);
+    state.commandPoller = null;
+  }
+
+  if (document.hidden) {
+    state.commandPollerInterval = 0;
+    return;
   }
 
   if (isDeliverySpeedModeActive()) {
@@ -4431,6 +4438,14 @@ function bindEvents() {
 
   document.addEventListener("pointerdown", primeReplySound, { passive: true });
   document.addEventListener("keydown", primeReplySound, { passive: true });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      startPolling();
+      return;
+    }
+
+    refreshAll().catch(() => {});
+  });
 
   dispatchModeBridgeButton?.addEventListener("click", () => {
     state.dispatchMode = "bridge";
@@ -4477,7 +4492,7 @@ function bindEvents() {
       return;
     }
 
-    await refreshAll();
+    await refreshAll({ refreshRepos: true });
 
     const stuckDeliveryCommands = getLikelyStuckDeliveryCommands();
 
@@ -4696,7 +4711,7 @@ async function boot() {
 
   await ensureLatestClient();
 
-  await refreshAll();
+  await refreshAll({ refreshRepos: true });
   startPolling();
 
   const url = new URL(window.location.href);
