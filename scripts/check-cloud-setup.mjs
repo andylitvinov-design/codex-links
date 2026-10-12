@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { validateSlackCodexActor } from "../functions/_lib/slack.js";
+import assert from "node:assert/strict";
 
+const OFFLINE = process.argv.includes("--offline");
 const ROOT = process.cwd();
 const DEV_VARS_PATH = path.join(ROOT, ".dev.vars");
-const PROD_URL = process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev";
-const CLOUD_BRIDGE_HEALTH_URL = process.env.CLOUD_BRIDGE_HEALTH_URL || "http://127.0.0.1:8788/healthz";
+const PROD_URL = OFFLINE ? "" : (process.env.CODEX_LINKS_URL || "https://codex-links.pages.dev");
+const CLOUD_BRIDGE_HEALTH_URL = OFFLINE ? "" : (process.env.CLOUD_BRIDGE_HEALTH_URL || "http://127.0.0.1:8788/healthz");
 const IS_CI = Boolean(String(process.env.GITHUB_ACTIONS || process.env.CI || "").trim());
 const REQUIRED = [
   "LINKS_WRITE_TOKEN",
@@ -115,7 +116,81 @@ async function loadJson(url) {
   }
 }
 
+function inspectCloudConfiguration(merged) {
+  const missing = REQUIRED.filter((key) => !String(merged[key] || "").trim());
+  const configuredMode = String(merged.COMMAND_DISPATCH_MODE || "").trim().toLowerCase();
+  const wantsDirectOpenAi = configuredMode === "direct-openai";
+  const hasOpenAiKey = Boolean(String(merged.OPENAI_API_KEY || "").trim());
+  const hasSlackRoute = Boolean(String(merged.SLACK_BOT_TOKEN || "").trim()) && Boolean(String(merged.SLACK_CODEX_CHANNEL_ID || "").trim());
+  const hasTrustedBridge = Boolean(String(merged.CLOUD_BRIDGE_BASE_URL || "").trim()) && Boolean(String(merged.CLOUD_BRIDGE_SHARED_SECRET || "").trim());
+  const hasCloudRoute = hasTrustedBridge || hasOpenAiKey || hasSlackRoute;
+
+  if (wantsDirectOpenAi && !hasOpenAiKey) {
+    missing.push("OPENAI_API_KEY for direct OpenAI mode");
+  }
+
+  if (!hasCloudRoute) {
+    missing.push("OPENAI_API_KEY or Slack cloud route or trusted cloud bridge");
+  }
+
+
+  return { missing, hasOpenAiKey, hasSlackRoute, hasTrustedBridge };
+}
+
+async function verifyOfflineCloudSetup() {
+  // Exercise the same configuration requirements as the live operator check.
+  // These values are synthetic fixtures; never read .dev.vars or provider env here.
+  const base = { LINKS_WRITE_TOKEN: "offline-fixture", COMMAND_DISPATCH_MODE: "cloud-via-slack" };
+  const slack = { ...base, SLACK_BOT_TOKEN: "offline-fixture", SLACK_CODEX_CHANNEL_ID: "C_FIXTURE" };
+  const bridge = { ...base, CLOUD_BRIDGE_BASE_URL: "https://fixture.invalid", CLOUD_BRIDGE_SHARED_SECRET: "offline-fixture" };
+  const direct = { ...base, COMMAND_DISPATCH_MODE: "direct-openai", OPENAI_API_KEY: "offline-fixture" };
+  const cases = [
+    [{}, ["LINKS_WRITE_TOKEN", "COMMAND_DISPATCH_MODE", "OPENAI_API_KEY or Slack cloud route or trusted cloud bridge"]],
+    [base, ["OPENAI_API_KEY or Slack cloud route or trusted cloud bridge"]],
+    [slack, []],
+    [bridge, []],
+    [direct, []],
+    [{ ...slack, COMMAND_DISPATCH_MODE: "direct-openai" }, ["OPENAI_API_KEY for direct OpenAI mode"]]
+  ];
+  for (const [config, expectedMissing] of cases) {
+    assert.deepEqual(inspectCloudConfiguration(config).missing, expectedMissing);
+  }
+
+  // Run the actual status derivation against a synthetic in-memory store.
+  const { deriveBridgeStatusFromCommands } = await import("../functions/_lib/status.js");
+  const now = new Date().toISOString();
+  const store = new Map([
+    ["app:config:v1", {}],
+    ["commands:active:v2", []],
+    ["commands:recent:v2", []],
+    ["commands:index:v1", []],
+    ["bridge:status:v1", { localBridge: { online: true, managedBy: "launchd", lastRunAt: now, state: "idle" } }]
+  ]);
+  const status = await deriveBridgeStatusFromCommands({
+    COMMAND_DISPATCH_MODE: "local-bridge",
+    LINKS_STORE: {
+      async get(key, type) {
+        assert.equal(type, "json");
+        assert.ok(store.has(key), "Unexpected fixture read: " + key);
+        return structuredClone(store.get(key));
+      },
+      async put() { assert.fail("Offline cloud setup must not write KV."); },
+      async delete() { assert.fail("Offline cloud setup must not delete KV."); }
+    }
+  });
+  assert.equal(status.state, "idle");
+  assert.equal(status.pendingCount, 0);
+  assert.equal(status.bridgeOnline, true);
+  assert.equal(status.routes.localBridge.state, "healthy");
+  console.log("Offline cloud setup checks passed: configuration requirements and synthetic status derivation. Live provider health is not checked.");
+}
+
 async function main() {
+  if (OFFLINE) {
+    await verifyOfflineCloudSetup();
+    return;
+  }
+
   const fileVars = parseEnvFile(DEV_VARS_PATH);
   const merged = { ...fileVars, ...process.env };
 
@@ -138,21 +213,7 @@ async function main() {
 
   console.log("");
 
-  const missing = REQUIRED.filter((key) => !String(merged[key] || "").trim());
-  const configuredMode = String(merged.COMMAND_DISPATCH_MODE || "").trim().toLowerCase();
-  const wantsDirectOpenAi = configuredMode === "direct-openai";
-  const hasOpenAiKey = Boolean(String(merged.OPENAI_API_KEY || "").trim());
-  const hasSlackRoute = Boolean(String(merged.SLACK_BOT_TOKEN || "").trim()) && Boolean(String(merged.SLACK_CODEX_CHANNEL_ID || "").trim());
-  const hasTrustedBridge = Boolean(String(merged.CLOUD_BRIDGE_BASE_URL || "").trim()) && Boolean(String(merged.CLOUD_BRIDGE_SHARED_SECRET || "").trim());
-  const hasCloudRoute = hasTrustedBridge || hasOpenAiKey || hasSlackRoute;
-
-  if (wantsDirectOpenAi && !hasOpenAiKey) {
-    missing.push("OPENAI_API_KEY for direct OpenAI mode");
-  }
-
-  if (!hasCloudRoute) {
-    missing.push("OPENAI_API_KEY or Slack cloud route or trusted cloud bridge");
-  }
+  const { missing, hasOpenAiKey, hasSlackRoute, hasTrustedBridge } = inspectCloudConfiguration(merged);
 
   if (missing.length) {
     console.log(IS_CI ? "Missing local values (advisory in CI):" : "Missing local values:");
@@ -168,6 +229,7 @@ async function main() {
   }
 
   if (hasSlackRoute) {
+    const { validateSlackCodexActor } = await import("../functions/_lib/slack.js");
     console.log("");
     const actorValidation = await validateSlackCodexActor(merged, {
       timeoutMs: 10_000,

@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -13,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -23,11 +28,80 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: UI error visibility regression
-        run: node --test tests/app-status-visibility.test.mjs
+      - name: Offline delivery and status regressions
+        run: node --import ./tests/helpers/no-external-effects.mjs --test tests/app-status-visibility.test.mjs tests/delivery-polling.test.mjs tests/messages-storage.test.mjs tests/status-bridge-health.test.mjs tests/cloud-setup-offline.test.mjs
 
-      - name: Cloud setup check
-        run: npm run cloud:check
+      - name: Cloud setup check (offline fixtures)
+        run: node --import ./tests/helpers/no-external-effects.mjs scripts/check-cloud-setup.mjs --offline
 
       - name: Release smoke check
         run: npm run smoke:release
+
+  browser-acceptance:
+    # Temporary explicit image: preserve sandboxed Chromium without changing host security.
+    # Revisit this pin before the ubuntu-22.04 runner retirement.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/codex-links-browser-binaries
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # This isolated package has one exact official dependency. Do not run lifecycle scripts.
+      # Registry resolution is captured as evidence, not presented as a pre-reviewed lockfile.
+      - name: Resolve exact browser dependency and record integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-links-browser-home" browser-acceptance-results
+          : > "$RUNNER_TEMP/codex-links-npm-user.conf"
+          : > "$RUNNER_TEMP/codex-links-npm-global.conf"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-browser-home" \
+            NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/codex-links-npm-user.conf" \
+            NPM_CONFIG_GLOBALCONFIG="$RUNNER_TEMP/codex-links-npm-global.conf" \
+            npm install --prefix tests/browser --ignore-scripts --no-audit --no-fund \
+              --package-lock=true --registry=https://registry.npmjs.org
+          node tests/browser/verify-dependencies.mjs
+          cp tests/browser/package-lock.json browser-acceptance-results/package-lock.json
+
+      - name: Install pinned Chromium and official runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-browser-home" \
+            PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
+            node tests/browser/node_modules/playwright/cli.js install --with-deps chromium
+
+      # Only loopback exists during application execution. Run Chromium as the normal
+      # runner user, keep its sandbox enabled, and fail if the runner cannot support it.
+      - name: Real browser acceptance with external network absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- /bin/bash -c '
+            set -euo pipefail
+            ip link set lo up
+            exec runuser --user "$1" -- env -i PATH="$2" HOME="$3" \
+              PLAYWRIGHT_BROWSERS_PATH="$4" \
+              xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" \
+              node tests/browser/acceptance.mjs
+          ' acceptance "$(id -un)" "$PATH" "$RUNNER_TEMP/codex-links-browser-home" "$PLAYWRIGHT_BROWSERS_PATH"
+
+      - name: Upload synthetic acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-acceptance-${{ github.sha }}
+          path: browser-acceptance-results/
+          if-no-files-found: warn
+          retention-days: 7
