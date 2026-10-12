@@ -67,7 +67,7 @@ test("verifyOpenClawLive fails on live commit mismatch", async () => {
     if (url.endsWith("/api/status")) {
       return jsonResponse({
         status: "ok",
-        commitSha: "live456",
+        commitSha: "cafe456",
         commitRef: "main",
         googleSheetReadOk: true
       });
@@ -75,7 +75,7 @@ test("verifyOpenClawLive fails on live commit mismatch", async () => {
     return jsonResponse({ ok: true, warnings: [] });
   };
 
-  const result = await verifyOpenClawLive({ project: "finance", expectedCommit: "expected123" }, { fetchImpl });
+  const result = await verifyOpenClawLive({ project: "finance", expectedCommit: "badc123" }, { fetchImpl });
 
   assert.equal(result.ok, false);
   assert.equal(result.result, "fail");
@@ -101,4 +101,17 @@ test("verifyOpenClawLive includes bounded non-json response metadata", async () 
   assert.equal(status.jsonParsed, false);
   assert.match(status.bodyFirst300, /platform auth page/);
   assert.match(result.exactFailingCommand, /api\/status/);
+});
+
+// Invalid input must stop before even the injected transport is called.
+test("verifyOpenClawLive rejects a non-SHA before fetching", async () => {
+  let calls = 0;
+  const result = await verifyOpenClawLive({ project: "finance", expectedCommit: "expected123" }, {
+    fetchImpl: async () => { calls += 1; throw new Error("must not fetch"); }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.result, "fail");
+  assert.equal(result.status, 400);
+  assert.match(result.error, /git SHA/);
+  assert.equal(calls, 0);
 });

@@ -19,6 +19,11 @@ const state = {
   bridgeWatchdog: null,
   commandPoller: null,
   commandPollerInterval: 0,
+  deliveryRefreshPromise: null,
+  deliveryRefreshMode: "",
+  deliveryRefreshRequested: false,
+  deliveryPollInFlight: false,
+  refreshReposRequested: false,
   lastRenderedTimelineSize: 0,
   lastRenderedTimelineSignature: "",
   answerOpenUntil: {},
@@ -56,11 +61,12 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20260516-1306";
+const BUILD_VERSION = "20261012-2016";
 const SPEED_POLL_INTERVAL_MS = 1000;
 const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 3500;
-const IDLE_POLL_INTERVAL_MS = 12000;
+const IDLE_POLL_INTERVAL_MS = 60000;
+const DELIVERY_REQUEST_TIMEOUT_MS = 10000;
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
   window.location.hostname.endsWith(".codex-links.pages.dev")
@@ -859,7 +865,7 @@ async function ensureLatestClient(options = {}) {
   url.searchParams.set("_", String(Date.now()));
 
   try {
-    const response = await fetch(url.toString(), {
+    const { response, data } = await fetchJsonWithTimeout(url.toString(), {
       cache: "no-store",
       headers: {
         accept: "application/json"
@@ -870,7 +876,6 @@ async function ensureLatestClient(options = {}) {
       return false;
     }
 
-    const data = await response.json();
     const latestVersion = String(data?.build || "").trim();
     const requestedVersion = String(new URL(window.location.href).searchParams.get("v") || "").trim();
 
@@ -2218,7 +2223,7 @@ async function retryCommandWithExecutor(commandId, executor) {
     throw new Error(String(result?.error || "").trim() || `Не удалось повторить сообщение (HTTP ${response.status}).`);
   }
 
-  await refreshAll();
+  await refreshAll({ requireFresh: true });
 }
 
 async function requestAdminWriteToken(forcePrompt = false) {
@@ -2392,7 +2397,7 @@ async function runDeliveryReset() {
     const changedCount = Number(result?.summary?.changedCount || 0);
     const dispatchedCount = Number(result?.summary?.dispatchedCount || 0);
     setCommandStatusMessage(`Reset выполнен: changed ${changedCount}, dispatched ${dispatchedCount}. ${formatMaintenanceSummary(result?.summary)}`, { tone: "processing" });
-    await refreshAll();
+    await refreshAll({ requireFresh: true });
   } catch (error) {
     setCommandStatusMessage(String(error?.message || "Reset maintenance не выполнился."), { tone: "error" });
   } finally {
@@ -2442,7 +2447,7 @@ async function runSlackDiagnostic() {
     const probeText = diagnostic.probeMessageTs ? ` probe ${diagnostic.probeMessageTs}` : "";
     const replyText = diagnostic.probeReplyTs ? ` reply ${diagnostic.probeReplyTs}` : " no reply";
     setCommandStatusMessage(`Slack diagnostic: ${stateText}.${probeText}${replyText}`, { tone: diagnostic.ok ? "success" : "processing" });
-    await refreshAll();
+    await refreshAll({ requireFresh: true });
   } catch (error) {
     setCommandStatusMessage(String(error?.message || "Slack diagnostic failed."), { tone: "error" });
   } finally {
@@ -3798,18 +3803,42 @@ function renderCommandThreads() {
   renderCommands();
 }
 
+async function fetchJsonWithTimeout(resource, init = {}) {
+  const controller = new AbortController();
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      controller.abort();
+      reject(new Error("Request timed out."));
+    }, DELIVERY_REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([
+      (async () => {
+        const response = await fetch(resource, { ...init, signal: controller.signal });
+        const data = await response.json();
+        return { response, data };
+      })(),
+      timeout
+    ]);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function fetchJsonWithRetry(resource, init = {}, label = "data") {
   let lastError = null;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await fetch(resource, init);
+      const { response, data } = await fetchJsonWithTimeout(resource, init);
 
       if (!response.ok) {
         throw new Error(`Failed to load ${label}: ${response.status}`);
       }
 
-      return await response.json();
+      return data;
     } catch (error) {
       lastError = error;
 
@@ -4102,7 +4131,7 @@ async function fetchDeliverySnapshot(options = {}) {
   }
   url.searchParams.set("_", String(Date.now()));
 
-  const response = await fetch(url.toString(), {
+  const { response, data } = await fetchJsonWithTimeout(url.toString(), {
     cache: "no-store",
     headers: {
       accept: "application/json"
@@ -4110,12 +4139,11 @@ async function fetchDeliverySnapshot(options = {}) {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const message = String(payload?.message || "").trim();
+    const message = String(data?.message || "").trim();
     throw new Error(message || `Failed to load delivery: ${response.status}`);
   }
 
-  return response.json();
+  return data;
 }
 
 function applyDeliverySnapshot(snapshot) {
@@ -4197,43 +4225,86 @@ async function fetchMenuRepos() {
   state.menuRepos = Array.isArray(data) ? data : Array.isArray(data?.repos) ? data.repos : [];
 }
 
-async function refreshAll() {
-  const results = await Promise.allSettled([
-    fetchDeliverySnapshot(),
-    fetchMenuRepos()
-  ]);
-
-  const statusResult = results[0];
-  const reposError = results[1].status === "rejected" ? results[1].reason : null;
-
-  if (statusResult.status === "fulfilled") {
-    applyDeliverySnapshot(statusResult.value);
+async function runDeliveryRefresh(refresh, mode = "full") {
+  if (state.deliveryRefreshPromise) {
+    return state.deliveryRefreshPromise;
   }
 
-  renderDispatchModeUi();
-
-  const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
-
-  if (statusResult.status === "rejected" && hasCachedData) {
-    setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
-  } else if (statusResult.status === "rejected") {
-    setCommandStatusMessage(String(statusResult.reason?.message || "Не удалось обновить состояние."), { tone: "error" });
-  } else if (reposError) {
-    setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
-  } else {
-    syncCommandStatusFromState();
-  }
-
-  startPolling();
-  renderCommands();
+  const settle = async (value, error) => {
+    state.deliveryRefreshPromise = null;
+    state.deliveryRefreshMode = "";
+    if (state.deliveryRefreshRequested || (state.refreshReposRequested && !document.hidden)) {
+      // A queued fresh/full read replaces the older read's outcome, even if it failed.
+      return refreshAll();
+    }
+    startPolling();
+    if (error) {
+      throw error;
+    }
+    return value;
+  };
+  const pending = Promise.resolve().then(refresh).then(
+    value => settle(value, null),
+    error => settle(undefined, error)
+  );
+  state.deliveryRefreshPromise = pending;
+  state.deliveryRefreshMode = mode;
+  return pending;
 }
 
-async function refreshSpeedMode() {
-  const snapshot = await fetchDeliverySnapshot({ activeOnly: true });
-  applyDeliverySnapshot(snapshot);
-  renderDispatchModeUi();
-  syncCommandStatusFromState();
-  renderCommands();
+async function refreshAll(options = {}) {
+  if (state.deliveryRefreshPromise && (options.requireFresh === true || state.deliveryRefreshMode === "active")) {
+    state.deliveryRefreshRequested = true;
+  }
+  if (options.refreshRepos === true) {
+    state.refreshReposRequested = true;
+  }
+
+  return runDeliveryRefresh(async () => {
+    state.deliveryRefreshRequested = false;
+    const shouldRefreshRepos = state.refreshReposRequested || state.menuRepos.length === 0;
+    state.refreshReposRequested = false;
+    const results = await Promise.allSettled([
+      fetchDeliverySnapshot(),
+      shouldRefreshRepos ? fetchMenuRepos() : Promise.resolve()
+    ]);
+
+    const statusResult = results[0];
+    const reposError = results[1].status === "rejected" ? results[1].reason : null;
+
+    if (statusResult.status === "fulfilled") {
+      applyDeliverySnapshot(statusResult.value);
+    }
+
+    renderDispatchModeUi();
+
+    const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
+
+    if (statusResult.status === "rejected" && hasCachedData) {
+      setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
+    } else if (statusResult.status === "rejected") {
+      setCommandStatusMessage("Данные временно недоступны. Попробуйте обновить страницу позже.", { tone: "error" });
+    } else if (reposError) {
+      setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
+    } else {
+      syncCommandStatusFromState();
+    }
+
+    renderCommands();
+  });
+}
+
+async function refreshSpeedMode(options = {}) {
+  if (options.requireFresh === true && state.deliveryRefreshPromise) {
+    state.deliveryRefreshRequested = true;
+  }
+  return runDeliveryRefresh(async () => {
+    const snapshot = await fetchDeliverySnapshot({ activeOnly: true });
+    applyDeliverySnapshot(snapshot);
+    renderDispatchModeUi();
+    syncCommandStatusFromState();
+    renderCommands();
+  }, "active");
 }
 
 function enterDeliverySpeedMode() {
@@ -4384,28 +4455,42 @@ async function submitCommand(event) {
     { tone: "processing" }
   );
 
-  refreshSpeedMode().catch(() => {});
+  refreshSpeedMode({ requireFresh: true }).catch(() => {});
+}
+
+async function pollDelivery() {
+  if (document.hidden || state.deliveryPollInFlight || state.deliveryRefreshPromise) {
+    return;
+  }
+
+  state.deliveryPollInFlight = true;
+  try {
+    if (await ensureLatestClient()) {
+      return;
+    }
+    if (document.hidden) {
+      return;
+    }
+
+    if (isDeliverySpeedModeActive()) {
+      await refreshSpeedMode();
+    } else {
+      await refreshAll();
+    }
+  } finally {
+    state.deliveryPollInFlight = false;
+    startPolling();
+  }
 }
 
 function startPolling() {
   if (state.commandPoller) {
     window.clearInterval(state.commandPoller);
+    state.commandPoller = null;
   }
 
-  if (isDeliverySpeedModeActive()) {
-    state.commandPollerInterval = SPEED_POLL_INTERVAL_MS;
-    state.commandPoller = window.setInterval(async () => {
-      if (!isDeliverySpeedModeActive()) {
-        startPolling();
-        return;
-      }
-
-      if (await ensureLatestClient()) {
-        return;
-      }
-
-      refreshSpeedMode().catch(() => {});
-    }, state.commandPollerInterval);
+  if (document.hidden) {
+    state.commandPollerInterval = 0;
     return;
   }
 
@@ -4414,13 +4499,11 @@ function startPolling() {
     return status === "queued" || status === "dispatched" || status === "processing";
   });
 
-  state.commandPollerInterval = hasActiveCommands ? FAST_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
-  state.commandPoller = window.setInterval(async () => {
-    if (await ensureLatestClient()) {
-      return;
-    }
-
-    refreshAll().catch(() => {});
+  state.commandPollerInterval = isDeliverySpeedModeActive()
+    ? SPEED_POLL_INTERVAL_MS
+    : (hasActiveCommands ? FAST_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
+  state.commandPoller = window.setInterval(() => {
+    pollDelivery().catch(() => {});
   }, state.commandPollerInterval);
 }
 
@@ -4431,6 +4514,15 @@ function bindEvents() {
 
   document.addEventListener("pointerdown", primeReplySound, { passive: true });
   document.addEventListener("keydown", primeReplySound, { passive: true });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      startPolling();
+      return;
+    }
+
+    startPolling();
+    refreshAll().catch(() => {});
+  });
 
   dispatchModeBridgeButton?.addEventListener("click", () => {
     state.dispatchMode = "bridge";
@@ -4477,7 +4569,7 @@ function bindEvents() {
       return;
     }
 
-    await refreshAll();
+    await refreshAll({ refreshRepos: true });
 
     const stuckDeliveryCommands = getLikelyStuckDeliveryCommands();
 
@@ -4497,7 +4589,7 @@ function bindEvents() {
     const refreshed = await runDeliveryMaintenanceFromRefresh();
 
     if (refreshed) {
-      await refreshAll();
+      await refreshAll({ requireFresh: true });
     }
   });
 
@@ -4696,7 +4788,7 @@ async function boot() {
 
   await ensureLatestClient();
 
-  await refreshAll();
+  await refreshAll({ refreshRepos: true });
   startPolling();
 
   const url = new URL(window.location.href);

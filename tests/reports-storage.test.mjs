@@ -26,7 +26,8 @@ function createMockEnv() {
   };
 }
 
-test("upsertReports dedupes same report id and keeps latest", async () => {
+test("upsertReports dedupes same report id and keeps latest", async (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-04-24T12:00:00.000Z"));
   const env = createMockEnv();
   const created = new Date("2026-04-20T10:00:00.000Z").toISOString();
   const replaced = new Date("2026-04-21T10:00:00.000Z").toISOString();
@@ -57,7 +58,8 @@ test("upsertReports dedupes same report id and keeps latest", async () => {
   assert.equal(reports[0].generated_at, replaced);
 });
 
-test("upsertReports accepts baseline status when previous snapshot missing", async () => {
+test("upsertReports accepts baseline status when previous snapshot missing", async (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-04-24T12:00:00.000Z"));
   const env = createMockEnv();
   const report = await upsertReports(env, [{
     report_id: "daily-report-2026-04-22",
@@ -74,7 +76,8 @@ test("upsertReports accepts baseline status when previous snapshot missing", asy
   assert.equal(read[0].status, "baseline");
 });
 
-test("upsertReports preserves report title and summary", async () => {
+test("upsertReports preserves report title and summary", async (t) => {
+  t.mock.method(Date, "now", () => Date.parse("2026-04-24T12:00:00.000Z"));
   const env = createMockEnv();
   await upsertReports(env, [{
     report_id: "management-morning-report-2026-04-23",
@@ -91,4 +94,20 @@ test("upsertReports preserves report title and summary", async () => {
   assert.equal(reports.length, 1);
   assert.equal(reports[0].title, "Management Morning Report (2026-04-23)");
   assert.equal(reports[0].summary, "Agent 1: focus; Agent 2: action; Daily Changes: item.");
+});
+
+// Keep the fixture clock deterministic without concealing retention behavior.
+test("readReports expires stored reports after the 90-day boundary", async (t) => {
+  const generatedAt = "2026-04-23T12:00:00.000Z";
+  let now = Date.parse(generatedAt);
+  t.mock.method(Date, "now", () => now);
+  const env = createMockEnv();
+  await upsertReports(env, [{
+    report_id: "retention-boundary", report_date: "2026-04-23",
+    generated_at: generatedAt, status: "ok", metric_changes: []
+  }]);
+  now += 90 * 24 * 60 * 60 * 1000;
+  assert.equal((await readReports(env)).length, 1, "exactly 90 days is retained");
+  now += 1;
+  assert.equal((await readReports(env)).length, 0, "older than 90 days expires");
 });

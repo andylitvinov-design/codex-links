@@ -38,3 +38,28 @@ test("UI exposes route health and Slack diagnostic controls", async () => {
   assert.match(source, /Slack actor:/);
   assert.match(source, /claude_photo_not_visible/);
 });
+
+test("UI hides raw read-service errors when no cached data is available", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.match(source, /Данные временно недоступны\. Попробуйте обновить страницу позже\./);
+  assert.doesNotMatch(source, /statusResult\.reason\?\.message/);
+});
+
+
+test("UI limits idle KV pressure and preserves the shared public feed", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.match(source, /IDLE_POLL_INTERVAL_MS = 60000/);
+  assert.match(source, /url\.searchParams\.set\("scope", "public"\)/);
+  assert.doesNotMatch(source, /url\.searchParams\.set\("clientId", storage\.clientId\)/);
+  assert.match(source, /if \(document\.hidden\) \{\s*state\.commandPollerInterval = 0;\s*return;/);
+});
+
+test("UI does not refetch the repository manifest on every delivery poll", async () => {
+  const source = await readFile(appScriptPath, "utf8");
+
+  assert.match(source, /const shouldRefreshRepos = state\.refreshReposRequested \|\| state\.menuRepos\.length === 0/);
+  assert.match(source, /shouldRefreshRepos \? fetchMenuRepos\(\) : Promise\.resolve\(\)/);
+  assert.match(source, /refreshAll\(\{ refreshRepos: true \}\)/);
+});

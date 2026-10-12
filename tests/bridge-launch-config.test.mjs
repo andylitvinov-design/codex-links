@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 
 const runScriptPath = new URL("../scripts/run-links-bridge.sh", import.meta.url);
@@ -131,7 +132,8 @@ test("bridge executor starts fresh Codex threads for new text commands by defaul
   const source = await readFile(bridgeScriptPath, "utf8");
 
   assert.match(source, /const BRIDGE_CODEX_NEW_THREAD_PER_COMMAND = String\(process\.env\.BRIDGE_CODEX_NEW_THREAD_PER_COMMAND \|\| "1"\)/);
-  assert.match(source, /const useFreshCodexThread = BRIDGE_EXECUTOR === "codex" && BRIDGE_CODEX_NEW_THREAD_PER_COMMAND && !command\.photo;/);
+  assert.match(source, /const hasPhoto = Boolean\(command\.photo\);/);
+  assert.match(source, /const useFreshCodexThread = BRIDGE_EXECUTOR === "codex" && BRIDGE_CODEX_NEW_THREAD_PER_COMMAND && !hasPhoto;/);
   assert.match(source, /useFreshCodexThread[\s\S]+runCodexExecFreshThread\(/);
   assert.match(source, /useFreshCodexThread[\s\S]+runCodexExecFreshThread\([\s\S]+:[\s\S]+runCodexResume\(/);
 });
@@ -196,4 +198,23 @@ test("Claude photo visibility failures are classified separately", async () => {
 
   assert.match(source, /claude_photo_not_visible/);
   assert.match(source, /BRIDGE_EXECUTOR === "claude" && isPhotoVisibilityFailure/);
+});
+
+// Evaluate only the audited condition, never the bridge's effectful entrypoint.
+test("fresh-thread selection preserves text/photo and executor behavior", async () => {
+  const source = await readFile(bridgeScriptPath, "utf8");
+  const hasPhoto = source.match(/const hasPhoto = Boolean\(command\.photo\);/)?.[0];
+  const selection = source.match(/const useFreshCodexThread = BRIDGE_EXECUTOR === "codex" && BRIDGE_CODEX_NEW_THREAD_PER_COMMAND && !hasPhoto;/)?.[0];
+  assert.ok(hasPhoto);
+  assert.ok(selection);
+  for (const executor of ["codex", "claude"]) {
+    for (const enabled of [true, false]) {
+      for (const photo of [undefined, null, false, {}, { hasDataUrl: true }]) {
+        const actual = vm.runInNewContext(`${hasPhoto}\n${selection}\nuseFreshCodexThread`, {
+          BRIDGE_EXECUTOR: executor, BRIDGE_CODEX_NEW_THREAD_PER_COMMAND: enabled, command: { photo }
+        });
+        assert.equal(actual, executor === "codex" && enabled && !photo);
+      }
+    }
+  }
 });
