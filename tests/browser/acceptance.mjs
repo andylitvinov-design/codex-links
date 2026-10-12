@@ -1,6 +1,7 @@
 // Real-browser acceptance uses only a loopback fixture server. Run inside a network namespace.
 import assert from "node:assert/strict";
 import http from "node:http";
+import { spawn } from "node:child_process";
 import { readFile, mkdir, writeFile, mkdtemp, chmod, rm } from "node:fs/promises";
 import { tmpdir, networkInterfaces } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -110,6 +111,12 @@ const server = http.createServer(async (req, res) => {
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const origin="http://127.0.0.1:"+server.address().port;
 let context;
+let browser;
+let browserProcess;
+let browserExit;
+let browserError;
+let browserStopped=false;
+let browserLog="";
 let profile;
 async function waitUntil(predicate, timeout=15000) {
   const deadline=Date.now()+timeout;
@@ -122,7 +129,29 @@ try {
   // Headful Chromium under Xvfb exercises actual tab visibility; no document.hidden override.
   profile=await mkdtemp(resolve(tmpdir(), "codex-links-browser-profile-"));
   await chmod(profile, 0o700);
-  context=await chromium.launchPersistentContext(profile,{headless:false,chromiumSandbox:true,args:["--disable-background-networking"],viewport:{width:1100,height:800}});
+  // Native Chromium retains its default sandbox. Playwright attaches without focus
+  // emulation; noDefaults is documented in the pinned 1.62.1 connectOverCDP API.
+  browserProcess=spawn(chromium.executablePath(),[
+    "--remote-debugging-address=127.0.0.1","--remote-debugging-port=0",
+    "--user-data-dir="+profile,"--window-size=1100,800",
+    "--disable-background-networking","--no-first-run","--no-default-browser-check",
+    "--disable-sync","about:blank"
+  ],{stdio:["ignore","ignore","pipe"]});
+  browserProcess.stderr.on("data",chunk=>{browserLog=(browserLog+chunk.toString()).slice(-8000);});
+  browserExit=new Promise(resolve=>{
+    browserProcess.once("exit",()=>{browserStopped=true;resolve();});
+    browserProcess.once("error",error=>{browserStopped=true;browserError=error;resolve();});
+  });
+  let port;
+  await waitUntil(async()=>{
+    if(browserError)throw browserError;
+    if(browserStopped)throw new Error("Sandboxed Chromium exited before CDP startup: "+browserLog);
+    try {port=Number((await readFile(resolve(profile,"DevToolsActivePort"),"utf8")).split("\n")[0]);return Number.isInteger(port)&&port>0&&port<65536;}
+    catch(error){if(error.code==="ENOENT")return false;throw error;}
+  });
+  browser=await chromium.connectOverCDP("http://127.0.0.1:"+port,{noDefaults:true,isLocal:true});
+  context=browser.contexts()[0];
+  assert.ok(context,"Native Chromium default context must exist.");
   await context.route("**/*", route=>{
     if(new URL(route.request().url()).origin!==origin){external.push(route.request().url());return route.abort("blockedbyclient");}
     return route.continue();
@@ -150,14 +179,8 @@ try {
   }
   checks.push("Initial rendered feed includes phone, desktop and Telegram commands; all three replies were expanded and visible.");
 
-  // Playwright enables focus emulation by default, keeping background pages visible.
-  // Disable that automation override so real Chromium tab activation drives visibility.
-  // Source: microsoft/playwright v1.62.1, chromium/crPage.ts, setFocusEmulationEnabled.
-  const pageSession=await context.newCDPSession(page);
-  await pageSession.send("Emulation.setFocusEmulationEnabled",{enabled:false});
+  // noDefaults prevents focus emulation; native tab activation drives visibility.
   const second=await context.newPage();await second.goto(origin+"/blank");
-  const secondSession=await context.newCDPSession(second);
-  await secondSession.send("Emulation.setFocusEmulationEnabled",{enabled:false});
   await second.bringToFront();
   await page.waitForFunction(()=>document.hidden===true,null,{polling:50});
   await waitUntil(()=>active===0);
@@ -218,16 +241,28 @@ try {
   assert.deepEqual(pageErrors,[]);
   assert.deepEqual(external,[]);
   await page.screenshot({path:resolve(output,"shared-feed.png"),fullPage:true});
-  const report={result:"passed",playwright:playwrightPackage.version,browser:context.browser()?.version() || "Chromium",build,checks,maxConcurrentDelivery:maxActive,abortedRequests:aborted,syntheticCommandSubmissions:submitCount,events,externalRequestsBlocked:external.length,limitations:["Synthetic responses only; no production, Cloudflare preview or account analytics.","Browser acceptance does not prove production KV savings.","Reports and provider integrations are not covered by these browser fixtures."]};
+  const report={result:"passed",playwright:playwrightPackage.version,launch:"native sandboxed Chromium; loopback CDP noDefaults",browser:context.browser()?.version() || "Chromium",build,checks,maxConcurrentDelivery:maxActive,abortedRequests:aborted,syntheticCommandSubmissions:submitCount,events,externalRequestsBlocked:external.length,limitations:["Synthetic responses only; no production, Cloudflare preview or account analytics.","Browser acceptance does not prove production KV savings.","Reports and provider integrations are not covered by these browser fixtures."]};
   await writeFile(resolve(output,"report.json"),JSON.stringify(report,null,2)+"\n");
   console.log(JSON.stringify(report));
 } catch(error) {
-  await writeFile(resolve(output,"report.json"),JSON.stringify({result:"failed",build,error:error.message,checks,events,pageErrors,external,maxActive},null,2)+"\n");
+  await writeFile(resolve(output,"report.json"),JSON.stringify({result:"failed",build,error:error.message,checks,events,pageErrors,external,maxActive,browserLog},null,2)+"\n");
   throw error;
 } finally {
   for(const item of held)item.res.destroy();
-  if(context)await context.close();
-  if(profile)await rm(profile,{recursive:true,force:true});
+  if(browser) {
+    const gracefulClose=async()=>{
+      try {const session=await browser.newBrowserCDPSession();await session.send("Browser.close");} catch {}
+      await browser.close().catch(()=>{});
+    };
+    await Promise.race([gracefulClose(),new Promise(resolve=>setTimeout(resolve,2000))]);
+  }
+  if(browserProcess && !browserStopped)browserProcess.kill("SIGTERM");
+  if(browserExit)await Promise.race([browserExit,new Promise(resolve=>setTimeout(resolve,2000))]);
+  if(browserProcess && !browserStopped) {
+    browserProcess.kill("SIGKILL");
+    await Promise.race([browserExit,new Promise(resolve=>setTimeout(resolve,2000))]);
+  }
+  if(profile && (!browserProcess || browserStopped))await rm(profile,{recursive:true,force:true});
   server.closeAllConnections();
   await new Promise(resolve=>server.close(resolve));
 }
