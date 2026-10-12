@@ -134,3 +134,63 @@ jobs:
           path: browser-acceptance-results/
           if-no-files-found: warn
           retention-days: 7
+
+  full-unit-suite:
+    # Loopback is needed only by three synthetic local-vault HTTP tests.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # Anonymous exact-event checkout keeps all files without persisting credentials.
+      # actions/checkout credential cleanup rejects this repo's historical .tmp gitlinks.
+      - name: Checkout exact public repository commit anonymously
+        shell: bash
+        env:
+          CHECKOUT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-links-git-home"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-git-home" \
+            GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 CHECKOUT_SHA="$CHECKOUT_SHA" \
+            /bin/bash --noprofile --norc -euo pipefail -c '
+              [[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]
+              test ! -e .git
+              git init .
+              git remote add origin https://github.com/andylitvinov-design/codex-links.git
+              git -c credential.helper= -c protocol.version=2 fetch --no-tags --no-recurse-submodules --depth=1 origin "$CHECKOUT_SHA"
+              git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+              test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
+            '
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Built-in Node tests need no npm install and receive no provider secrets.
+      - name: Run all tracked unit tests in isolated fixture environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-links-unit-home" "$RUNNER_TEMP/codex-links-unit-tmp" full-unit-results
+          test ! -e /tmp/claude-does-not-exist
+          printf 'event_sha=%s\nnode=%s\n' "$(git rev-parse HEAD)" "$(node --version)" > full-unit-results/environment.txt
+          sudo unshare --net -- /bin/bash -c '
+            set -euo pipefail
+            ip link set lo up
+            exec runuser --user "$1" -- env -i PATH="$2" HOME="$3" TMPDIR="$4" \
+              NODE_OPTIONS="--import=$5/tests/helpers/offline-suite-guard.mjs" \
+              OFFLINE_GUARD_LOG="$5/full-unit-results/blocked-effects.txt" \
+              /bin/bash --noprofile --norc -euo pipefail -c "node --test --test-reporter=tap tests/*.test.mjs"
+          ' full-unit "$(id -un)" "$PATH" "$RUNNER_TEMP/codex-links-unit-home" "$RUNNER_TEMP/codex-links-unit-tmp" "$PWD" \
+            2>&1 | tee full-unit-results/suite.tap
+
+      - name: Upload full unit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-unit-${{ github.sha }}
+          path: full-unit-results/
+          if-no-files-found: error
+          retention-days: 7
