@@ -14,10 +14,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      # Anonymous exact-event checkout keeps all files without persisting credentials.
+      # actions/checkout credential cleanup rejects this repo's historical .tmp gitlinks.
+      - name: Checkout exact public repository commit anonymously
+        shell: bash
+        env:
+          CHECKOUT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-links-git-home"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-git-home" \
+            GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 CHECKOUT_SHA="$CHECKOUT_SHA" \
+            /bin/bash --noprofile --norc -euo pipefail -c '
+              [[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]
+              test ! -e .git
+              git init .
+              git remote add origin https://github.com/andylitvinov-design/codex-links.git
+              git -c credential.helper= -c protocol.version=2 fetch --no-tags --no-recurse-submodules --depth=1 origin "$CHECKOUT_SHA"
+              git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+              test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
+            '
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -45,10 +61,26 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout without persisted credentials
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      # Anonymous exact-event checkout keeps all files without persisting credentials.
+      # actions/checkout credential cleanup rejects this repo's historical .tmp gitlinks.
+      - name: Checkout exact public repository commit anonymously
+        shell: bash
+        env:
+          CHECKOUT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-links-git-home"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-git-home" \
+            GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 CHECKOUT_SHA="$CHECKOUT_SHA" \
+            /bin/bash --noprofile --norc -euo pipefail -c '
+              [[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]
+              test ! -e .git
+              git init .
+              git remote add origin https://github.com/andylitvinov-design/codex-links.git
+              git -c credential.helper= -c protocol.version=2 fetch --no-tags --no-recurse-submodules --depth=1 origin "$CHECKOUT_SHA"
+              git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+              test "$(git rev-parse HEAD)" = "$CHECKOUT_SHA"
+            '
 
       - name: Setup Node
         uses: actions/setup-node@v4
