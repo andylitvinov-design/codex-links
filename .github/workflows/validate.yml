@@ -87,9 +87,8 @@ jobs:
         with:
           node-version: 22
 
-      # This isolated package has one exact official dependency. Do not run lifecycle scripts.
-      # Registry resolution is captured as evidence, not presented as a pre-reviewed lockfile.
-      - name: Resolve exact browser dependency and record integrity
+      # Lock captured from CI414 official npm resolution; never run lifecycle scripts.
+      - name: Install locked browser dependency and record integrity
         shell: bash
         run: |
           set -euo pipefail
@@ -99,8 +98,8 @@ jobs:
           env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-browser-home" \
             NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/codex-links-npm-user.conf" \
             NPM_CONFIG_GLOBALCONFIG="$RUNNER_TEMP/codex-links-npm-global.conf" \
-            npm install --prefix tests/browser --ignore-scripts --no-audit --no-fund \
-              --package-lock=true --registry=https://registry.npmjs.org
+            npm ci --prefix tests/browser --ignore-scripts --no-audit --no-fund \
+              --registry=https://registry.npmjs.org
           node tests/browser/verify-dependencies.mjs
           cp tests/browser/package-lock.json browser-acceptance-results/package-lock.json
 

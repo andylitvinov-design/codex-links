@@ -22,6 +22,6 @@ await writeFile(new URL("dependency-resolution.json", output), JSON.stringify({
   result: "resolved-exact-version",
   dependencies,
   browsers: browsers.browsers.filter(browser => browser.name.includes("chromium")),
-  note: "Registry-generated lock and npm integrity validation captured during CI; not independently pre-fetched before publication."
+  note: "Committed lock captured from official npm resolution in CI414; npm ci verifies integrity and exact versions on every run."
 }, null, 2) + "\n");
 console.log("Exact Playwright 1.62.1 dependency versions and official registry integrity recorded.");

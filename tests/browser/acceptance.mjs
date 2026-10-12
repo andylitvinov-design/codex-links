@@ -150,7 +150,14 @@ try {
   }
   checks.push("Initial rendered feed includes phone, desktop and Telegram commands; all three replies were expanded and visible.");
 
+  // Playwright enables focus emulation by default, keeping background pages visible.
+  // Disable that automation override so real Chromium tab activation drives visibility.
+  // Source: microsoft/playwright v1.62.1, chromium/crPage.ts, setFocusEmulationEnabled.
+  const pageSession=await context.newCDPSession(page);
+  await pageSession.send("Emulation.setFocusEmulationEnabled",{enabled:false});
   const second=await context.newPage();await second.goto(origin+"/blank");
+  const secondSession=await context.newCDPSession(second);
+  await secondSession.send("Emulation.setFocusEmulationEnabled",{enabled:false});
   await second.bringToFront();
   await page.waitForFunction(()=>document.hidden===true,null,{polling:50});
   await waitUntil(()=>active===0);
