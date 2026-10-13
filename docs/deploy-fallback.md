@@ -90,6 +90,28 @@ Do not use fallback deploy when:
 6. There is a risk of deploying an old ref over a newer production build.
 ```
 
+## Hardened fallback gates
+
+The manual workflow accepts only `ref=main`, requires a full 40-character
+`expected_sha`, and must itself run from `main`. It fails closed when the current
+remote `main` differs from that SHA, including a second check just before deploy.
+Merge the reviewed workflow/helper changes first; then use the resulting current
+`main` SHA. This workflow has no push, schedule, or automatic deployment trigger.
+
+Application tests run in a separate job without provider credentials, using the
+same clean environment and loopback-only network isolation as Validate. The
+fresh deployment job installs the lockfile with lifecycle scripts disabled. Only
+the explicit Wrangler deployment step receives the existing Cloudflare secrets.
+The patch does not create, inspect, replace, or expand those credentials.
+
+The post-deploy verifier reads only `/version.json`, `/app.js`, and `/` on the
+fixed Pages production origin. It checks the expected build, all release markers,
+and exact static-file bytes against the checked-out source, with bounded retries
+for propagation. `/` is used because Pages canonicalizes `/index.html`. No
+application JavaScript is executed and no delivery/inbox/KV API is queried.
+Static proof does not independently prove the server-function commit or KV health.
+A missing secret, failed check, stale SHA, or version mismatch fails the workflow.
+
 ## Required GitHub Secrets
 
 ```text

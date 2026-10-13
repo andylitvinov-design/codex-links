@@ -4,13 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to deploy"
-        required: false
+        description: "Production branch (must be main)"
+        required: true
         default: "main"
       expected_sha:
-        description: "Expected commit SHA to verify before deploy"
-        required: false
-        default: ""
+        description: "Exact current main commit SHA (40 lowercase hex characters)"
+        required: true
       reason:
         description: "Why this fallback deploy was triggered"
         required: false
@@ -18,82 +17,167 @@ on:
 
 permissions:
   contents: read
-  deployments: write
 
 concurrency:
   group: production-deploy-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  deploy-production:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      PRODUCTION_URL: https://codex-links.pages.dev/
-      VERSION_URL: https://codex-links.pages.dev/version.json
-
+  validate-release:
+    # Keep all application tests on a separate runner without provider credentials.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    outputs:
+      build: ${{ steps.release.outputs.build }}
     steps:
-      - name: Checkout selected ref
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-
-      - name: Print checked-out commit
+      # Same anonymous checkout as Validate; no persisted token or submodule recursion.
+      - name: Verify main and check out exact expected commit
+        shell: bash
+        env:
+          TARGET_REF: ${{ inputs.ref }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
-          echo "ref=${{ inputs.ref }}"
-          echo "reason=${{ inputs.reason }}"
-          echo "expected_sha=${{ inputs.expected_sha }}"
-          echo "actual_sha=$(git rev-parse HEAD)"
-          git log -1 --oneline
-
-      - name: Verify expected SHA if provided
-        if: ${{ inputs.expected_sha != '' }}
-        run: |
-          ACTUAL_SHA="$(git rev-parse HEAD)"
-          if [ "$ACTUAL_SHA" != "${{ inputs.expected_sha }}" ]; then
-            echo "Expected SHA does not match checked-out SHA"
-            echo "expected=${{ inputs.expected_sha }}"
-            echo "actual=$ACTUAL_SHA"
-            exit 1
-          fi
+          set -euo pipefail
+          test "$TARGET_REF" = main
+          test "$WORKFLOW_REF" = refs/heads/main
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p "$RUNNER_TEMP/codex-links-git-home"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-git-home" \
+            GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 EXPECTED_SHA="$EXPECTED_SHA" \
+            /bin/bash --noprofile --norc -euo pipefail -c '
+              test ! -e .git
+              git init .
+              git remote add origin https://github.com/andylitvinov-design/codex-links.git
+              git -c credential.helper= -c protocol.version=2 fetch --no-tags --no-recurse-submodules --depth=1 origin refs/heads/main
+              test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+              git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+              test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+            '
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Verify local release markers
+        id: release
+        run: node scripts/verify-production-release.mjs --local >> "$GITHUB_OUTPUT"
 
-      - name: Run tests
-        run: npm test
+      # Reuse the passing Validate isolation: fixture-only filesystem effects,
+      # clean environment, and loopback-only network for the local-vault fixtures.
+      - name: Full isolated unit suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-links-unit-home" "$RUNNER_TEMP/codex-links-unit-tmp"
+          test ! -e /tmp/claude-does-not-exist
+          sudo unshare --net -- /bin/bash -c '
+            set -euo pipefail
+            ip link set lo up
+            exec runuser --user "$1" -- env -i PATH="$2" HOME="$3" TMPDIR="$4" \
+              NODE_OPTIONS="--import=$5/tests/helpers/offline-suite-guard.mjs" \
+              /bin/bash --noprofile --norc -euo pipefail -c "node --test tests/*.test.mjs"
+          ' full-unit "$(id -un)" "$PATH" "$RUNNER_TEMP/codex-links-unit-home" "$RUNNER_TEMP/codex-links-unit-tmp" "$PWD"
 
-      - name: Deploy to Cloudflare Pages production
-        run: npm run deploy
+  deploy-production:
+    needs: validate-release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      # Same anonymous checkout as Validate; no persisted token or submodule recursion.
+      - name: Verify main and check out exact expected commit
+        shell: bash
+        env:
+          TARGET_REF: ${{ inputs.ref }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$TARGET_REF" = main
+          test "$WORKFLOW_REF" = refs/heads/main
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p "$RUNNER_TEMP/codex-links-git-home"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-git-home" \
+            GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 EXPECTED_SHA="$EXPECTED_SHA" \
+            /bin/bash --noprofile --norc -euo pipefail -c '
+              test ! -e .git
+              git init .
+              git remote add origin https://github.com/andylitvinov-design/codex-links.git
+              git -c credential.helper= -c protocol.version=2 fetch --no-tags --no-recurse-submodules --depth=1 origin refs/heads/main
+              test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+              git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+              test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+            '
 
-      - name: Wait for Cloudflare Pages propagation
-        run: sleep 60
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-      - name: Verify production URL responds
-        run: curl -fsS --retry 6 --retry-delay 10 "$PRODUCTION_URL" >/dev/null
+      - name: Install locked deploy CLI without lifecycle scripts or credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/codex-links-deploy-home"
+          : > "$RUNNER_TEMP/codex-links-npm-user.conf"
+          : > "$RUNNER_TEMP/codex-links-npm-global.conf"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-deploy-home" \
+            NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/codex-links-npm-user.conf" \
+            NPM_CONFIG_GLOBALCONFIG="$RUNNER_TEMP/codex-links-npm-global.conf" \
+            npm ci --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
 
-      - name: Verify version endpoint responds
-        run: curl -fsS --retry 6 --retry-delay 10 "$VERSION_URL" | tee /tmp/version.json
+      - name: Recheck source and tested build before deployment
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_BUILD: ${{ needs.validate-release.outputs.build }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          REMOTE_SHA="$(env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-git-home" \
+            GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+            git -c credential.helper= ls-remote origin refs/heads/main | cut -f1)"
+          test "$REMOTE_SHA" = "$EXPECTED_SHA"
+          test "$(node scripts/verify-production-release.mjs --local)" = "build=$EXPECTED_BUILD"
+
+      # Only this step receives the existing provider credentials. Avoid npm scripts.
+      - name: Deploy exact source to Cloudflare Pages production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          CI: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/codex-links-deploy-home" CI=true \
+            CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
+            CLOUDFLARE_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID" \
+            node node_modules/wrangler/bin/wrangler.js pages deploy public \
+              --project-name codex-links --branch main --commit-hash "$EXPECTED_SHA"
+
+      # Fetch static assets only. Never visit delivery/inbox/KV API endpoints here.
+      - name: Verify published build and static asset bytes
+        env:
+          EXPECTED_BUILD: ${{ needs.validate-release.outputs.build }}
+        run: node scripts/verify-production-release.mjs --production
 
       - name: Deployment summary
         if: always()
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_BUILD: ${{ needs.validate-release.outputs.build }}
+          REASON: ${{ inputs.reason }}
+        shell: bash
         run: |
           {
             echo "## Production Deploy Fallback"
-            echo "- Repository: ${{ github.repository }}"
-            echo "- Platform: Cloudflare Pages"
-            echo "- Ref: ${{ inputs.ref }}"
-            echo "- Expected SHA: ${{ inputs.expected_sha }}"
-            echo "- Actual SHA: $(git rev-parse HEAD)"
-            echo "- Reason: ${{ inputs.reason }}"
-            echo "- Production URL: $PRODUCTION_URL"
-            echo "- Version URL: $VERSION_URL"
+            printf '%s\n' "- Expected SHA: $EXPECTED_SHA" "- Expected build: $EXPECTED_BUILD" "- Reason: $REASON"
+            echo "- Target: Cloudflare Pages / codex-links / main"
+            echo "- Production URL: https://codex-links.pages.dev/"
+            echo "- Version URL: https://codex-links.pages.dev/version.json"
+            echo "- Static build proof is not independent server-function commit proof."
           } >> "$GITHUB_STEP_SUMMARY"
