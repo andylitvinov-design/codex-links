@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import { buildRemediationPlan, createRemediationRun } from "../codex-save/functions/_lib/remediation.js";
 import { saveDiagnosisRun, saveRemediationRun } from "../codex-save/functions/_lib/runs.js";
+import { isWriteAuthorized } from "../codex-save/functions/_lib/http.js";
+import { onRequest as runRemediationRequest } from "../codex-save/functions/api/remediation/run.js";
 
 function createMockEnv() {
   const store = new Map();
@@ -295,4 +297,34 @@ test("remediation run reuses an active run for the same diagnosis", async () => 
 
   assert.equal(run.runId, "remediation-active");
   assert.equal(run.actions[0].commandId, "active-command");
+});
+
+test("codex-save remediation route fails closed without owner authorization", async () => {
+  const request = new Request("https://codex-save-cjb.pages.dev/api/remediation/run", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sourceDiagnosisId: "diagnosis-1" })
+  });
+
+  const response = await runRemediationRequest({ request, env: {} });
+  const body = await response.json();
+
+  assert.equal(response.status, 401);
+  assert.equal(body.code, "owner_authorization_required");
+  assert.match(body.error, /Owner authorization is required/);
+});
+
+test("codex-save write authorization accepts only configured server-side tokens", () => {
+  const env = { LINKS_WRITE_TOKEN: "links-owner-token", ADMIN_TOKEN: "admin-owner-token" };
+
+  assert.equal(isWriteAuthorized(new Request("https://example.com"), env), false);
+  assert.equal(isWriteAuthorized(new Request("https://example.com", {
+    headers: { "x-write-token": "wrong-token" }
+  }), env), false);
+  assert.equal(isWriteAuthorized(new Request("https://example.com", {
+    headers: { "x-write-token": "links-owner-token" }
+  }), env), true);
+  assert.equal(isWriteAuthorized(new Request("https://example.com", {
+    headers: { "x-write-token": "admin-owner-token" }
+  }), env), true);
 });
