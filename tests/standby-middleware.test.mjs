@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { onRequest as codexLinks } from "../functions/api/_middleware.js";
 import { onRequest as codexSave } from "../codex-save/functions/api/_middleware.js";
+import { onRequestGet as legacyAddLink } from "../functions/add.js";
 
 function fixture(handler, path, method, env = {}) {
   let nextCalls = 0;
@@ -51,9 +52,17 @@ test("codex-links standby also prevents all POST command creation and OPTIONS", 
   }
 });
 
+test("legacy /add shortcut is also paused before token checks or KV writes", async () => {
+  const f = fixture(legacyAddLink, "/add?url=https%3A%2F%2Fexample.org", "GET");
+  const response = await f.run();
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, "service_standby");
+  assert.deepEqual(f.effects(), { nextCalls: 0, kvReads: 0, kvWrites: 0 });
+});
+
 test("codex-save standby denies diagnostics and remediation before storage access", async () => {
   for (const [method, path] of [
-    ["GET", "/api/diagnostics/latest"],
+    ["GET", "/api/diagnostics/run"],
     ["POST", "/api/remediation/run"]
   ]) {
     const f = fixture(codexSave, path, method);
