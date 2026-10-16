@@ -4,12 +4,12 @@ import { onRequest as codexLinks } from "../functions/api/_middleware.js";
 import { onRequest as codexSave } from "../codex-save/functions/api/_middleware.js";
 import { onRequestGet as legacyAddLink } from "../functions/add.js";
 
-function fixture(handler, path, method, env = {}) {
+function fixture(handler, path, method, env = {}, headers = {}) {
   let nextCalls = 0;
   let kvReads = 0;
   let kvWrites = 0;
   const context = {
-    request: new Request(`https://example.pages.dev${path}`, { method }),
+    request: new Request(`https://example.pages.dev${path}`, { method, headers }),
     env: {
       ...env,
       LINKS_STORE: {
@@ -94,7 +94,13 @@ test("invalid/unset control values fail closed, and caller headers cannot bypass
   ]) {
     for (const setting of [undefined, "", "unexpected", "ON"]) {
       const env = setting === undefined ? {} : { [envName]: setting };
-      const f = fixture(handler, "/api/status", "GET", env);
+      const f = fixture(
+        handler,
+        "/api/status?CODEX_LINKS_STANDBY=off&CODEX_SAVE_STANDBY=off",
+        "GET",
+        env,
+        { "x-write-token": "synthetic-not-a-token", "x-standby": "off" }
+      );
       assert.equal((await f.run()).status, 503);
       assert.equal(f.effects().nextCalls, 0);
     }
