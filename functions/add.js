@@ -1,9 +1,14 @@
 import { insertLink } from "./_lib/links.js";
 import { text } from "./_lib/http.js";
 import { isAuthorized } from "./_lib/security.js";
+import { isStandbyEnabled, standbyResponse } from "./_lib/standby.js";
 
 export async function onRequestGet(context) {
   const { request, env } = context;
+
+  if (isStandbyEnabled(env)) {
+    return standbyResponse();
+  }
   const url = new URL(request.url);
 
   if (!isAuthorized(request, env)) {

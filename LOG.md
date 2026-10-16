@@ -1,5 +1,13 @@
 # LOG
 
+## 2026-10-16 — Cloudflare KV standby safety branch
+
+- Observed from source: a public delivery fixture uses 18 KV gets per request; idle clients and legacy local bridges are plausible multipliers, but real namespace attribution remains **needs verification**.
+- Added fail-closed default-on middleware for `codex-links /api/*` and `codex-save /api/*`, plus standby protection for the legacy `/add` route; static Pages content and KV data are preserved.
+- Added synthetic request regressions, including no KV access in standby and opt-in delegation to original handlers; verify tests in PR CI.
+- No account config, secrets, local launchd processes, production deploy, or existing short-link redirect Worker was changed. Do not resume commands while auth issue #174 remains open.
+- Next: CI, owner-reviewed deploy, production status probe, Cloudflare Observability attribution, and Mac launchd inventory.
+
 ## 2026-05-26
 
 - Added `Reiki Yggdrasil / Supabase` as a Local Secret Vault section with store-only entries for `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF` under Keychain service `reiki-yggdrasil-supabase`.
