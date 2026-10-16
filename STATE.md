@@ -1,8 +1,8 @@
 # STATE
 
-- current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
-- current task: add Reiki Yggdrasil Supabase migration secrets to the Local Secret Vault
-- next step: use metadata-only wallet status plus local `/api/secrets/read` values from secure storage for the Reiki Supabase migration runner
+- current goal: emergency KV quota protection for idle codex-links and codex-save without deleting data
+- current task: branch `fix/kv-standby-20261016`; add default-on fail-closed API guards; PR/CI and live deployment pending
+- next step: verify exact-head CI; obtain owner approval for merge/deploy; attribute account-wide reads/CPU and check Mac launchd agents
 
 ## 2026-05-26 Reiki Supabase Wallet Entry
 
