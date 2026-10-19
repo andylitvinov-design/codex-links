@@ -1,0 +1,140 @@
+name: KV Incident Read-only Diagnostics
+
+on:
+  push:
+    branches: [diagnostics/kv-readonly-20261019]
+    paths: [.github/workflows/kv-usage-readonly.yml]
+
+# One-off diagnostics only. No checkout, npm, application code, deployment,
+# KV values/keys, mutation, new credentials, or recurring schedule.
+permissions: {}
+
+jobs:
+  inspect:
+    if: github.repository == 'andylitvinov-design/codex-links' && github.ref == 'refs/heads/diagnostics/kv-readonly-20261019'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read bounded aggregate metrics and known Pages source metadata
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I <<'PY'
+          import json, math, os, re, urllib.request, urllib.error
+          from datetime import datetime, timezone
+
+          ACCOUNT = "2632954c462f8f8de6f61dd857c678e0"
+          EXPECTED_REPO = ("andylitvinov-design", "codex-links")
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          configured_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+          report = {"incident_date_utc": "2026-10-19", "checked_at": datetime.now(timezone.utc).isoformat(), "mode": "read_only"}
+
+          def finish():
+              safe = json.dumps(report, indent=2, sort_keys=True)
+              print(safe)
+              summary = os.environ.get("GITHUB_STEP_SUMMARY")
+              if summary:
+                  with open(summary, "a", encoding="utf-8") as stream:
+                      stream.write("## Read-only KV incident evidence\n```json\n" + safe + "\n```\n")
+
+          if not token:
+              report["access"] = "existing_cloudflare_api_token_missing"
+              finish()
+              raise SystemExit(0)
+          if configured_account and configured_account != ACCOUNT:
+              report["access"] = "existing_account_does_not_match_requested_account"
+              finish()
+              raise SystemExit(0)
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          client = urllib.request.build_opener(NoRedirect())
+          def read_api(path, body=None):
+              # Only Cloudflare's official HTTPS API; redirects are forbidden.
+              assert path.startswith("/client/v4/")
+              data = None if body is None else json.dumps(body).encode("utf-8")
+              request = urllib.request.Request("https://api.cloudflare.com" + path, data=data,
+                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                  method="GET" if body is None else "POST")
+              try:
+                  with client.open(request, timeout=20) as response:
+                      raw = response.read(2_000_001)
+                      if len(raw) > 2_000_000:
+                          return {"http": response.status, "status": "response_too_large"}, None
+                      return {"http": response.status, "status": "received"}, json.loads(raw)
+              except urllib.error.HTTPError as error:
+                  # Never emit provider bodies, request headers, tokens or tracebacks.
+                  return {"http": error.code, "status": "http_error"}, None
+              except Exception:
+                  return {"status": "transport_or_json_error"}, None
+
+          namespaces = {
+              "LINKS_STORE": "0691e3bf26bd46199b829252d92b88ef",
+              "SAVE_STORE": "50c2c4cadf884cbfa970cdbdb75324a8",
+              "MOBILE_RUNS": "3f5735f8f69240e68a13ed32efc7a428"
+          }
+          groups = {"all_namespaces": None, **namespaces}
+          selections = []
+          for alias, namespace in groups.items():
+              filter_text = 'date_geq: "2026-10-19", date_leq: "2026-10-19", actionType: "read"'
+              if namespace:
+                  filter_text += ', namespaceId: "' + namespace + '"'
+              selections.append(alias + ': kvOperationsAdaptiveGroups(filter: {' + filter_text + '}, limit: 10) { sum { requests } }')
+          query = 'query ReadOnlyKvIncident($account: string!) { viewer { accounts(filter: {accountTag: $account}) { ' + ' '.join(selections) + ' } } }'
+          status, payload = read_api("/client/v4/graphql", {"query": query, "variables": {"account": ACCOUNT}})
+          report["analytics"] = status
+          if isinstance(payload, dict) and not payload.get("errors"):
+              accounts = ((payload.get("data") or {}).get("viewer") or {}).get("accounts") or []
+              if accounts:
+                  totals = {}
+                  for alias in groups:
+                      rows = accounts[0].get(alias)
+                      if not isinstance(rows, list):
+                          continue
+                      total = 0
+                      valid = True
+                      for row in rows:
+                          value = (row.get("sum") or {}).get("requests")
+                          if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                              valid = False
+                              break
+                          total += value
+                      if valid:
+                          totals[alias] = total
+                  report["analytics"]["status"] = "available" if len(totals) == len(groups) else "partial"
+                  report["analytics"]["adaptive_read_counts"] = totals
+                  if len(totals) == len(groups):
+                      report["analytics"]["other_namespaces_reads"] = max(0, totals["all_namespaces"] - sum(totals[name] for name in namespaces))
+              else:
+                  report["analytics"]["status"] = "account_data_unavailable"
+          elif isinstance(payload, dict) and payload.get("errors"):
+              report["analytics"]["status"] = "graphql_denied_or_unavailable"
+
+          # Inspect two already known projects. Ignore all env/build secret fields.
+          report["pages"] = {}
+          for project in ("codex-links", "codex-save"):
+              status, payload = read_api("/client/v4/accounts/" + ACCOUNT + "/pages/projects/" + project)
+              entry = dict(status)
+              value = payload.get("result") if isinstance(payload, dict) and payload.get("success") else None
+              if isinstance(value, dict) and value.get("name") == project:
+                  config = ((value.get("source") or {}).get("config") or {})
+                  repository = (config.get("owner"), config.get("repo_name"))
+                  entry["source_repository_matches"] = repository == EXPECTED_REPO if all(repository) else None
+                  entry["production_branch_is_main"] = config.get("production_branch") == "main" if config.get("production_branch") else None
+                  enabled = config.get("production_deployments_enabled")
+                  entry["automatic_production_deployments"] = enabled if isinstance(enabled, bool) else None
+                  deployment = value.get("canonical_deployment") or {}
+                  metadata = ((deployment.get("deployment_trigger") or {}).get("metadata") or {})
+                  sha = metadata.get("commit_hash") or ""
+                  entry["production_commit"] = sha if re.fullmatch(r"[a-f0-9]{40}", sha) else None
+                  stage = (deployment.get("latest_stage") or {}).get("status")
+                  entry["deployment_stage"] = stage if stage in ("success", "failure", "active", "idle", "canceled") else None
+                  entry["status"] = "metadata_available"
+              report["pages"][project] = entry
+          finish()
+          PY
