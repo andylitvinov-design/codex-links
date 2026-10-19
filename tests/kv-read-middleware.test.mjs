@@ -56,6 +56,35 @@ test("real delivery quota response makes subsequent polls stop before KV access"
   assert.equal(writes, 0);
 });
 
+test("delivery cooldown does not replace protected GET authorization", async () => {
+  let deliveryCalls = 0;
+  const env = { LINKS_STORE: {
+    async get() {
+      deliveryCalls++;
+      throw new Error("Workers KV 429 daily read limit exceeded");
+    }
+  } };
+  const limitedContext = {
+    request: new Request("https://protected-cooldown.fixture.invalid/api/delivery?scope=public"),
+    env,
+    next() { throw new Error("Unexpected route fallback"); }
+  };
+  assert.equal((await onRequest(limitedContext)).status, 429);
+
+  let authCalls = 0;
+  const protectedContext = {
+    request: new Request("https://protected-cooldown.fixture.invalid/api/commands?scope=recent"),
+    env,
+    next() {
+      authCalls++;
+      return Response.json({ error: "Unauthorized." }, { status: 401 });
+    }
+  };
+  assert.equal((await onRequest(protectedContext)).status, 401);
+  assert.ok(deliveryCalls > 0);
+  assert.equal(authCalls, 1);
+});
+
 test("non-GET and unrelated routes retain normal routing and the original environment", async () => {
   for (const [method, path] of [["POST", "/api/commands"], ["OPTIONS", "/api/delivery"], ["GET", "/api/openclaw/verify"]]) {
     const env = { LINKS_STORE: {} };

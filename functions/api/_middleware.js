@@ -2,10 +2,9 @@ import { createKvReadGuard, withRequestKvMemo } from "../_lib/kv-read-guard.js";
 import { onRequest as delivery } from "./delivery.js";
 import { onRequest as status } from "./status.js";
 
-const KV_READ_PATHS = new Set([
-  "/api/delivery", "/api/status", "/api/commands", "/api/messages",
-  "/api/reports", "/api/links", "/api/threads", "/api/config", "/api/repos"
-]);
+// Only public polling routes may be short-circuited before their handlers.
+// Protected reads must always reach their own authorization checks.
+const KV_POLL_PATHS = new Set(["/api/delivery", "/api/status"]);
 const guarded = createKvReadGuard({
   async run(context) {
     if (context.request.method === "GET") {
@@ -21,5 +20,5 @@ const guarded = createKvReadGuard({
 
 export function onRequest(context) {
   const path = new URL(context.request.url).pathname.replace(/\/$/, "");
-  return KV_READ_PATHS.has(path) ? guarded(context) : context.next();
+  return KV_POLL_PATHS.has(path) ? guarded(context) : context.next();
 }
