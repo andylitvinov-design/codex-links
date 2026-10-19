@@ -20,9 +20,9 @@ export function json(data, init = {}) {
 
 export function isStorageRateLimited(error) {
   const message = String(error?.message || error || "").toLowerCase();
-  return message.includes("429")
-    && (message.includes("workers kv") || message.includes("kv"))
-    && (message.includes("limit") || message.includes("rate"));
+  if (!message.includes("kv")) return false;
+  return (message.includes("429") && (message.includes("limit") || message.includes("rate") || message.includes("too many")))
+    || (message.includes("limit") && (message.includes("exceed") || message.includes("quota")));
 }
 
 export function jsonStorageError(error, fallbackMessage = "Storage temporarily rate limited.") {

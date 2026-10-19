@@ -35,8 +35,9 @@ export function withRequestKvMemo(env, binding = "LINKS_STORE") {
 
 export function isKvReadLimitError(error) {
   const message = String(error?.message || error || "").toLowerCase();
-  return /\bkv\b/.test(message) && message.includes("429")
-    && /limit|rate|too many/.test(message);
+  if (!/\bkv\b/.test(message)) return false;
+  return (message.includes("429") && /limit|rate|too many/.test(message))
+    || (/\blimit\b/.test(message) && /exceed|quota/.test(message));
 }
 
 function unavailable(until, now) {
