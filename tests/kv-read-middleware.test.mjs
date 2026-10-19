@@ -43,7 +43,7 @@ test("real delivery quota response makes subsequent polls stop before KV access"
   const context = {
     request: new Request("https://quota.fixture.invalid/api/delivery?scope=public"),
     env: { LINKS_STORE: {
-      async get() { reads++; throw new Error("KV get failed: 429 Too Many Requests"); },
+      async get() { reads++; throw new Error("KV read limit exceeded"); },
       async put() { writes++; throw new Error("No writes during failed snapshot"); }
     } },
     next() { throw new Error("Unexpected route fallback"); }
