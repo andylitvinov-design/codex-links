@@ -136,5 +136,54 @@ jobs:
                   entry["deployment_stage"] = stage if stage in ("success", "failure", "active", "idle", "canceled") else None
                   entry["status"] = "metadata_available"
               report["pages"][project] = entry
+          # One-off source provenance and bounded Workers runtime comparison.
+          report["workers"] = {"window_utc": "2026-10-19", "status": "unavailable"}
+          try:
+              query = ('query Workers($a: string!) { viewer { accounts(filter: {accountTag: $a}) { '
+                  'workersInvocationsAdaptive(limit: 10000, filter: {datetime_geq: "2026-10-19T00:00:00Z", '
+                  'datetime_leq: "2026-10-19T17:00:00Z"}) { '
+                  'dimensions { scriptName status } sum { requests errors } } } } }')
+              worker_status, worker_payload = read_api("/client/v4/graphql", {"query":query, "variables":{"a":ACCOUNT}})
+              rows = (((worker_payload or {}).get("data") or {}).get("viewer") or {}).get("accounts") or []
+              series = rows[0].get("workersInvocationsAdaptive") if rows else None
+              if isinstance(series, list):
+                  totals = {}
+                  for row in series:
+                      dims = row.get("dimensions") or {}
+                      name = str(dims.get("scriptName") or "UNKNOWN")[:100]
+                      sums = row.get("sum") or {}
+                      requests = sums.get("requests")
+                      errors = sums.get("errors")
+                      if not isinstance(requests,(int,float)) or not math.isfinite(requests) or requests < 0: continue
+                      bucket = totals.setdefault(name, {"requests":0, "errors":0})
+                      bucket["requests"] += requests
+                      if isinstance(errors,(int,float)) and math.isfinite(errors) and errors >= 0:
+                          bucket["errors"] += errors
+                  report["workers"] = {"status":"available", "rows":len(series),
+                      "may_be_truncated":len(series)>=10000,
+                      "scripts":dict(sorted(totals.items(),key=lambda item:-item[1]["requests"])[:25])}
+              else:
+                  report["workers"] = {"status":"graphql_unavailable", "http":worker_status.get("http")}
+          except Exception:
+              report["workers"] = {"status":"read_error"}
+
+          # A source=None Pages project is commonly a Direct Upload target.
+          # Print only the observed public build routing metadata, never env.
+          for project in ("codex-links","codex-save"):
+              status, payload = read_api("/client/v4/accounts/" + ACCOUNT + "/pages/projects/" + project)
+              value = payload.get("result") if isinstance(payload,dict) and payload.get("success") else None
+              if not isinstance(value,dict): continue
+              entry = report["pages"].get(project) or {}
+              source = value.get("source")
+              entry["source_type"] = source.get("type") if isinstance(source,dict) else None
+              entry["project_production_branch"] = value.get("production_branch")
+              build = value.get("build_config") or {}
+              entry["root_dir"] = build.get("root_dir")
+              dep = value.get("canonical_deployment") or {}
+              entry["uses_functions"] = dep.get("uses_functions")
+              trigger = dep.get("deployment_trigger") or {}
+              entry["deployment_trigger_type"] = trigger.get("type")
+              entry["deployment_created_on"] = dep.get("created_on")
+              report["pages"][project] = entry
           finish()
           PY
