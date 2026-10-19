@@ -1,5 +1,14 @@
 # LOG
 
+## 2026-10-19
+
+- Investigated Cloudflare KV incident #180 with read-only Analytics: `LINKS_STORE=111914`, `SAVE_STORE=0`, and `MOBILE_RUNS=0` reads for the UTC day. The known old Codex Links deployment used a 12-second idle poll while GitHub `main` used 60 seconds.
+- Merged PR #181 (`2051aada38330e54318627239bfcaa269319d406`) after its release gates, then deployed it through `deploy-production.yml` with the exact merge SHA. It retained hidden-tab polling stop, request-local KV memoization, and cooldown protection without caching personal data in the public CDN.
+- A bounded live read revealed that Cloudflare's quota error text may be `KV read limit exceeded` without a literal `429`; before the follow-up this reached the API as HTTP 500. Merged PR #182 (`f18d7533c1f72d4e0e09cda1ab816942a5328df0`) to recognize that error in both API response and KV read guard.
+- Release workflow run `39294315379` deployed exact commit `f18d7533c1f72d4e0e09cda1ab816942a5328df0`. Cloudflare Pages confirmed its canonical `codex-links` deployment was created at `2026-10-19T17:28:28Z`, successful, ad hoc, and Functions-enabled.
+- One read-only public delivery request after release returned HTTP 429 with `Retry-After: 300` and `rateLimited=true`; the probe did not create a command or disclose delivery content. The account aggregate still read `111914`, which is a cumulative daily value rather than evidence of the new rate.
+- Did not deploy Codex Save: `SAVE_STORE=0`, its deployment stayed at `38c85701810c59645e9c6438ed9620056c9ee0fe`, and no urgent change was justified.
+
 ## 2026-05-26
 
 - Added `Reiki Yggdrasil / Supabase` as a Local Secret Vault section with store-only entries for `SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF` under Keychain service `reiki-yggdrasil-supabase`.

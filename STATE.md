@@ -1,5 +1,14 @@
 # STATE
 
+## 2026-10-19 Cloudflare KV Read Incident (#180)
+
+- cause: Cloudflare Analytics reported `LINKS_STORE=111914` reads for the UTC day; `SAVE_STORE=0` and `MOBILE_RUNS=0`. The affected Pages app was an old May deployment that still polled every 12 seconds instead of the 60-second interval in GitHub `main`.
+- production remediation: PR #181 added hidden-tab polling stop, request-local KV memoization, and a five-minute read cooldown. A live probe then exposed Cloudflare's `KV read limit exceeded` form without a literal `429`; PR #182 recognizes that form so the API emits controlled `429` responses instead of `500`.
+- live proof: canonical `codex-links` Pages deployment is commit `f18d7533c1f72d4e0e09cda1ab816942a5328df0`, created `2026-10-19T17:28:28Z`, with Functions enabled. One read-only `GET /api/delivery?scope=public` returned `429`, `Retry-After: 300`, and `rateLimited=true`; no command was created.
+- rollback: the prior confirmed production commit is `2051aada38330e54318627239bfcaa269319d406`; use `deploy-production.yml` with that exact SHA only after a release-gate decision.
+- measurement limit: the post-release Cloudflare daily aggregate remained `111914`; it is cumulative for the current UTC day, and the available Workers GraphQL response cannot attribute requests to a Worker/process. A next-window measurement or per-route telemetry is required to prove the new consumption rate.
+- scope preserved: Codex Save was not deployed; its canonical deployment remains `38c85701810c59645e9c6438ed9620056c9ee0fe` and its namespace measured `0` reads. No KV data, command history, bridge, launchd task, API credentials, or billing plan was changed.
+
 - current goal: сделать `links` постоянной облачной точкой входа для работы с проектами с телефона и компьютера
 - current task: add Reiki Yggdrasil Supabase migration secrets to the Local Secret Vault
 - next step: use metadata-only wallet status plus local `/api/secrets/read` values from secure storage for the Reiki Supabase migration runner
