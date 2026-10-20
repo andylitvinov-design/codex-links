@@ -1,10 +1,9 @@
 name: One-shot Codex Links KV Recovery Release
 
-# Only the explicitly approved PR #184 merge can dispatch the existing,
-# already hardened exact-SHA deployment workflow. No standalone deploy steps.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - ops/releases/codex-links-kv-20261020.release
 
@@ -14,22 +13,28 @@ permissions:
 
 jobs:
   release:
-    if: ${{ github.repository == 'andylitvinov-design/codex-links' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release(codex-links): KV polling budget #184') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Dispatch existing production fallback for exact pushed merge commit
+      - name: Dispatch existing production fallback for exact SHA
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXACT_SHA: ${{ github.sha }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "andylitvinov-design/codex-links"
+          test "$GITHUB_REF" = "refs/heads/main"
           [[ "$EXACT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          case "$HEAD_MESSAGE" in
+            kv-budgets-184*) ;;
+            *) echo "Skipping unrelated merge."; exit 0 ;;
+          esac
           gh workflow run deploy-production.yml \
             --repo andylitvinov-design/codex-links \
             --ref main \
             -f ref=main \
             -f expected_sha="$EXACT_SHA" \
-            -f reason="2026-10-20 authorized Codex Links KV budget recovery PR 184"
-          echo "Exact-SHA production workflow dispatch requested for $EXACT_SHA"
+            -f reason="2026-10-20 authorized KV budget recovery PR 184"
+          echo "Requested exact-SHA production deployment $EXACT_SHA"
