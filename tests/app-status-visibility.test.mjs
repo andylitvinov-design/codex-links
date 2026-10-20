@@ -50,7 +50,7 @@ test("UI hides raw read-service errors when no cached data is available", async 
 test("UI limits idle KV pressure and preserves the shared public feed", async () => {
   const source = await readFile(appScriptPath, "utf8");
 
-  assert.match(source, /IDLE_POLL_INTERVAL_MS = 60000/);
+  assert.match(source, /IDLE_POLL_INTERVAL_MS = 300000/);
   assert.match(source, /url\.searchParams\.set\("scope", "public"\)/);
   assert.doesNotMatch(source, /url\.searchParams\.set\("clientId", storage\.clientId\)/);
   assert.match(source, /if \(document\.hidden\) \{\s*state\.commandPollerInterval = 0;\s*return;/);

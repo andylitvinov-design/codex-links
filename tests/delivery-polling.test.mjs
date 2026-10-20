@@ -73,7 +73,7 @@ test("hung delivery response is aborted within ten seconds and polling can recov
   assert.equal(h.intervalCount(), 1);
   assert.match(h.effects.status, /Данные временно недоступны/);
   h.setFetch(null);
-  await h.advance(60000);
+  await h.advance(300000);
   assert.equal(h.state.commands.length, 3);
 });
 
@@ -96,7 +96,7 @@ test("hide while version check is pending does not start a new delivery request"
   h.setFetch(url => url.pathname === "/version.json"
     ? new Promise(r => { resolveVersion = r; }) : undefined);
   h.context.startPolling();
-  await h.advance(60000);
+  await h.advance(300000);
   h.visibility(true);
   resolveVersion(Response.json({build: ""}));
   await drain();
@@ -104,14 +104,14 @@ test("hide while version check is pending does not start a new delivery request"
   assert.equal(h.intervalCount(), 0);
 });
 
-test("speed and active cadence remain one and 3.5 seconds", async () => {
+test("speed, active, and idle polling stay within safe request cadence", async () => {
   const h = await createBrowser();
   h.setSpeed(true); h.context.startPolling();
-  assert.equal(h.state.commandPollerInterval, 1000);
+  assert.equal(h.state.commandPollerInterval, 5000);
   h.setSpeed(false); h.state.commands = [{status: "processing"}]; h.context.startPolling();
-  assert.equal(h.state.commandPollerInterval, 3500);
+  assert.equal(h.state.commandPollerInterval, 30000);
   h.state.commands = []; h.context.startPolling();
-  assert.equal(h.state.commandPollerInterval, 60000);
+  assert.equal(h.state.commandPollerInterval, 300000);
 });
 
 test("ordinary refresh skips cached repos; explicit refresh during an in-flight snapshot is retained", async () => {
@@ -236,4 +236,51 @@ test("successful trailing full refresh replaces an older failed active-only resu
   assert.equal(h.state.reports.length, 2);
   assert.doesNotMatch(h.effects.status, /SYNTHETIC/);
   assert.equal(h.intervalCount(), 1);
+});
+
+test("idle polling reads bounded recent records while preserving loaded full history", async () => {
+  const h = await createBrowser();
+  await h.context.refreshAll();
+  h.context.startPolling();
+  await h.advance(300000);
+  const requests = h.deliveryRequests();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].url.searchParams.get("mode"), "poll");
+  assert.equal(requests[1].url.searchParams.get("activeOnly"), "1");
+  assert.equal(h.state.reports.length, 2);
+  assert.equal(h.state.messages.length, 3);
+});
+
+test("full history refresh remains available every 30 minutes and on demand", async () => {
+  const h = await createBrowser();
+  await h.context.refreshAll();
+  h.context.startPolling();
+  await h.advance(1800001);
+  assert.equal(h.deliveryRequests().filter(r => !r.url.searchParams.has("mode")).length, 2);
+  await h.context.refreshAll({requireFresh:true});
+  assert.equal(h.deliveryRequests().filter(r => !r.url.searchParams.has("mode")).length, 3);
+  assert.equal(h.state.reports.length, 2);
+});
+
+test("exhausted KV quota prevents background polling storms, manual retry still works", async () => {
+  const h = await createBrowser();
+  h.setFetch(url => url.pathname === "/api/delivery"
+    ? Response.json({error:"rate_limited",rateLimited:true},{status:429,headers:{"retry-after":"300"}})
+    : undefined);
+  await h.context.refreshAll();
+  const initialCount = h.deliveryRequests().length;
+  assert.ok(h.state.nextDeliveryRetryAt > Date.now());
+  await h.advance(300000);
+  assert.equal(h.deliveryRequests().length, initialCount);
+  assert.match(h.effects.status, /Данные временно недоступны/);
+  h.setFetch(null);
+  await h.context.refreshAll();
+  assert.equal(h.state.nextDeliveryRetryAt, 0);
+});
+
+test("a stale processing card cannot force forever-fast delivery polling", async () => {
+  const h = await createBrowser();
+  h.state.commands = [{status:"processing",createdAt:new Date(Date.now()-3600000).toISOString()}];
+  h.context.startPolling();
+  assert.equal(h.state.commandPollerInterval, 300000);
 });

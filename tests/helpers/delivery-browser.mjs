@@ -83,6 +83,7 @@ export async function createBrowser(sourceUrl = new URL("../../public/app.js", i
     commands: [], messages: [], reports: [], menuRepos: [{id: "project"}],
     commandPoller: null, commandPollerInterval: 0, deliveryRefreshPromise: null, deliveryRefreshMode: "",
     deliveryPollInFlight: false, deliveryRefreshRequested: false, refreshReposRequested: false, hardReloading: false,
+    lastFullDeliveryAt: 0, nextDeliveryRetryAt: 0,
     latestAvailableVersion: ""
   };
   const document = {hidden: false, visibilityState: "visible", addEventListener(name, fn) {
@@ -119,8 +120,10 @@ export async function createBrowser(sourceUrl = new URL("../../public/app.js", i
     state, document, window, URL, Promise, AbortController, Date: FakeDate, fetch,
     storage: {clientId: "phone-uuid"},
     BUILD_VERSION: build,
-    SPEED_POLL_INTERVAL_MS: 1000,
-    FAST_POLL_INTERVAL_MS: 3500,
+    SPEED_POLL_INTERVAL_MS: 5000,
+    FAST_POLL_INTERVAL_MS: 30000,
+    FULL_REFRESH_INTERVAL_MS: 1800000,
+    ACTIVE_POLL_FRESHNESS_MS: 900000,
     IDLE_POLL_INTERVAL_MS: Number(/IDLE_POLL_INTERVAL_MS = (\d+)/.exec(source)[1]),
     DELIVERY_REQUEST_TIMEOUT_MS: Number(/DELIVERY_REQUEST_TIMEOUT_MS = (\d+)/.exec(source)?.[1] || 10000),
     isDeliverySpeedModeActive: () => speed,
