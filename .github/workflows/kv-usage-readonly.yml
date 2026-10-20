@@ -316,5 +316,37 @@ jobs:
                       "created_on": str(deploy.get("created_on") or "")[:40]
                   })
           report["codex_links_preview_inventory"] = preview
+
+          # Read only *names* and equality against the already-known namespace
+          # from the project’s preview/production KV config. This endpoint
+          # contains provider secrets in other fields: never print the payload.
+          report["preview_binding_audit"] = {"status": "unavailable"}
+          status, payload = read_api("/client/v4/accounts/" + ACCOUNT + "/pages/projects/codex-links")
+          project = payload.get("result") if isinstance(payload, dict) and payload.get("success") else None
+          if isinstance(project, dict):
+              environments = project.get("deployment_configs") or {}
+              findings = {}
+              for environment in ("production", "preview"):
+                  config = environments.get(environment) if isinstance(environments, dict) else None
+                  namespaces = config.get("kv_namespaces") if isinstance(config, dict) else None
+                  if not isinstance(namespaces, dict):
+                      findings[environment] = {"status": "not_exposed"}
+                      continue
+                  binding_names = []
+                  for name, entry in namespaces.items():
+                      if not isinstance(entry, dict): continue
+                      ident = entry.get("namespace_id")
+                      if not isinstance(ident, str): continue
+                      if ident == "0691e3bf26bd46199b829252d92b88ef":
+                          binding_names.append(str(name)[:100])
+                  findings[environment] = {
+                      "status": "available", "matches_known_LINKS_STORE": bool(binding_names),
+                      "matched_binding_names": binding_names,
+                      "total_kv_binding_labels": len(namespaces)
+                  }
+              report["preview_binding_audit"] = {"status": "available", "environments": findings}
+          else:
+              report["preview_binding_audit"] = {"status": "provider_unavailable", "http": status.get("http")}
+
           finish()
           PY
