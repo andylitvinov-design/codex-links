@@ -1,0 +1,154 @@
+name: One-time Codex Links Preview Access Lock
+
+# Owner requested temporary shutdown of Codex Links. Historical previews
+# still have the production LINKS_STORE binding. Secure previews only.
+on:
+  push:
+    branches:
+      - diagnostics/codex-links-preview-access-20261020
+    paths:
+      - .github/workflows/codex-links-preview-access.yml
+
+permissions: {}
+
+jobs:
+  protect:
+    if: github.repository == 'andylitvinov-design/codex-links'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Guard preview hostnames with default-deny Access policy
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "andylitvinov-design/codex-links"
+          test "$GITHUB_REF" = "refs/heads/diagnostics/codex-links-preview-access-20261020"
+          python3 -I <<'PY'
+          import json, os, re, time, urllib.request, urllib.error, urllib.parse
+          ACCOUNT = "2632954c462f8f8de6f61dd857c678e0"
+          LINK_KV = "0691e3bf26bd46199b829252d92b88ef"
+          PAUSED_SHA = "fd1ab2190a6532c2f682ca2ec55b5377c7d7a40c"
+          WILDCARD = "*.codex-links.pages.dev"
+          NAME = "Codex Links - paused preview protection"
+          token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          if not token or os.environ.get("CLOUDFLARE_ACCOUNT_ID") != ACCOUNT:
+              raise SystemExit("BLOCKED: existing Cloudflare credentials are unavailable or account mismatch")
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          opener = urllib.request.build_opener(NoRedirect())
+
+          def api(method, path, body=None):
+              if not path.startswith("/client/v4/accounts/"+ACCOUNT+"/"):
+                  raise RuntimeError("Unexpected API scope")
+              data = None if body is None else json.dumps(body).encode("utf-8")
+              req = urllib.request.Request("https://api.cloudflare.com"+path,
+                  data=data,
+                  headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"},
+                  method=method)
+              try:
+                  with opener.open(req,timeout=20) as res:
+                      raw=res.read(1_000_001)
+                      if len(raw)>1_000_000: raise RuntimeError("Provider response too large")
+                      return res.status, json.loads(raw)
+              except urllib.error.HTTPError as error:
+                  # Never print provider body, tokens, secrets, cookies or headers.
+                  return error.code, None
+
+          base="/client/v4/accounts/"+ACCOUNT
+          code, body = api("GET",base+"/pages/projects/codex-links")
+          project = body.get("result") if code==200 and isinstance(body,dict) and body.get("success") else None
+          if not isinstance(project,dict) or project.get("name")!="codex-links":
+              raise SystemExit("BLOCKED: cannot establish exact target Pages project")
+          dep = project.get("canonical_deployment") or {}
+          deployed = ((dep.get("deployment_trigger") or {}).get("metadata") or {}).get("commit_hash")
+          if deployed!=PAUSED_SHA or (dep.get("latest_stage") or {}).get("status")!="success":
+              raise SystemExit("BLOCKED: main Codex Links is not at exact paused production SHA")
+          configs=project.get("deployment_configs") or {}
+          preview=(configs.get("preview") or {}).get("kv_namespaces") or {}
+          if not isinstance(preview,dict) or (preview.get("LINKS_STORE") or {}).get("namespace_id")!=LINK_KV:
+              raise SystemExit("BLOCKED: shared LINKS_STORE preview binding not verified")
+
+          code, body = api("GET",base+"/access/apps?per_page=100")
+          apps=body.get("result") if code==200 and isinstance(body,dict) and body.get("success") else None
+          if not isinstance(apps,list) or len(apps)>=100:
+              raise SystemExit("BLOCKED: existing Access app inventory unavailable or truncated")
+          matches=[]
+          for app in apps:
+              if not isinstance(app,dict): continue
+              domains=[app.get("domain")]
+              domains += [entry.get("domain") for entry in (app.get("self_hosted_domains") or []) if isinstance(entry,dict)]
+              if WILDCARD in domains: matches.append(app)
+          if len(matches)>1:
+              raise SystemExit("BLOCKED: conflicting wildcard Access apps")
+          created=False
+          if matches:
+              app=matches[0]
+              if app.get("policies"):
+                  raise SystemExit("BLOCKED: existing preview policy is not default-deny")
+          else:
+              # Access apps are deny-by-default when there are no Allow rules.
+              # Wildcard covers immutable hash URLs + branch aliases, not main.
+              payload={
+                  "name": NAME,
+                  "type": "self_hosted",
+                  "domain": WILDCARD,
+                  "policies": [],
+                  "app_launcher_visible": False,
+                  "session_duration": "24h"
+              }
+              code, body = api("POST",base+"/access/apps",payload)
+              if code not in (200,201) or not isinstance(body,dict) or not body.get("success"):
+                  raise SystemExit("BLOCKED: Access app create was not permitted (HTTP %s). No plan or KV changes."%code)
+              app=body.get("result")
+              created=True
+          if not isinstance(app,dict) or app.get("domain")!=WILDCARD:
+              raise SystemExit("BLOCKED: wildcard Access domain not verified")
+          app_id=app.get("id")
+          if not isinstance(app_id,str) or not re.fullmatch(r"[a-f0-9-]{36}",app_id):
+              raise SystemExit("BLOCKED: Access app ID invalid")
+          if app.get("policies"):
+              raise SystemExit("BLOCKED: Access app unexpectedly has policies")
+
+          code, body=api("GET",base+"/access/apps/"+app_id)
+          confirmed=body.get("result") if code==200 and isinstance(body,dict) and body.get("success") else None
+          if not isinstance(confirmed,dict) or confirmed.get("domain")!=WILDCARD or confirmed.get("policies"):
+              raise SystemExit("BLOCKED: Access app verification failed")
+
+          def probe(url):
+              req=urllib.request.Request(url,
+                  headers={"User-Agent":"codex-links-owner-paused-preview-lock/1","Accept":"text/html"},
+                  method="GET")
+              try:
+                  with opener.open(req,timeout=12) as r:
+                      return r.status, ""
+              except urllib.error.HTTPError as e:
+                  location=e.headers.get("Location","") if e.headers else ""
+                  return e.code, location
+              except Exception:
+                  return None, ""
+          # Existing preview URL verified from this project's read-only API
+          # listing. Never test API/POST/commands or inspect any response body.
+          probe_status, location=probe("https://08b3911e.codex-links.pages.dev/")
+          access_redirect=("cloudflareaccess.com" in location.lower() or "/cdn-cgi/access/" in location.lower())
+          blocked = probe_status in (401,403) or (probe_status in (301,302,303,307,308) and access_redirect)
+          # The production Pages domain must stay on the owner's 503 pause.
+          main_status,_=probe("https://codex-links.pages.dev/")
+          outcome={
+              "created_new_preview_app":created,
+              "wildcard":WILDCARD,
+              "default_deny_no_policies":True,
+              "preview_http_status":probe_status,
+              "preview_access_redirect":access_redirect,
+              "preview_protected":blocked,
+              "production_main_http_status":main_status,
+              "source_sha_checked":True
+          }
+          print(json.dumps(outcome,sort_keys=True))
+          if not blocked or main_status!=503:
+              raise SystemExit("VERIFY: preview Access or production 503 not confirmed. Inspect Access application before further changes.")
+          PY
