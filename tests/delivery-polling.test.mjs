@@ -241,6 +241,9 @@ test("successful trailing full refresh replaces an older failed active-only resu
 test("idle polling reads bounded recent records while preserving loaded full history", async () => {
   const h = await createBrowser();
   await h.context.refreshAll();
+  // The fixture starts with three queued jobs, which correctly use active
+  // 30-second polling. Put the browser in its true idle state for this test.
+  h.state.commands = h.state.commands.map(command => ({ ...command, status: "answered" }));
   h.context.startPolling();
   await h.advance(300000);
   const requests = h.deliveryRequests();
