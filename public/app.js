@@ -4494,7 +4494,7 @@ async function pollDelivery() {
     }
 
     if (state.nextDeliveryRetryAt > Date.now()) return;
-    if (state.lastFullDeliveryAt && Date.now() - state.lastFullDeliveryAt >= FULL_REFRESH_INTERVAL_MS) {
+    if (!state.lastFullDeliveryAt || Date.now() - state.lastFullDeliveryAt >= FULL_REFRESH_INTERVAL_MS) {
       await refreshAll();
     } else {
       await refreshSpeedMode();
