@@ -254,5 +254,67 @@ jobs:
                   entry = {"status":"network_or_timeout"}
               report["public_route_probe"][label] = entry
 
+
+          # Read-only inventory: find any other deployed Worker with a direct
+          # KV binding to LINKS_STORE. Never log secrets, source code, or raw
+          # settings responses. Only print matching KV names and known IDs.
+          report["worker_kv_binding_audit"] = {"status": "not_checked"}
+          status, payload = read_api("/client/v4/accounts/" + ACCOUNT + "/workers/scripts")
+          entry = {"status": status.get("status"), "http": status.get("http"), "scanned": 0, "matches": []}
+          scripts = payload.get("result") if isinstance(payload, dict) and payload.get("success") else None
+          if isinstance(scripts, list):
+              candidates = []
+              for script in scripts[:80]:
+                  name = str(script.get("id") or "")
+                  if re.fullmatch(r"[A-Za-z0-9_-]{1,150}", name):
+                      candidates.append(name)
+              entry["scanned"] = len(candidates)
+              entry["truncated"] = len(scripts) > 80
+              # Bounded metadata calls only. A script's settings may include
+              # secrets: inspect *only* kv_namespace binding IDs and names.
+              denied = 0
+              for name in candidates:
+                  status, settings = read_api("/client/v4/accounts/" + ACCOUNT + "/workers/scripts/" + name + "/settings")
+                  if not isinstance(settings, dict) or not settings.get("success"):
+                      denied += 1
+                      continue
+                  value = settings.get("result") or {}
+                  kv = value.get("bindings") if isinstance(value, dict) else None
+                  if not isinstance(kv, list): continue
+                  matches = []
+                  for binding in kv:
+                      if not isinstance(binding, dict) or binding.get("type") != "kv_namespace": continue
+                      namespace = binding.get("namespace_id")
+                      if namespace == namespaces["LINKS_STORE"]:
+                          binding_name = str(binding.get("name") or "")[:100]
+                          matches.append(binding_name)
+                  if matches:
+                      entry["matches"].append({"script": name, "binding_names": matches})
+              entry["settings_unavailable_count"] = denied
+              entry["status"] = "available" if denied == 0 else "partial"
+          else:
+              entry["status"] = "workers_listing_unavailable"
+          report["worker_kv_binding_audit"] = entry
+
+          # Pages deployment metadata only. Do not request or execute previews,
+          # scripts, routes, assets, storage values, user commands or webhooks.
+          report["codex_links_preview_inventory"] = {"status": "unavailable"}
+          status, payload = read_api("/client/v4/accounts/" + ACCOUNT + "/pages/projects/codex-links/deployments?page=1&per_page=20")
+          deployments = payload.get("result") if isinstance(payload, dict) and payload.get("success") else None
+          preview = {"status": status.get("status"), "http": status.get("http"), "deployments_listed": 0, "preview": []}
+          if isinstance(deployments, list):
+              preview["status"] = "available"
+              preview["deployments_listed"] = len(deployments)
+              for deploy in deployments:
+                  if not isinstance(deploy, dict): continue
+                  if deploy.get("environment") != "preview": continue
+                  url = deploy.get("url")
+                  if not isinstance(url, str) or not re.fullmatch(r"https://[A-Za-z0-9-]+\.codex-links\.pages\.dev/?", url):
+                      url = None
+                  preview["preview"].append({
+                      "url": url, "uses_functions": deploy.get("uses_functions") if isinstance(deploy.get("uses_functions"), bool) else None,
+                      "created_on": str(deploy.get("created_on") or "")[:40]
+                  })
+          report["codex_links_preview_inventory"] = preview
           finish()
           PY
