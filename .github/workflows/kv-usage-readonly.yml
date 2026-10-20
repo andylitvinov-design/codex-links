@@ -218,5 +218,40 @@ jobs:
               entry["deployment_trigger_type"] = trigger.get("type")
               entry["deployment_created_on"] = dep.get("created_on")
               report["pages"][project] = entry
+          # 2026-10-20 live outage: one request per fixed, allowlisted URL.
+          # Never log API response content, cookies, headers, or user data.
+          report["public_route_probe"] = {}
+          targets = {
+              "static_home": "https://codex-links.pages.dev/",
+              "static_version": "https://codex-links.pages.dev/version.json",
+              "delivery_read_once": "https://codex-links.pages.dev/api/delivery?scope=public"
+          }
+          for label, url in targets.items():
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": "codex-links-incident-diagnostics/1",
+                  "Accept": "application/json" if label != "static_home" else "text/html"
+              }, method="GET")
+              entry = {"status": "unavailable"}
+              try:
+                  with client.open(req, timeout=12) as response:
+                      entry = {"http": int(response.status),
+                          "content_type": str(response.headers.get("Content-Type") or "").split(";")[0][:50],
+                          "status":"responsive"}
+                      if label == "static_version":
+                          data = response.read(4096)
+                          try:
+                              marker = json.loads(data)
+                              build = marker.get("build") if isinstance(marker, dict) else None
+                              if isinstance(build,str) and re.fullmatch(r"[a-zA-Z0-9_.-]{1,60}",build):
+                                  entry["build"] = build
+                          except (json.JSONDecodeError, UnicodeError): pass
+              except urllib.error.HTTPError as error:
+                  entry = {"http": int(error.code), "status": "http_error"}
+                  retry = error.headers.get("Retry-After") if error.headers else None
+                  if retry and re.fullmatch(r"[0-9]{1,8}", retry): entry["retry_after_s"] = int(retry)
+              except Exception:
+                  entry = {"status":"network_or_timeout"}
+              report["public_route_probe"][label] = entry
+
           finish()
           PY
