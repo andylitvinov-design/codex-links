@@ -1,0 +1,40 @@
+name: One-time Codex Links Maintenance Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ops/releases/codex-links-maintenance-20261020.release
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request gated exact-SHA Cloudflare Pages production deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXACT_SHA: ${{ github.sha }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "andylitvinov-design/codex-links"
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$EXACT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          case "$HEAD_MESSAGE" in
+            "pause(codex-links):"*) ;;
+            *) echo "Skip: unrelated commit"; exit 0 ;;
+          esac
+          gh workflow run deploy-production.yml \
+            --repo andylitvinov-design/codex-links \
+            --ref main \
+            -f ref=main \
+            -f expected_sha="$EXACT_SHA" \
+            -f reason="Owner approved temporary Codex Links pause; no KV operations"
+          echo "Requested production deployment of $EXACT_SHA"

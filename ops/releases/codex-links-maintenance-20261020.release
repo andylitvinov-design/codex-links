@@ -1,0 +1,6 @@
+2026-10-20 temporary maintenance / Codex Links ONLY.
+Owner authorized temporarily disabling the site to stop Workers KV reads.
+Root Pages middleware intercepts all routes before storage; static version marker remains accessible.
+Deploy exact main merge SHA through the existing proven deploy-production.yml workflow.
+Restore ONLY on a new explicit user request, via reviewed revert and exact-SHA deploy.
+Never delete KV namespaces, bindings, stored commands, Slack tokens, or unrelated Pages projects.
