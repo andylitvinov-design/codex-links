@@ -1,0 +1,6 @@
+One-time Cloudflare Pages release of PR #184 from the already validated main merge.
+Target: codex-links, production branch main.
+Uses existing deploy-production.yml with exact merge commit SHA.
+Previous live release for rollback: a3777914a73036ff72170094693e035666c691bd.
+No Codex Save deployment. No KV data changes, new tokens, billing, or provider sends.
+No further release should modify this marker.

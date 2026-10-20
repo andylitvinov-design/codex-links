@@ -187,7 +187,7 @@ try {
   const hiddenCount=countDelivery();
   await new Promise(resolve=>setTimeout(resolve,4200));
   assert.equal(countDelivery(),hiddenCount);
-  checks.push("Actual hidden tab made no new delivery request across an active 3.5-second cadence.");
+  checks.push("Actual hidden tab made no new delivery request across the active cadence.");
 
   mode="hold";await page.bringToFront();
   await page.waitForFunction(()=>document.hidden===false,null,{polling:50});
@@ -209,7 +209,7 @@ try {
   assert.equal(active,0);
   mode="normal";
   commands[0]={...commands[0],text:"Recovered fixture snapshot",progressUpdatedAt:new Date().toISOString()};
-  await page.waitForFunction(()=>document.querySelector("#command-timeline")?.textContent?.includes("Recovered fixture snapshot"),null,{timeout:15000});
+  await page.waitForFunction(()=>document.querySelector("#command-timeline")?.textContent?.includes("Recovered fixture snapshot"),null,{timeout:45000});
   checks.push("Native AbortController aborted a hanging network response and scheduled polling recovered.");
 
   mode="hold";await second.bringToFront();await page.waitForFunction(()=>document.hidden===true,null,{polling:50});

@@ -2954,11 +2954,32 @@ export async function getCommandById(env, id) {
   return commands.find((command) => command.id === normalizedId) || null;
 }
 
-export async function readActiveCommands(env) {
-  const activeIds = await readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY).catch(() => []);
+// Recent and active commands for low-cost browser polling. This never modifies
+// the full history or KV indexes.
+export async function readPollingCommands(env) {
+  const [recentIds, activeIds] = await Promise.all([
+    readIdIndex(env, COMMANDS_RECENT_STORAGE_KEY),
+    readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY)
+  ]);
+  if (!recentIds.length && !activeIds.length) {
+    return (await readCommands(env)).slice(-8); // legacy storage
+  }
+  const ids = uniqIds([...activeIds.slice(-12), ...recentIds.slice(-8)]);
+  const commands = await readStoredCommandsByIds(env, ids);
+  return commands
+    .map((entry) => normalizeStoredCommandEntry(entry))
+    .filter((entry) => entry && isWithinRetentionWindow(entry.createdAt))
+    .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+}
 
+export async function readActiveCommands(env) {
+  // An empty modern active index is valid; do not scan all recent commands,
+  // and never hide a KV rate-limit error behind a high-cost fallback.
+  const activeIds = await readIdIndex(env, COMMAND_ACTIVE_STORAGE_KEY);
   if (!activeIds.length) {
-    const commands = await readCommands(env);
+    const recentIds = await readIdIndex(env, COMMANDS_RECENT_STORAGE_KEY);
+    if (recentIds.length) return [];
+    const commands = await readCommands(env); // legacy-only fallback
     return commands.filter((command) => isActiveCommandStatus(command.status));
   }
 
