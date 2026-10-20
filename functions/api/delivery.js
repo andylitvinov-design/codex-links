@@ -1,6 +1,6 @@
-import { getCommandsForClient, readCommands } from "../_lib/commands.js";
-import { deriveBridgeStatusFromCommands } from "../_lib/status.js";
-import { getMessagesForClient, readMessages } from "../_lib/messages.js";
+import { getCommandsForClient, readCommands, readPollingCommands } from "../_lib/commands.js";
+import { deriveBridgeStatusFromCommands, readBridgeStatus } from "../_lib/status.js";
+import { getMessagesForClient, readMessages, readPollingMessages } from "../_lib/messages.js";
 import { readReports } from "../_lib/reports.js";
 import { handleOptions, json, jsonStorageError } from "../_lib/http.js";
 import { buildLatencyBreakdown, getVisibleDeliveryStage } from "../_lib/delivery.js";
@@ -114,6 +114,23 @@ export async function onRequest(context) {
 
     if (!usePublicScope && !clientId) {
       return json({ error: "clientId is required." }, { status: 400 });
+    }
+
+    if (usePublicScope && url.searchParams.get("mode") === "poll") {
+      // Bounded reads; no cross-request/edge caching of command/message data.
+      // Full history and reports are still available from the default route.
+      const [commands, messages, status] = await Promise.all([
+        readPollingCommands(env),
+        readPollingMessages(env),
+        readBridgeStatus(env)
+      ]);
+      return json({
+        serverTime: new Date().toISOString(),
+        status,
+        commands: commands.filter((command) => !isHiddenPublicEntry(command)).map(serializeCommand),
+        messages: messages.filter((message) => !isHiddenPublicEntry(message)),
+        reports: []
+      });
     }
 
     if (activeOnly) {

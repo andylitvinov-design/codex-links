@@ -160,6 +160,16 @@ async function persistMessage(env, message) {
   return normalized;
 }
 
+// Only the newest messages are needed for the frequent cross-device poll.
+// Full history remains accessible through readMessages() on initial/manual load.
+export async function readPollingMessages(env) {
+  const ids = await readIdIndex(env, INBOX_MESSAGES_RECENT_STORAGE_KEY);
+  if (!ids.length) return (await readMessages(env)).slice(-12); // legacy
+  return (await readStoredMessagesByIds(env, ids.slice(-12)))
+    .filter((message) => isWithinRetentionWindow(message.createdAt))
+    .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+}
+
 export async function readMessages(env) {
   const indexedIds = await readIdIndex(env, INBOX_MESSAGES_RECENT_STORAGE_KEY).catch(() => []);
   let existing = [];
