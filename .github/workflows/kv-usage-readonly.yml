@@ -30,7 +30,7 @@ jobs:
           EXPECTED_REPO = ("andylitvinov-design", "codex-links")
           token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
           configured_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-          report = {"incident_date_utc": "2026-10-19", "checked_at": datetime.now(timezone.utc).isoformat(), "mode": "read_only"}
+          report = {"incident_date_utc": "2026-10-20", "checked_at": datetime.now(timezone.utc).isoformat(), "mode": "read_only"}
 
           def finish():
               safe = json.dumps(report, indent=2, sort_keys=True)
@@ -81,7 +81,7 @@ jobs:
           groups = {"all_namespaces": None, **namespaces}
           selections = []
           for alias, namespace in groups.items():
-              filter_text = 'date_geq: "2026-10-19", date_leq: "2026-10-19", actionType: "read"'
+              filter_text = 'date_geq: "2026-10-20", date_leq: "2026-10-20", actionType: "read"'
               if namespace:
                   filter_text += ', namespaceId: "' + namespace + '"'
               selections.append(alias + ': kvOperationsAdaptiveGroups(filter: {' + filter_text + '}, limit: 10) { sum { requests } }')
@@ -137,11 +137,11 @@ jobs:
                   entry["status"] = "metadata_available"
               report["pages"][project] = entry
           # One-off source provenance and bounded Workers runtime comparison.
-          report["workers"] = {"window_utc": "2026-10-19", "status": "unavailable"}
+          report["workers"] = {"window_utc": "2026-10-20", "status": "unavailable"}
           try:
               query = ('query Workers($a: string!) { viewer { accounts(filter: {accountTag: $a}) { '
-                  'workersInvocationsAdaptive(limit: 10000, filter: {datetime_geq: "2026-10-19T00:00:00Z", '
-                  'datetime_leq: "2026-10-19T17:00:00Z"}) { '
+                  'workersInvocationsAdaptive(limit: 10000, filter: {datetime_geq: "2026-10-20T00:00:00Z", '
+                  'datetime_leq: "2026-10-20T03:20:00Z"}) { '
                   'dimensions { scriptName status } sum { requests errors } } } } }')
               worker_status, worker_payload = read_api("/client/v4/graphql", {"query":query, "variables":{"a":ACCOUNT}})
               rows = (((worker_payload or {}).get("data") or {}).get("viewer") or {}).get("accounts") or []
