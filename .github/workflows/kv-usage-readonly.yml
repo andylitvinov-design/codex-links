@@ -167,6 +167,37 @@ jobs:
           except Exception:
               report["workers"] = {"status":"read_error"}
 
+          # One-off source provenance and bounded Workers runtime comparison.
+          report["pages_functions"] = {"window_utc": "2026-10-20", "status": "unavailable"}
+          try:
+              query = ('query PagesFunctions($a: string!) { viewer { accounts(filter: {accountTag: $a}) { '
+                  'pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: "2026-10-20T00:00:00Z", '
+                  'datetime_leq: "2026-10-20T03:20:00Z"}) { '
+                  'dimensions { scriptName status } sum { requests errors } } } } }')
+              worker_status, worker_payload = read_api("/client/v4/graphql", {"query":query, "variables":{"a":ACCOUNT}})
+              rows = (((worker_payload or {}).get("data") or {}).get("viewer") or {}).get("accounts") or []
+              series = rows[0].get("pagesFunctionsInvocationsAdaptiveGroups") if rows else None
+              if isinstance(series, list):
+                  totals = {}
+                  for row in series:
+                      dims = row.get("dimensions") or {}
+                      name = str(dims.get("scriptName") or "UNKNOWN")[:100]
+                      sums = row.get("sum") or {}
+                      requests = sums.get("requests")
+                      errors = sums.get("errors")
+                      if not isinstance(requests,(int,float)) or not math.isfinite(requests) or requests < 0: continue
+                      bucket = totals.setdefault(name, {"requests":0, "errors":0})
+                      bucket["requests"] += requests
+                      if isinstance(errors,(int,float)) and math.isfinite(errors) and errors >= 0:
+                          bucket["errors"] += errors
+                  report["pages_functions"] = {"status":"available", "rows":len(series),
+                      "may_be_truncated":len(series)>=10000,
+                      "scripts":dict(sorted(totals.items(),key=lambda item:-item[1]["requests"])[:25])}
+              else:
+                  report["pages_functions"] = {"status":"graphql_unavailable", "http":worker_status.get("http")}
+          except Exception:
+              report["pages_functions"] = {"status":"read_error"}
+
           # A source=None Pages project is commonly a Direct Upload target.
           # Print only the observed public build routing metadata, never env.
           for project in ("codex-links","codex-save"):
