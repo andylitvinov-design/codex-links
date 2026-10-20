@@ -23,6 +23,8 @@ const state = {
   deliveryRefreshMode: "",
   deliveryRefreshRequested: false,
   deliveryPollInFlight: false,
+  lastFullDeliveryAt: 0,
+  nextDeliveryRetryAt: 0,
   refreshReposRequested: false,
   lastRenderedTimelineSize: 0,
   lastRenderedTimelineSignature: "",
@@ -61,11 +63,12 @@ const state = {
   deliveryStatus: null
 };
 
-const BUILD_VERSION = "20261012-2016";
-const SPEED_POLL_INTERVAL_MS = 1000;
+const BUILD_VERSION = "20261020-0840";
+const SPEED_POLL_INTERVAL_MS = 5000;
 const SPEED_POLL_WINDOW_MS = 25000;
-const FAST_POLL_INTERVAL_MS = 3500;
-const IDLE_POLL_INTERVAL_MS = 60000;
+const FAST_POLL_INTERVAL_MS = 30000;
+const IDLE_POLL_INTERVAL_MS = 300000;
+const FULL_REFRESH_INTERVAL_MS = 1800000;
 const DELIVERY_REQUEST_TIMEOUT_MS = 10000;
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
@@ -4128,6 +4131,7 @@ async function fetchDeliverySnapshot(options = {}) {
   url.searchParams.set("scope", "public");
   if (options.activeOnly) {
     url.searchParams.set("activeOnly", "1");
+    url.searchParams.set("mode", "poll");
   }
   url.searchParams.set("_", String(Date.now()));
 
@@ -4139,10 +4143,18 @@ async function fetchDeliverySnapshot(options = {}) {
   });
 
   if (!response.ok) {
+    if (response.status === 429) {
+      const retrySeconds = Number(response.headers?.get("retry-after"));
+      const retryMs = Number.isFinite(retrySeconds) && retrySeconds > 0
+        ? retrySeconds * 1000 : 300000;
+      // Avoid hammering an exhausted daily quota; manual Refresh remains usable.
+      state.nextDeliveryRetryAt = Date.now() + Math.max(1800000, Math.min(3600000, retryMs));
+    }
     const message = String(data?.message || "").trim();
     throw new Error(message || `Failed to load delivery: ${response.status}`);
   }
 
+  state.nextDeliveryRetryAt = 0;
   return data;
 }
 
@@ -4274,6 +4286,7 @@ async function refreshAll(options = {}) {
 
     if (statusResult.status === "fulfilled") {
       applyDeliverySnapshot(statusResult.value);
+      state.lastFullDeliveryAt = Date.now();
     }
 
     renderDispatchModeUi();
@@ -4281,9 +4294,9 @@ async function refreshAll(options = {}) {
     const hasCachedData = state.commands.length > 0 || state.messages.length > 0;
 
     if (statusResult.status === "rejected" && hasCachedData) {
-      setCommandStatusMessage("Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
+      setCommandStatusMessage(state.nextDeliveryRetryAt > Date.now() ? "Данные временно недоступны из-за лимита Cloudflare KV, показываю последнюю доступную версию. Автоповтор отложен; Refresh — вручную." : "Часть данных не обновилась, показываю последнюю доступную версию.", { tone: "error" });
     } else if (statusResult.status === "rejected") {
-      setCommandStatusMessage("Данные временно недоступны. Попробуйте обновить страницу позже.", { tone: "error" });
+      setCommandStatusMessage(state.nextDeliveryRetryAt > Date.now() ? "Данные временно недоступны из-за лимита Cloudflare KV. Автопроверка отложена; Refresh — вручную." : "Данные временно недоступны. Попробуйте обновить страницу позже.", { tone: "error" });
     } else if (reposError) {
       setCommandStatusMessage("Не удалось обновить список репозиториев.", { tone: "error" });
     } else {
@@ -4299,11 +4312,18 @@ async function refreshSpeedMode(options = {}) {
     state.deliveryRefreshRequested = true;
   }
   return runDeliveryRefresh(async () => {
-    const snapshot = await fetchDeliverySnapshot({ activeOnly: true });
-    applyDeliverySnapshot(snapshot);
-    renderDispatchModeUi();
-    syncCommandStatusFromState();
-    renderCommands();
+    try {
+      const snapshot = await fetchDeliverySnapshot({ activeOnly: true });
+      applyDeliverySnapshot(snapshot);
+      renderDispatchModeUi();
+      syncCommandStatusFromState();
+      renderCommands();
+    } catch (error) {
+      if (state.nextDeliveryRetryAt > Date.now()) {
+        setCommandStatusMessage("Данные временно недоступны из-за лимита Cloudflare KV. Автопроверка отложена; Refresh — вручную.", { tone: "error" });
+      }
+      throw error;
+    }
   }, "active");
 }
 
@@ -4472,10 +4492,11 @@ async function pollDelivery() {
       return;
     }
 
-    if (isDeliverySpeedModeActive()) {
-      await refreshSpeedMode();
-    } else {
+    if (state.nextDeliveryRetryAt > Date.now()) return;
+    if (state.lastFullDeliveryAt && Date.now() - state.lastFullDeliveryAt >= FULL_REFRESH_INTERVAL_MS) {
       await refreshAll();
+    } else {
+      await refreshSpeedMode();
     }
   } finally {
     state.deliveryPollInFlight = false;
@@ -4499,9 +4520,12 @@ function startPolling() {
     return status === "queued" || status === "dispatched" || status === "processing";
   });
 
-  state.commandPollerInterval = isDeliverySpeedModeActive()
-    ? SPEED_POLL_INTERVAL_MS
-    : (hasActiveCommands ? FAST_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
+  const retryRemaining = Math.max(0, state.nextDeliveryRetryAt - Date.now());
+  state.commandPollerInterval = retryRemaining > 0
+    ? Math.max(IDLE_POLL_INTERVAL_MS, retryRemaining)
+    : isDeliverySpeedModeActive()
+      ? SPEED_POLL_INTERVAL_MS
+      : (hasActiveCommands ? FAST_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
   state.commandPoller = window.setInterval(() => {
     pollDelivery().catch(() => {});
   }, state.commandPollerInterval);
