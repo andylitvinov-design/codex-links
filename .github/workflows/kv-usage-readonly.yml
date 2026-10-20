@@ -1,5 +1,5 @@
 name: KV Incident Read-only Diagnostics
-# Post-release one-shot verification on 2026-10-20; read-only
+# Post-standby one-shot independent production check on 2026-10-20; read-only
 
 on:
   push:
