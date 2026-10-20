@@ -130,7 +130,11 @@ export async function createBrowser(sourceUrl = new URL("../../public/app.js", i
     applyDeliverySnapshot(snapshot) {
       state.commands = snapshot.commands || [];
       state.messages = snapshot.messages || [];
-      state.reports = snapshot.reports || [];
+      // Real UI merges reports; a bounded poll intentionally omits them and
+    // must not erase the previous full-history report cards.
+    if (Array.isArray(snapshot.reports) && snapshot.reports.length) {
+      state.reports = snapshot.reports;
+    }
     },
     renderDispatchModeUi() {},
     renderCommands() { effects.rendered++; },
