@@ -69,6 +69,7 @@ const SPEED_POLL_WINDOW_MS = 25000;
 const FAST_POLL_INTERVAL_MS = 30000;
 const IDLE_POLL_INTERVAL_MS = 300000;
 const FULL_REFRESH_INTERVAL_MS = 1800000;
+const ACTIVE_POLL_FRESHNESS_MS = 900000;
 const DELIVERY_REQUEST_TIMEOUT_MS = 10000;
 const sharedCookieDomain = (
   window.location.hostname === "codex-links.pages.dev" ||
@@ -4517,7 +4518,10 @@ function startPolling() {
 
   const hasActiveCommands = state.commands.some((command) => {
     const status = String(command?.status || "").trim().toLowerCase();
-    return status === "queued" || status === "dispatched" || status === "processing";
+    if (status !== "queued" && status !== "dispatched" && status !== "processing") return false;
+    const updatedAt = Date.parse(String(command?.progressUpdatedAt || command?.createdAt || ""));
+    // Old or abandoned jobs must not pin a browser to fast polling all day.
+    return !Number.isFinite(updatedAt) || Date.now() - updatedAt <= ACTIVE_POLL_FRESHNESS_MS;
   });
 
   const retryRemaining = Math.max(0, state.nextDeliveryRetryAt - Date.now());
