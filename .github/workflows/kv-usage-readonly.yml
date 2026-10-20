@@ -348,5 +348,56 @@ jobs:
           else:
               report["preview_binding_audit"] = {"status": "provider_unavailable", "http": status.get("http")}
 
+
+          # Only aggregate request counts AFTER production was paused, not
+          # individual requests/IPs or any log, route parameter or KV data.
+          report["post_pause_pages_functions"] = {"status": "not_checked"}
+          end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+          start_utc = "2026-10-20T13:41:00Z"
+          if end_utc > start_utc:
+              query = ('query AfterPause($a: string!) { viewer { accounts(filter: {accountTag: $a}) { '
+                  'pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: "'
+                  + start_utc + '", datetime_leq: "' + end_utc +
+                  '"}) { dimensions {scriptName status} sum {requests errors} } } } }')
+              http, result = read_api("/client/v4/graphql", {"query": query, "variables": {"a": ACCOUNT}})
+              data = (((result or {}).get("data") or {}).get("viewer") or {}).get("accounts") or []
+              series = data[0].get("pagesFunctionsInvocationsAdaptiveGroups") if data else None
+              entry = {"status": "unavailable", "http": http.get("http"), "from": start_utc,
+                       "to": end_utc}
+              if isinstance(series, list):
+                  buckets = {}
+                  for row in series:
+                      dimensions = row.get("dimensions") or {}
+                      script = str(dimensions.get("scriptName") or "unknown")[:120]
+                      amount = (row.get("sum") or {}).get("requests")
+                      if isinstance(amount, (int,float)) and math.isfinite(amount) and amount >= 0:
+                          buckets[script] = buckets.get(script,0) + amount
+                  entry.update({"status":"available", "rows":len(series),
+                                "truncated":len(series)>=10000,
+                                "requests_by_script":dict(sorted(buckets.items()))})
+              report["post_pause_pages_functions"] = entry
+
+          # Access preview protection status: safely inspect only matched public
+          # hostnames. Never print Access policies, IDs or private identities.
+          report["preview_access_policy"] = {"status": "unavailable"}
+          http, result = read_api("/client/v4/accounts/" + ACCOUNT + "/access/apps?per_page=100")
+          apps = result.get("result") if isinstance(result, dict) and result.get("success") else None
+          if isinstance(apps, list):
+              found = 0
+              for app in apps:
+                  if not isinstance(app, dict): continue
+                  hosts = []
+                  domain = app.get("domain")
+                  if isinstance(domain, str): hosts.append(domain)
+                  for obj in (app.get("self_hosted_domains") or []):
+                      if isinstance(obj, dict) and isinstance(obj.get("domain"), str):
+                          hosts.append(obj["domain"])
+                  if any(host.strip().lower() == "*.codex-links.pages.dev" for host in hosts):
+                      found += 1
+              report["preview_access_policy"] = {"status":"available", "matching_app_count":found,
+                  "list_truncated": len(apps)>=100}
+          else:
+              report["preview_access_policy"] = {"status":"not_authorized_or_not_available", "http":http.get("http")}
+
           finish()
           PY
