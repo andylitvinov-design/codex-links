@@ -1,5 +1,5 @@
 import { createRemediationRun, advanceRemediationRun } from "../../_lib/remediation.js";
-import { handleOptions, json } from "../../_lib/http.js";
+import { handleOptions, isWriteAuthorized, json } from "../../_lib/http.js";
 import { readLatestDiagnosisRun } from "../../_lib/runs.js";
 
 export async function onRequest(context) {
@@ -10,6 +10,13 @@ export async function onRequest(context) {
 
   if (context.request.method !== "POST") {
     return json({ error: "Method not allowed." }, { status: 405 });
+  }
+
+  if (!isWriteAuthorized(context.request, context.env)) {
+    return json({
+      error: "Owner authorization is required to start remediation.",
+      code: "owner_authorization_required"
+    }, { status: 401 });
   }
 
   let payload = {};
