@@ -1,43 +1,65 @@
 {
   "schema": "HH_PR_TRANSITION_LEDGER_V1",
   "repo": "andylitvinov-design/books",
-  "generated_at": "2026-11-03T20:11:33.979Z",
+  "generated_at": "2026-11-03T21:20:40.559Z",
   "source": "GitHub PR-created cohort via existing HH PR Monitor; exact stage events from GitHub API",
   "window": {
     "hours": 48,
-    "from": "2026-11-01T20:11:33.979Z",
-    "to": "2026-11-03T20:11:33.979Z",
+    "from": "2026-11-01T21:20:40.559Z",
+    "to": "2026-11-03T21:20:40.559Z",
     "complete": true,
-    "total": 352
+    "total": 336
   },
   "coverage": {
-    "timeline_checked": 5,
-    "ci_checked": 5,
+    "timeline_checked": 4,
+    "ci_checked": 4,
     "failed_reads": 0,
     "cohort": {
       "schema": "HH_PR_CREATED_COHORT_V1",
-      "pages_read": 4,
-      "method": "GitHub REST pulls state=all sorted by created_at descending; stop when oldest page crosses 48h boundary",
+      "pages_read": 1,
+      "method": "Incremental GitHub REST PR created/updated since previous complete 48h snapshot; previous verified cohort retained, cutoff pruned",
       "stage_events_complete": false
     },
     "recent_head_readback": {
-      "at": "2026-11-03T20:11:33.979Z",
+      "at": "2026-11-03T21:20:40.559Z",
       "prs": [
-        3331,
-        3330,
-        3329,
-        3328,
-        3327,
-        3301,
-        3303,
-        3242,
-        3257,
+        3338,
+        3337,
+        3336,
+        3335,
+        3334,
+        3333,
+        3332,
         3288,
-        3323
+        3329,
+        3323,
+        3257,
+        3242,
+        3327,
+        3320,
+        3331
       ],
-      "read_success": 11
+      "read_success": 15
     },
-    "legacy_unverified_ready_removed": 5
+    "legacy_unverified_ready_removed": 5,
+    "incremental": {
+      "at": "2026-11-03T21:20:40.559Z",
+      "previous_generated_at": "2026-11-03T20:11:33.979Z",
+      "created_page1_older_than_previous": true,
+      "updated_pages": 1,
+      "updated_complete": true,
+      "verified_native_merges": [
+        3331,
+        3332,
+        3329,
+        3336
+      ],
+      "verified_ci_runs": [
+        41707594153,
+        41714921221
+      ],
+      "live_verified_new": 0
+    }
   },
   "stages": [
     "created",
@@ -54,14 +76,15 @@
   ],
   "prs": [
     {
-      "number": 3331,
-      "url": "https://github.com/andylitvinov-design/books/pull/3331",
-      "title": "perf(ci): safely remove redundant workflow YAML self-trigger runs under Core/actionlint",
-      "created_at": "2026-11-03T19:54:12Z",
+      "number": 3338,
+      "url": "https://github.com/andylitvinov-design/books/pull/3338",
+      "title": "perf(ci): stop stale browser/billing/mobile jobs after PR head update",
+      "created_at": "2026-11-03T21:18:56Z",
       "stamps": {
         "created": {
-          "at": "2026-11-03T19:54:12Z",
+          "at": "2026-11-03T21:18:56Z",
           "source": "github:created_at",
+          "actor": "github",
           "verified": true
         }
       },
@@ -77,12 +100,270 @@
       "state": "open",
       "merged_at": null,
       "closed_at": null,
-      "updated_at": "2026-11-03T19:54:12Z",
+      "updated_at": "2026-11-03T21:18:56Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "head_sha": "02f3acf44aa3b9dac689476164398412d07a83cf",
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
+    },
+    {
+      "number": 3337,
+      "url": "https://github.com/andylitvinov-design/books/pull/3337",
+      "title": "feat(video): build four real licensed scenes from a visitor's prompt",
+      "created_at": "2026-11-03T21:18:44Z",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T21:18:44Z",
+          "source": "github:created_at",
+          "actor": "github",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "state": "open",
+      "merged_at": null,
+      "closed_at": null,
+      "updated_at": "2026-11-03T21:18:44Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "head_sha": "64335119f299c8e63e332cd403b163b06b0044e4",
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
+    },
+    {
+      "number": 3336,
+      "url": "https://github.com/andylitvinov-design/books/pull/3336",
+      "title": "docs(ci): open Ready PR immediately, use Triage only for failed checks",
+      "created_at": "2026-11-03T21:04:48Z",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T21:04:48Z",
+          "source": "github:created_at",
+          "actor": "github",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T21:14:03Z",
+          "source": "github:pulls/3336#merged_at",
+          "actor": "GitHub native merge",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "state": "closed",
+      "merged_at": "2026-11-03T21:14:03Z",
+      "closed_at": "2026-11-03T21:14:03Z",
+      "updated_at": "2026-11-03T21:14:03Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "head_sha": "3dfcede0f62b108f2c32c884b26a37bc86f70765",
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
+    },
+    {
+      "number": 3335,
+      "url": "https://github.com/andylitvinov-design/books/pull/3335",
+      "title": "feat(video): grow source library toward 320 real clips with 16 reviewed-source candidates and strict QA",
+      "created_at": "2026-11-03T20:54:36Z",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T20:54:36Z",
+          "source": "github:created_at",
+          "actor": "github",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "state": "open",
+      "merged_at": null,
+      "closed_at": null,
+      "updated_at": "2026-11-03T21:11:07Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "head_sha": "5fe9ce5b0e9b888ae088bb163909ccaddcdcf8e1",
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
+    },
+    {
+      "number": 3334,
+      "url": "https://github.com/andylitvinov-design/books/pull/3334",
+      "title": "feat(mytube): rank all 44 existing video scenes and public videos in 4×4×4×4 taxonomy",
+      "created_at": "2026-11-03T20:49:20Z",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T20:49:20Z",
+          "source": "github:created_at",
+          "actor": "github",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "state": "open",
+      "merged_at": null,
+      "closed_at": null,
+      "updated_at": "2026-11-03T21:17:54Z",
+      "base": "feat/mytube-six-dock-production-live-20261103",
+      "draft": false,
+      "current_draft": false,
+      "head_sha": "6d5f133c4991749b305562e0fd2317cdaf755f5d",
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
+    },
+    {
+      "number": 3333,
+      "url": "https://github.com/andylitvinov-design/books/pull/3333",
+      "title": "fix(consultation): reliable one-click optional name on iPhone/WebKit",
+      "created_at": "2026-11-03T20:42:46Z",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T20:42:46Z",
+          "source": "github:created_at",
+          "actor": "github",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "state": "open",
+      "merged_at": null,
+      "closed_at": null,
+      "updated_at": "2026-11-03T21:20:33Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "head_sha": "c1e8be09298cdb302e0130210c49dc6956fb17d9",
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
+    },
+    {
+      "number": 3332,
+      "url": "https://github.com/andylitvinov-design/books/pull/3332",
+      "title": "fix(ci): preserve branch-specific Profile Axis skip after selective YAML migration",
+      "created_at": "2026-11-03T20:42:42Z",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T20:42:42Z",
+          "source": "github:created_at",
+          "actor": "github",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T20:59:37Z",
+          "source": "github:pulls/3332#merged_at",
+          "actor": "GitHub native merge",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "state": "closed",
+      "merged_at": "2026-11-03T20:59:37Z",
+      "closed_at": "2026-11-03T20:59:37Z",
+      "updated_at": "2026-11-03T20:59:37Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "head_sha": "c3667084ab8fe2e0901dedf2c33fb3634f6f86f2",
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
+    },
+    {
+      "number": 3331,
+      "url": "https://github.com/andylitvinov-design/books/pull/3331",
+      "title": "perf(ci): safely remove redundant workflow YAML self-trigger runs under Core/actionlint",
+      "created_at": "2026-11-03T19:54:12Z",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T19:54:12Z",
+          "source": "github:created_at",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T20:13:48Z",
+          "source": "github:pulls/3331#merged_at",
+          "actor": "GitHub native merge",
+          "verified": true
+        },
+        "CI_green": {
+          "at": "2026-11-03T20:13:18Z",
+          "source": "github:actions/runs/41707594153/jobs#required-exact-head",
+          "actor": "GitHub Actions (process; owner not established)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": [
+          {
+            "head_sha": "36f55680a651f10dfb6c45478bb1265d24899124",
+            "workflow_run_id": 41707594153,
+            "run_attempt": 1,
+            "queued_at": "2026-11-03T19:54:16Z",
+            "started_at": "2026-11-03T20:04:03Z",
+            "completed_at": "2026-11-03T20:13:18Z",
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)"
+          }
+        ]
+      },
+      "state": "closed",
+      "merged_at": "2026-11-03T20:13:48Z",
+      "closed_at": "2026-11-03T20:13:48Z",
+      "updated_at": "2026-11-03T20:13:48Z",
       "base": "codex/public-book-library",
       "draft": false,
       "head_sha": "36f55680a651f10dfb6c45478bb1265d24899124",
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3330,
@@ -123,12 +404,24 @@
     {
       "number": 3329,
       "url": "https://github.com/andylitvinov-design/books/pull/3329",
-      "title": "perf(ci): eliminate 38 redundant PR workflow self-checks, keep Core/Specialist",
+      "title": "perf(ci): remove 29 redundant feature workflow self-triggers, preserve required gates",
       "created_at": "2026-11-03T19:49:12Z",
       "stamps": {
         "created": {
           "at": "2026-11-03T19:49:12Z",
           "source": "github:created_at",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T21:07:08Z",
+          "source": "github:pulls/3329#merged_at",
+          "actor": "GitHub native merge",
+          "verified": true
+        },
+        "CI_green": {
+          "at": "2026-11-03T21:06:51Z",
+          "source": "github:actions/runs/41714921221/jobs#required-exact-head",
+          "actor": "GitHub Actions (process; owner not established)",
           "verified": true
         }
       },
@@ -139,17 +432,28 @@
         "check_count": null,
         "duplicate_checks": null,
         "failed_wall_minutes": null,
-        "cycles": []
+        "cycles": [
+          {
+            "head_sha": "33306580f80abe2729db9f23a03e6b3711b785e6",
+            "workflow_run_id": 41714921221,
+            "run_attempt": 1,
+            "queued_at": "2026-11-03T20:41:44Z",
+            "started_at": "2026-11-03T20:55:45Z",
+            "completed_at": "2026-11-03T21:06:51Z",
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)"
+          }
+        ]
       },
-      "state": "open",
-      "merged_at": null,
-      "closed_at": null,
-      "updated_at": "2026-11-03T20:05:12Z",
+      "state": "closed",
+      "merged_at": "2026-11-03T21:07:08Z",
+      "closed_at": "2026-11-03T21:07:09Z",
+      "updated_at": "2026-11-03T21:07:09Z",
       "base": "codex/public-book-library",
       "draft": false,
-      "head_sha": "0642b398002556fd04b17df9f23bceaf221543b3",
+      "head_sha": "33306580f80abe2729db9f23a03e6b3711b785e6",
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3328,
@@ -241,14 +545,20 @@
       "number": 3327,
       "url": "https://github.com/andylitvinov-design/books/pull/3327",
       "title": "fix(ci): stop unrelated Browser/WebKit checks from blocking Specialist on CI-only PRs",
-      "state": "open",
+      "state": "closed",
       "created_at": "2026-11-03T19:44:06Z",
-      "merged_at": null,
-      "head_sha": "b39d462798e6acca07511f0de1a73f02f7099c7d",
+      "merged_at": "2026-11-03T20:27:43Z",
+      "head_sha": "42cc02b03fa4adf6f885366732fc48f8bdb2bf35",
       "stamps": {
         "created": {
           "at": "2026-11-03T19:44:06Z",
           "source": "github:created_at",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T20:27:43Z",
+          "source": "github:pulls/3327#merged_at",
+          "actor": "GitHub native merge",
           "verified": true
         }
       },
@@ -276,11 +586,11 @@
         "current_head_sha": "b39d462798e6acca07511f0de1a73f02f7099c7d"
       },
       "current_draft": false,
-      "closed_at": null,
-      "updated_at": "2026-11-03T19:54:53Z",
+      "closed_at": "2026-11-03T20:27:44Z",
+      "updated_at": "2026-11-03T20:27:44Z",
       "base": "codex/public-book-library",
       "draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3326,
@@ -664,7 +974,7 @@
       "state": "open",
       "created_at": "2026-11-03T17:51:07Z",
       "merged_at": null,
-      "head_sha": "d43885a9dd2bb352beb7f0bccde2c3b1044a8454",
+      "head_sha": "666e1425521074e1cb3df1f908714ff36dbcba62",
       "stamps": {
         "created": {
           "at": "2026-11-03T17:51:07Z",
@@ -682,11 +992,11 @@
         "cycles": []
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T20:02:57Z",
+      "updated_at": "2026-11-03T21:03:40Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3322,
@@ -753,7 +1063,7 @@
       "state": "open",
       "created_at": "2026-11-03T17:38:28Z",
       "merged_at": null,
-      "head_sha": null,
+      "head_sha": "c93a2ab1c15b91f1da5658099e5a81d841bd53ce",
       "stamps": {
         "created": {
           "at": "2026-11-03T17:38:28Z",
@@ -771,9 +1081,11 @@
         "cycles": []
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T17:50:39Z",
+      "updated_at": "2026-11-03T20:20:12Z",
       "base": "codex/public-book-library",
-      "draft": false
+      "draft": false,
+      "current_draft": false,
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3319,
@@ -1756,7 +2068,7 @@
       "state": "open",
       "created_at": "2026-11-03T12:34:56Z",
       "merged_at": null,
-      "head_sha": "3997712fc7426c156ddfa0b9ba4988406d7ba887",
+      "head_sha": "30bb5b951666d7555bcbce7ee942d52053b3de97",
       "stamps": {
         "created": {
           "at": "2026-11-03T12:34:56Z",
@@ -1774,11 +2086,11 @@
         "cycles": []
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T20:06:44Z",
+      "updated_at": "2026-11-03T21:19:07Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3287,
@@ -2747,7 +3059,7 @@
       "state": "open",
       "created_at": "2026-11-03T05:21:20Z",
       "merged_at": null,
-      "head_sha": "e4e3363ed54d70a18788f2570c9008badeb73316",
+      "head_sha": "345a15b1db6b08b780f4439822ea15733a9137d7",
       "stamps": {
         "created": {
           "at": "2026-11-03T05:21:20Z",
@@ -2765,11 +3077,11 @@
         "cycles": []
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T20:00:52Z",
+      "updated_at": "2026-11-03T21:00:28Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3256,
@@ -3209,7 +3521,7 @@
       "state": "open",
       "created_at": "2026-11-03T04:34:28Z",
       "merged_at": null,
-      "head_sha": "c79a488b764b7d12ad1c9258dd405b30286a28c6",
+      "head_sha": "27c328320cc36cf06242d211c98b9d3839c45b42",
       "stamps": {
         "created": {
           "at": "2026-11-03T04:34:28Z",
@@ -3227,11 +3539,11 @@
         "cycles": []
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T20:04:15Z",
+      "updated_at": "2026-11-03T20:56:58Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T21:20:40.559Z"
     },
     {
       "number": 3241,
@@ -11045,763 +11357,6 @@
       },
       "closed_at": "2026-11-02T13:45:26Z",
       "updated_at": "2026-11-02T13:45:26Z",
-      "base": "codex/public-book-library",
-      "draft": false
-    },
-    {
-      "number": 2996,
-      "url": "https://github.com/andylitvinov-design/books/pull/2996",
-      "title": "perf(ci): stop audit-only pushes from idling the Repair Worker",
-      "state": "closed",
-      "created_at": "2026-11-01T21:18:09Z",
-      "merged_at": "2026-11-01T21:18:50Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:18:09Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:18:50Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:18:50Z",
-      "updated_at": "2026-11-01T21:18:50Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2995,
-      "url": "https://github.com/andylitvinov-design/books/pull/2995",
-      "title": "fix(ci): actually skip CI-only Vercel builds using verified GitHub Compare API",
-      "state": "closed",
-      "created_at": "2026-11-01T21:14:09Z",
-      "merged_at": "2026-11-01T21:22:04Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:14:09Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:22:04Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:22:04Z",
-      "updated_at": "2026-11-01T21:22:04Z",
-      "base": "codex/public-book-library",
-      "draft": false
-    },
-    {
-      "number": 2994,
-      "url": "https://github.com/andylitvinov-design/books/pull/2994",
-      "title": "fix(ci): unblock safe manual required-check migration on default branch",
-      "state": "closed",
-      "created_at": "2026-11-01T21:10:48Z",
-      "merged_at": "2026-11-01T21:14:32Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:10:48Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:14:32Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:14:32Z",
-      "updated_at": "2026-11-01T21:14:33Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2993,
-      "url": "https://github.com/andylitvinov-design/books/pull/2993",
-      "title": "fix(ci): keep mature PRs actionable with complete bounded owner history",
-      "state": "closed",
-      "created_at": "2026-11-01T21:10:07Z",
-      "merged_at": "2026-11-01T21:13:35Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:10:07Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:13:35Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:13:35Z",
-      "updated_at": "2026-11-01T21:13:35Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2992,
-      "url": "https://github.com/andylitvinov-design/books/pull/2992",
-      "title": "fix(ci): release resolved conflict PRs back to normal merge queue",
-      "state": "closed",
-      "created_at": "2026-11-01T21:09:51Z",
-      "merged_at": "2026-11-01T21:13:44Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:09:51Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:13:44Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:13:44Z",
-      "updated_at": "2026-11-01T21:13:44Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2991,
-      "url": "https://github.com/andylitvinov-design/books/pull/2991",
-      "title": "perf(ci): wake Control Tower only for actionable PR handoffs",
-      "state": "closed",
-      "created_at": "2026-11-01T21:07:45Z",
-      "merged_at": "2026-11-01T21:10:34Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:07:45Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:10:34Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:10:34Z",
-      "updated_at": "2026-11-01T21:10:34Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2990,
-      "url": "https://github.com/andylitvinov-design/books/pull/2990",
-      "title": "fix(ci): diagnose unnecessary Vercel builds without bypassing protected releases",
-      "state": "closed",
-      "created_at": "2026-11-01T21:05:24Z",
-      "merged_at": "2026-11-01T21:12:10Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:05:24Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:12:10Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:12:10Z",
-      "updated_at": "2026-11-01T21:12:10Z",
-      "base": "codex/public-book-library",
-      "draft": false
-    },
-    {
-      "number": 2989,
-      "url": "https://github.com/andylitvinov-design/books/pull/2989",
-      "title": "feat(ci): event-driven fallback to wake 10-level PR Direction Watcher",
-      "state": "closed",
-      "created_at": "2026-11-01T21:03:02Z",
-      "merged_at": "2026-11-01T21:06:23Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:03:02Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:06:23Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:06:23Z",
-      "updated_at": "2026-11-01T21:06:23Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2988,
-      "url": "https://github.com/andylitvinov-design/books/pull/2988",
-      "title": "fix(ci): prevent manual conflict queue from starving actionable Repair PRs",
-      "state": "closed",
-      "created_at": "2026-11-01T21:02:32Z",
-      "merged_at": null,
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:02:32Z",
-          "source": "github:created_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:04:03Z",
-      "updated_at": "2026-11-01T21:04:03Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2987,
-      "url": "https://github.com/andylitvinov-design/books/pull/2987",
-      "title": "fix(ci): keep source Repair and CI lanes visible behind P1 conflict backlog",
-      "state": "closed",
-      "created_at": "2026-11-01T21:01:09Z",
-      "merged_at": "2026-11-01T21:01:53Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T21:01:09Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T21:01:53Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T21:01:53Z",
-      "updated_at": "2026-11-01T21:01:53Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2986,
-      "url": "https://github.com/andylitvinov-design/books/pull/2986",
-      "title": "fix(ci): allow bounded Repair on minor Actions inventory races",
-      "state": "closed",
-      "created_at": "2026-11-01T20:58:33Z",
-      "merged_at": "2026-11-01T20:59:24Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:58:33Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T20:59:24Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T20:59:24Z",
-      "updated_at": "2026-11-01T20:59:24Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2985,
-      "url": "https://github.com/andylitvinov-design/books/pull/2985",
-      "title": "fix(ci): unblock Control Tower on transient Actions inventory count races",
-      "state": "closed",
-      "created_at": "2026-11-01T20:51:38Z",
-      "merged_at": "2026-11-01T20:54:25Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:51:38Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T20:54:25Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T20:54:25Z",
-      "updated_at": "2026-11-01T20:54:25Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2984,
-      "url": "https://github.com/andylitvinov-design/books/pull/2984",
-      "title": "perf(ci): skip cancelled and skipped Watchdog callbacks in Control Tower",
-      "state": "closed",
-      "created_at": "2026-11-01T20:49:11Z",
-      "merged_at": "2026-11-01T20:58:05Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:49:11Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T20:58:05Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T20:58:05Z",
-      "updated_at": "2026-11-01T20:58:05Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2983,
-      "url": "https://github.com/andylitvinov-design/books/pull/2983",
-      "title": "feat(support): fifth Anti-stress direction with goals, private reassessment and OPORA",
-      "state": "open",
-      "created_at": "2026-11-01T20:46:13Z",
-      "merged_at": null,
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:46:13Z",
-          "source": "github:created_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": null,
-      "updated_at": "2026-11-02T16:46:05Z",
-      "base": "codex/public-book-library",
-      "draft": false
-    },
-    {
-      "number": 2982,
-      "url": "https://github.com/andylitvinov-design/books/pull/2982",
-      "title": "feat(ci): 10-level PR merge priority and live queue stage for Watchdog",
-      "state": "closed",
-      "created_at": "2026-11-01T20:40:04Z",
-      "merged_at": "2026-11-01T20:47:43Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:40:04Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T20:47:43Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T20:47:43Z",
-      "updated_at": "2026-11-01T20:47:43Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2981,
-      "url": "https://github.com/andylitvinov-design/books/pull/2981",
-      "title": "fix(ci): restore owner cron actor recovery without unavailable @actions/github dependency",
-      "state": "closed",
-      "created_at": "2026-11-01T20:38:58Z",
-      "merged_at": null,
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:38:58Z",
-          "source": "github:created_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T20:43:53Z",
-      "updated_at": "2026-11-01T20:43:53Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2980,
-      "url": "https://github.com/andylitvinov-design/books/pull/2980",
-      "title": "fix(ci): safely retry cron recovery with injected GitHub Octokit",
-      "state": "closed",
-      "created_at": "2026-11-01T20:37:11Z",
-      "merged_at": "2026-11-01T20:41:25Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:37:11Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T20:41:25Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T20:41:25Z",
-      "updated_at": "2026-11-01T20:41:26Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2979,
-      "url": "https://github.com/andylitvinov-design/books/pull/2979",
-      "title": "perf(ci): cut Public Services cold-start and duplicate build work",
-      "state": "closed",
-      "created_at": "2026-11-01T20:33:52Z",
-      "merged_at": "2026-11-02T05:53:11Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:33:52Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-02T05:53:11Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-02T05:53:11Z",
-      "updated_at": "2026-11-02T05:53:11Z",
-      "base": "codex/public-book-library",
-      "draft": false
-    },
-    {
-      "number": 2978,
-      "url": "https://github.com/andylitvinov-design/books/pull/2978",
-      "title": "feat(ci): Control Tower 2.0 autonomous queue dispatcher with addressed CI/Repair",
-      "state": "closed",
-      "created_at": "2026-11-01T20:32:56Z",
-      "merged_at": "2026-11-01T20:35:10Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:32:56Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-01T20:35:10Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-01T20:35:10Z",
-      "updated_at": "2026-11-01T20:35:10Z",
-      "base": "codex/bootstrap-books",
-      "draft": false
-    },
-    {
-      "number": 2977,
-      "url": "https://github.com/andylitvinov-design/books/pull/2977",
-      "title": "feat(video chat): contextual RU/EN/ES understanding across goal and scenario tree",
-      "state": "closed",
-      "created_at": "2026-11-01T20:31:43Z",
-      "merged_at": "2026-11-02T09:05:12Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:31:43Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-02T09:05:12Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-02T09:05:12Z",
-      "updated_at": "2026-11-02T09:05:12Z",
-      "base": "codex/public-book-library",
-      "draft": false
-    },
-    {
-      "number": 2976,
-      "url": "https://github.com/andylitvinov-design/books/pull/2976",
-      "title": "perf(ci): accelerate Public Services by overlapping setup and reusing browser sessions",
-      "state": "closed",
-      "created_at": "2026-11-01T20:31:30Z",
-      "merged_at": "2026-11-02T10:07:53Z",
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:31:30Z",
-          "source": "github:created_at",
-          "verified": true
-        },
-        "merged": {
-          "at": "2026-11-02T10:07:53Z",
-          "source": "github:merged_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-02T10:07:53Z",
-      "updated_at": "2026-11-02T10:07:53Z",
-      "base": "codex/public-book-library",
-      "draft": false
-    },
-    {
-      "number": 2975,
-      "url": "https://github.com/andylitvinov-design/books/pull/2975",
-      "title": "feat(mobile): sixth AI Video Chat tab with bottom-anchored mobile navigation",
-      "state": "closed",
-      "created_at": "2026-11-01T20:12:40Z",
-      "merged_at": null,
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:12:40Z",
-          "source": "github:created_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-02T22:56:44Z",
-      "updated_at": "2026-11-02T22:56:44Z",
-      "base": "codex/public-book-library",
-      "draft": true
-    },
-    {
-      "number": 2974,
-      "url": "https://github.com/andylitvinov-design/books/pull/2974",
-      "title": "feat(ui): six-tab mobile dock with AI Video Director and fixed iPhone Messenger layout",
-      "state": "closed",
-      "created_at": "2026-11-01T20:12:15Z",
-      "merged_at": null,
-      "head_sha": null,
-      "stamps": {
-        "created": {
-          "at": "2026-11-01T20:12:15Z",
-          "source": "github:created_at",
-          "verified": true
-        }
-      },
-      "timeline_checked": false,
-      "ci": {
-        "checked": false,
-        "run_count": null,
-        "check_count": null,
-        "duplicate_checks": null,
-        "failed_wall_minutes": null,
-        "cycles": []
-      },
-      "closed_at": "2026-11-02T03:59:44Z",
-      "updated_at": "2026-11-02T03:59:44Z",
       "base": "codex/public-book-library",
       "draft": false
     }
