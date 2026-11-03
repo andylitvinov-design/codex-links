@@ -1,16 +1,16 @@
 {
   "schema": "HH_PR_TRANSITION_LEDGER_V1",
   "repo": "andylitvinov-design/books",
-  "generated_at": "2026-11-03T22:13:34.566Z",
+  "generated_at": "2026-11-03T23:13:22.615Z",
   "source": "GitHub PR-created cohort via existing HH PR Monitor; exact stage events from GitHub API",
   "window": {
     "hours": 48,
     "from": "2026-11-01T21:20:40.559Z",
     "to": "2026-11-03T21:20:40.559Z",
-    "complete": true,
-    "total": 336,
-    "start": "2026-11-01T22:13:34.566Z",
-    "end": "2026-11-03T22:13:34.566Z"
+    "complete": false,
+    "total": 333,
+    "start": "2026-11-01T23:13:22.615Z",
+    "end": "2026-11-03T23:13:22.615Z"
   },
   "coverage": {
     "timeline_checked": 4,
@@ -19,37 +19,96 @@
     "cohort": {
       "schema": "HH_PR_CREATED_COHORT_V1",
       "pages_read": 1,
-      "method": "Incremental GitHub created page1 plus preserved 48h cohort; selected exact-HEAD exceptions; historical timeline not fully checked",
+      "method": "Previous created cohort + targeted new-PR GitHub search since 2026-11-03T22:13Z; not full replay",
       "stage_events_complete": false
     },
     "recent_head_readback": {
-      "at": "2026-11-03T22:13:34.566Z",
+      "at": "2026-11-03T23:13:22.615Z",
       "prs": [
-        3288,
         3242,
-        3323,
-        3339
+        3257,
+        3288,
+        3301,
+        3339,
+        3349,
+        3350,
+        3351,
+        3352,
+        3353,
+        3354,
+        3355,
+        3356,
+        3357,
+        3358,
+        3359,
+        3360,
+        3361
       ],
-      "read_success": 4
+      "read_success": 18
     },
     "legacy_unverified_ready_removed": 5,
     "incremental": {
-      "at": "2026-11-03T22:13:34.566Z",
-      "previous_generated_at": "2026-11-03T21:20:40.559Z",
-      "created_page1_older_than_previous": true,
-      "updated_pages": 0,
-      "updated_complete": false,
-      "verified_native_merges": [
-        3343,
-        3338,
-        3337,
-        3334
+      "at": "2026-11-03T23:13:22.615Z",
+      "previous_generated_at": "2026-11-03T22:13:34.566Z",
+      "created_after_previous_page1_checked": [
+        3349,
+        3350,
+        3351,
+        3352,
+        3353,
+        3354,
+        3355,
+        3356,
+        3357,
+        3358,
+        3359,
+        3360,
+        3361
       ],
-      "verified_ci_runs": [
-        41722019296,
-        41725830300
+      "new_prs_added": [
+        3349,
+        3350,
+        3351,
+        3352,
+        3353,
+        3354,
+        3355,
+        3356,
+        3357,
+        3358,
+        3359,
+        3360,
+        3361
       ],
-      "live_verified_new": 0
+      "updated_prs": [
+        3242,
+        3257,
+        3288,
+        3339,
+        3352,
+        3358,
+        3359,
+        3360
+      ],
+      "verified_native_merges_production": [
+        3242,
+        3339,
+        3358,
+        3359,
+        3360
+      ],
+      "verified_native_merge_stacked": [
+        3352
+      ],
+      "verified_exact_head_failed_runs": [
+        41733170537,
+        41733170614,
+        41734088012,
+        41734087630
+      ],
+      "live_verified_new": 0,
+      "stage_events_complete": false,
+      "unknown_runner_timestamps": true
     }
   },
   "stages": [
@@ -275,6 +334,12 @@
           "source": "github:created_at",
           "actor": "andylitvinov-design",
           "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T22:21:27Z",
+          "source": "github:pulls/3339#merged_at",
+          "actor": "GitHub native merge (actor unverified)",
+          "verified": true
         }
       },
       "timeline_checked": false,
@@ -286,15 +351,16 @@
         "failed_wall_minutes": null,
         "cycles": []
       },
-      "state": "open",
-      "merged_at": null,
-      "closed_at": null,
-      "updated_at": "2026-11-03T21:52:43Z",
+      "state": "closed",
+      "merged_at": "2026-11-03T22:21:27Z",
+      "closed_at": "2026-11-03T22:21:27Z",
+      "updated_at": "2026-11-03T22:34:29Z",
       "base": "codex/public-book-library",
       "current_draft": false,
       "draft": false,
       "head_sha": "5908c6c5f80f4f05b1f8b5cf2f7e22c83d975b12",
-      "observed_at_utc": "2026-11-03T22:13:34.566Z"
+      "observed_at_utc": "2026-11-03T23:13:22.615Z",
+      "merge_commit_sha": "8632db15e5af18f989f96dbbebc59b15a05a4b3a"
     },
     {
       "number": 3338,
@@ -1942,11 +2008,11 @@
         "cycles": []
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T19:38:44Z",
+      "updated_at": "2026-11-03T23:10:03Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T20:11:33.979Z"
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
     },
     {
       "number": 3300,
@@ -2309,7 +2375,7 @@
       "state": "open",
       "created_at": "2026-11-03T12:34:56Z",
       "merged_at": null,
-      "head_sha": "61ddff6445c985ec42a3ea66007621d1112daced",
+      "head_sha": "890521304c1a3ba4462c814d1ceb59f9c19fc4b6",
       "stamps": {
         "created": {
           "at": "2026-11-03T12:34:56Z",
@@ -2334,15 +2400,35 @@
             "completed_at": null,
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)"
+          },
+          {
+            "head_sha": "890521304c1a3ba4462c814d1ceb59f9c19fc4b6",
+            "workflow_run_id": 41734088012,
+            "run_attempt": null,
+            "queued_at": null,
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)"
+          },
+          {
+            "head_sha": "890521304c1a3ba4462c814d1ceb59f9c19fc4b6",
+            "workflow_run_id": 41734087630,
+            "run_attempt": null,
+            "queued_at": null,
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)"
           }
         ]
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T22:00:23Z",
+      "updated_at": "2026-11-03T23:12:01Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T22:13:34.566Z"
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
     },
     {
       "number": 3287,
@@ -3311,7 +3397,7 @@
       "state": "open",
       "created_at": "2026-11-03T05:21:20Z",
       "merged_at": null,
-      "head_sha": "faf4acec59326b6ad0ccd4eab14463b7d594d733",
+      "head_sha": "7d2dd95b7df8d3c00649dfb41072f14b3131c48f",
       "stamps": {
         "created": {
           "at": "2026-11-03T05:21:20Z",
@@ -3326,14 +3412,35 @@
         "check_count": null,
         "duplicate_checks": null,
         "failed_wall_minutes": null,
-        "cycles": []
+        "cycles": [
+          {
+            "head_sha": "7d2dd95b7df8d3c00649dfb41072f14b3131c48f",
+            "workflow_run_id": 41733170537,
+            "run_attempt": null,
+            "queued_at": null,
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)"
+          },
+          {
+            "head_sha": "7d2dd95b7df8d3c00649dfb41072f14b3131c48f",
+            "workflow_run_id": 41733170614,
+            "run_attempt": null,
+            "queued_at": null,
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)"
+          }
+        ]
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T21:52:46Z",
+      "updated_at": "2026-11-03T23:08:54Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T22:13:34.566Z"
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
     },
     {
       "number": 3256,
@@ -3770,14 +3877,20 @@
       "number": 3242,
       "url": "https://github.com/andylitvinov-design/books/pull/3242",
       "title": "fix(video): compact iPhone Studio goals, six single-row tabs, Montage script first",
-      "state": "open",
+      "state": "closed",
       "created_at": "2026-11-03T04:34:28Z",
-      "merged_at": null,
-      "head_sha": "5292dc33eec3f206aff4a46b5988ebb75d456175",
+      "merged_at": "2026-11-03T23:02:23Z",
+      "head_sha": "24a9d9a36645e536f1e1bdd9be4e7d1206733d02",
       "stamps": {
         "created": {
           "at": "2026-11-03T04:34:28Z",
           "source": "github:created_at",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T23:02:23Z",
+          "source": "github:pulls/3242#merged_at",
+          "actor": "GitHub native merge (actor unverified)",
           "verified": true
         }
       },
@@ -3798,15 +3911,36 @@
             "completed_at": null,
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)"
+          },
+          {
+            "head_sha": "24a9d9a36645e536f1e1bdd9be4e7d1206733d02",
+            "workflow_run_id": 41733020530,
+            "run_attempt": null,
+            "queued_at": null,
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)"
+          },
+          {
+            "head_sha": "24a9d9a36645e536f1e1bdd9be4e7d1206733d02",
+            "workflow_run_id": 41733020914,
+            "run_attempt": null,
+            "queued_at": null,
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)"
           }
         ]
       },
-      "closed_at": null,
-      "updated_at": "2026-11-03T21:53:13Z",
+      "closed_at": "2026-11-03T23:02:23Z",
+      "updated_at": "2026-11-03T23:10:52Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T22:13:34.566Z"
+      "observed_at_utc": "2026-11-03T23:13:22.615Z",
+      "merge_commit_sha": "cc8f48ae816e3b324207330fc57a4cdc66123fd7"
     },
     {
       "number": 3241,
@@ -11423,6 +11557,450 @@
       "updated_at": "2026-11-01T22:16:38Z",
       "base": "codex/bootstrap-books",
       "draft": false
+    },
+    {
+      "number": 3349,
+      "url": "https://github.com/andylitvinov-design/books/pull/3349",
+      "title": "feat(mytube): plot-aware licensed montage for 1024 story concepts",
+      "state": "closed",
+      "created_at": "2026-11-03T22:30:39Z",
+      "merged_at": null,
+      "head_sha": "75828f61e074a788ccd98d56e290a753a31990bf",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:30:39Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "feat/mytube-taxonomy-ui-director-20261103",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T22:42:07Z",
+      "closed_at": "2026-11-03T22:42:07Z",
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3350,
+      "url": "https://github.com/andylitvinov-design/books/pull/3350",
+      "title": "feat(video): add 320 original abstract motion MP4 masters and 64 thematic film choices",
+      "state": "open",
+      "created_at": "2026-11-03T22:30:53Z",
+      "merged_at": null,
+      "head_sha": "1663ca8f967f21cee9e86c6682c3897266bf08b2",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:30:53Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T22:59:36Z",
+      "closed_at": null,
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3351,
+      "url": "https://github.com/andylitvinov-design/books/pull/3351",
+      "title": "feat(video): add 320 original moving MP4s and 64 MyTube film presets to existing Studio",
+      "state": "open",
+      "created_at": "2026-11-03T22:38:39Z",
+      "merged_at": null,
+      "head_sha": "6a7c2af3011b73e2d5b7015c57282cbb49f7eb52",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:38:39Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:09:40Z",
+      "closed_at": null,
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3352,
+      "url": "https://github.com/andylitvinov-design/books/pull/3352",
+      "title": "feat(mytube): safe plot-aware montage and caption fallback on active MyTube branch",
+      "state": "closed",
+      "created_at": "2026-11-03T22:38:58Z",
+      "merged_at": "2026-11-03T22:41:10Z",
+      "head_sha": "d125f1f01eb5a1156105db8c5c99f4c68fa3efe8",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:38:58Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T22:41:10Z",
+          "source": "github:pulls/3352#merged_at",
+          "actor": "GitHub native merge (actor unverified)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "feat/mytube-six-dock-production-live-20261103",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T22:41:10Z",
+      "closed_at": "2026-11-03T22:41:10Z",
+      "observed_at_utc": "2026-11-03T23:13:22.615Z",
+      "merge_commit_sha": "e91e60feed84778d3ecff4fb72e2437709fc7f67"
+    },
+    {
+      "number": 3353,
+      "url": "https://github.com/andylitvinov-design/books/pull/3353",
+      "title": "feat(dot): owner-only Telegram story picker with private revisioned DB state",
+      "state": "open",
+      "created_at": "2026-11-03T22:41:09Z",
+      "merged_at": null,
+      "head_sha": "c3729cd73d2d6c60d6a596c87aa250a04f2c888f",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:41:09Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T22:45:10Z",
+      "closed_at": null,
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3354,
+      "url": "https://github.com/andylitvinov-design/books/pull/3354",
+      "title": "feat(dot-video): connect owner story picker to real licensed MP4 soundtrack montage",
+      "state": "open",
+      "created_at": "2026-11-03T22:41:33Z",
+      "merged_at": null,
+      "head_sha": "848788b5287ae07f6c2aea53d6bf2b3f3a6ee66b",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:41:33Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:11:40Z",
+      "closed_at": null,
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3355,
+      "url": "https://github.com/andylitvinov-design/books/pull/3355",
+      "title": "feat(dot-video): wire verified story MP4 montage to original soundtrack in Telegram",
+      "state": "closed",
+      "created_at": "2026-11-03T22:41:52Z",
+      "merged_at": null,
+      "head_sha": "301d18ff67a0a0dfcd3f29cd1d322fd31327f9e3",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:41:52Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T22:50:07Z",
+      "closed_at": "2026-11-03T22:50:06Z",
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3356,
+      "url": "https://github.com/andylitvinov-design/books/pull/3356",
+      "title": "feat(dot-video): protected production-based audio-length MP4 story montage",
+      "state": "open",
+      "created_at": "2026-11-03T22:49:29Z",
+      "merged_at": null,
+      "head_sha": "447288b9db90cabc9d7472856db9551d50395bd3",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:49:29Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:03:39Z",
+      "closed_at": null,
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3357,
+      "url": "https://github.com/andylitvinov-design/books/pull/3357",
+      "title": "fix(ci): allow 650-file video imports through trusted full Core instead of INVALID_DIFF_ROWS",
+      "state": "open",
+      "created_at": "2026-11-03T22:51:58Z",
+      "merged_at": null,
+      "head_sha": "350917603627dafa7fc5c390f73eab8f6df79d25",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:51:58Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:12:40Z",
+      "closed_at": null,
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
+    },
+    {
+      "number": 3358,
+      "url": "https://github.com/andylitvinov-design/books/pull/3358",
+      "title": "test(privacy): remove retired analytics popup oracle blocking Gauntlet CI",
+      "state": "closed",
+      "created_at": "2026-11-03T22:58:10Z",
+      "merged_at": "2026-11-03T23:10:05Z",
+      "head_sha": "3f529fea152f545657e67e3db33289138dbb6ed8",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:58:10Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T23:10:05Z",
+          "source": "github:pulls/3358#merged_at",
+          "actor": "GitHub native merge (actor unverified)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:10:05Z",
+      "closed_at": "2026-11-03T23:10:05Z",
+      "observed_at_utc": "2026-11-03T23:13:22.615Z",
+      "merge_commit_sha": "f5ab8b97f70232fc4c9dd26adf16a8234fcfb33b"
+    },
+    {
+      "number": 3359,
+      "url": "https://github.com/andylitvinov-design/books/pull/3359",
+      "title": "fix(ci): never restart cancelled/failed Core as infrastructure recovery",
+      "state": "closed",
+      "created_at": "2026-11-03T22:59:34Z",
+      "merged_at": "2026-11-03T23:08:23Z",
+      "head_sha": "16ffdcdb222942c873ac9f5b823b7d5d43cf4ef6",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T22:59:34Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T23:08:23Z",
+          "source": "github:pulls/3359#merged_at",
+          "actor": "GitHub native merge (actor unverified)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:08:24Z",
+      "closed_at": "2026-11-03T23:08:23Z",
+      "observed_at_utc": "2026-11-03T23:13:22.615Z",
+      "merge_commit_sha": "d078edd2f293e106b670fe42081d8af523eb31e3"
+    },
+    {
+      "number": 3360,
+      "url": "https://github.com/andylitvinov-design/books/pull/3360",
+      "title": "test(ci): correct retired Cabinet journey Core gate assertion",
+      "state": "closed",
+      "created_at": "2026-11-03T23:03:32Z",
+      "merged_at": "2026-11-03T23:10:29Z",
+      "head_sha": "661cbe3ed2cccfdf1789428b7a12827b67a77ecc",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T23:03:32Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-03T23:10:29Z",
+          "source": "github:pulls/3360#merged_at",
+          "actor": "GitHub native merge (actor unverified)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "codex/public-book-library",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:10:29Z",
+      "closed_at": "2026-11-03T23:10:29Z",
+      "observed_at_utc": "2026-11-03T23:13:22.615Z",
+      "merge_commit_sha": "52a316d916ad74dea2338649dd680d7d365afb6b"
+    },
+    {
+      "number": 3361,
+      "url": "https://github.com/andylitvinov-design/books/pull/3361",
+      "title": "feat(mytube): exact-topic original animation bridge for 1024 plot montages",
+      "state": "open",
+      "created_at": "2026-11-03T23:03:36Z",
+      "merged_at": null,
+      "head_sha": "33af1eb2b46917b6d78c0dce8ec406ac753ffbdd",
+      "stamps": {
+        "created": {
+          "at": "2026-11-03T23:03:36Z",
+          "source": "github:created_at",
+          "actor": "andylitvinov-design",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "base": "feat/mytube-six-dock-production-live-20261103",
+      "draft": false,
+      "current_draft": false,
+      "updated_at": "2026-11-03T23:03:36Z",
+      "closed_at": null,
+      "observed_at_utc": "2026-11-03T23:13:22.615Z"
     }
   ]
 }
