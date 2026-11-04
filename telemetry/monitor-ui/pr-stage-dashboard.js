@@ -172,7 +172,7 @@
  // A separate, timestamp-backed source-history audit. This is NOT a clock of
  // continuous developer activity: commit timestamps are not GitHub push times.
  function auditParts(a){
-  const counts=[0,0,0,0,0,0],sums=[0,0,0,0,0,0],audited=[];
+  const counts=[0,0,0,0,0,0],sums=[0,0,0,0,0,0],audited=[],notAudited=[];
   const refs=new Map((headAudit&&headAudit.records||[]).map(r=>[Number(r.pr),r]));
   for(const p of a.select.merged){
    const cr=ts(p.created_at),me=ts(p.merged_at),total=delta(cr,me),rec=refs.get(Number(p.number));
@@ -182,7 +182,7 @@
     /^[a-f0-9]{40}$/i.test(rec.head_sha||'')&&(!p.head_sha||p.head_sha===rec.head_sha)&&
     /^https:\/\/github\.com\/andylitvinov-design\/books\/commit\/[a-f0-9]{40}$/i.test(rec.commit_url||'');
    const head=good?ts(rec.head_commit_at):null;
-   if(head===null||head<cr||head>me){sums[5]+=total;continue}
+   if(head===null||head<cr||head>me){counts[5]++;sums[5]+=total;notAudited.push({p,total,created:cr,merged:me});continue}
    counts[0]++;sums[0]+=(head-cr)/60000;pointer=head;
    const runner=ts(rec.last_head_first_successful_job_at);
    const gate=ts(rec.last_head_merge_gate_green_at);
@@ -202,7 +202,7 @@
    audited.push({p,rec,head,runner:validRun?runner:null,gate:validGate?gate:null,created:cr,merged:me,total,pre:(head-cr)/60000,post:(me-head)/60000});
   }
   const n=a.total.n||1,means=sums.map(x=>x/n);
-  return {n:a.total.n,counts,sums,means,audited:audited.sort((x,y)=>y.total-x.total),sum:means.reduce((x,y)=>x+y,0)};
+  return {n:a.total.n,counts,sums,means,audited:audited.sort((x,y)=>y.total-x.total),notAudited:notAudited.sort((x,y)=>y.total-x.total),sum:means.reduce((x,y)=>x+y,0)};
  }
  function auditedCompositionCard(a){
   if(!a.total.n)return '<section class="ph-composition ph-empty"><h3>Где проходит время до merge</h3><p class="ph-note">За этот период завершённых PR нет. Выберите больший период.</p></section>';
@@ -231,12 +231,22 @@
      '<a href="'+e(url)+'" target="_blank" rel="noopener noreferrer">'+e(human(new Date(at).toISOString()))+'</a></div>').join('')+
     '<p>После последнего коммита до merge: <b>'+fmt(x.post)+' мин</b>. Это не обязательно время очереди CI; источники перечислены выше.</p></div></details>';
   }).join('');
+  const preview=b.audited.slice(0,4).map(x=>
+   '<div class="ph-long-pr"><a href="https://github.com/andylitvinov-design/books/pull/'+Number(x.p.number)+'" target="_blank" rel="noopener noreferrer">PR #'+Number(x.p.number)+'</a>'+
+   '<strong>'+fmt(x.pre)+' мин до коммита</strong><small>Создан '+e(human(new Date(x.created).toISOString()))+
+   ' → последний код '+e(human(new Date(x.head).toISOString()))+' → merge '+e(human(new Date(x.merged).toISOString()))+'</small></div>').join('');
+  const missing=b.notAudited.slice(0,5).map(x=>
+   '<div class="ph-long-pr"><a href="https://github.com/andylitvinov-design/books/pull/'+Number(x.p.number)+'" target="_blank" rel="noopener noreferrer">PR #'+Number(x.p.number)+'</a>'+
+   '<strong>'+fmt(x.total)+' мин без этапов</strong><small>'+e(human(new Date(x.created).toISOString()))+
+   ' → '+e(human(new Date(x.merged).toISOString()))+'</small></div>').join('');
   return '<section class="ph-composition" data-role="evidence-decomposition">'+
    '<div class="ph-decomp-title"><h3>Где прошло время до merge</h3><span>Одна выборка: '+a.total.n+' PR</span></div>'+
    '<p class="ph-decomp-guide">Восстановлено по проверяемым датам последнего коммита и GitHub Actions. Это <b>временные границы, а не догадки о причинах задержки</b>. Все строки используют один знаменатель — '+a.total.n+' PR.</p>'+
    '<table class="ph-breakdown-table"><thead><tr><th>Период</th><th>Вклад</th></tr></thead>'+
    '<tbody>'+table+'<tr class="ph-breakdown-total"><td><strong>Итого Created → Merged</strong><small>Среднее по '+a.total.n+' смерженным PR</small></td><td class="ph-stage-value">'+moneyMin(a.total.mean)+'<small>мин/PR</small></td></tr></tbody></table>'+
-   '<p class="ph-decomp-note"><b>Охват истории: '+b.audited.length+' / '+a.total.n+' PR</b>. GitHub-коммит датирован локально, но время фактического push может отличаться. Значения «нет меток» нельзя считать простоями. Время LIVE после merge здесь не участвует.</p>'+
+   '<p class="ph-decomp-note"><b>Охват истории: '+b.audited.length+' / '+a.total.n+' PR</b>. GitHub-коммит датирован в GitHub, но время фактического push может отличаться. Значения «нет меток» нельзя считать простоями. Время LIVE после merge здесь не участвует.</p>'+
+   '<div class="ph-proof-preview"><h4>Когда: самые долгие проверенные PR</h4>'+preview+'</div>'+
+   (missing?'<details class="ph-proof-list"><summary>Где пока нет достоверной истории: '+b.notAudited.length+' PR <span>⌄</span></summary><div class="ph-proof-rows">'+missing+'</div></details>':'')+
    '<details class="ph-proof-list"><summary>Когда именно: '+Math.min(12,b.audited.length)+' самых долгих PR с датами и ссылками <span>⌄</span></summary>'+
    '<div class="ph-proof-rows">'+top+'</div></details>'+
    '<p class="ph-foot-proof">Источник: GitHub PR commits + exact-HEAD Actions; аудит '+e(human(headAudit.recorded_at))+'. '+(Math.abs(b.sum-a.total.mean)>0.01?'ОШИБКА арифметики, требуется проверка.':'Сумма интервалов проверена.')+'</p>'+
@@ -326,7 +336,7 @@
        if(!r.ok)throw Error('audit HTTP '+r.status);
        const d=await r.json();
        if(d.encoding!=='base64'||typeof d.content!=='string')throw Error('audit encoding');
-       const binary=atob(d.content.replace(/\\s/g,'')),buf=Uint8Array.from(binary,c=>c.charCodeAt(0));
+       const binary=atob(d.content.replace(/\s/g,'')),buf=Uint8Array.from(binary,c=>c.charCodeAt(0));
        const audit=JSON.parse(new TextDecoder().decode(buf));
        if(audit.schema!=='HH_PR_HEAD_LIFECYCLE_AUDIT_V1'||audit.repo!=='andylitvinov-design/books'||
         !Array.isArray(audit.records)||audit.records.length>500)throw Error('audit schema');
