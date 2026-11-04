@@ -1,0 +1,85 @@
+{
+  "schema": "HH_PR_HEAD_LIFECYCLE_AUDIT_V1",
+  "repo": "andylitvinov-design/books",
+  "source": "GitHub REST immutable commit.comitter.date for exact final PR HEAD, NOT proof of push time, continuous activity or waiting cause",
+  "scope": {
+    "window_from": "2026-11-03T04:13:51.633Z",
+    "window_to": "2026-11-04T04:13:51.633Z",
+    "expected": 72
+  },
+  "recorded_at": "2026-11-04T05:37:54.912Z",
+  "records": [
+    {
+      "pr": 3241,
+      "head_sha": null,
+      "created_at": "2026-11-03T04:15:13Z",
+      "merged_at": "2026-11-03T04:25:38Z",
+      "head_commit_at": null,
+      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+    },
+    {
+      "pr": 3242,
+      "head_sha": "24a9d9a36645e536f1e1bdd9be4e7d1206733d02",
+      "created_at": "2026-11-03T04:34:28Z",
+      "merged_at": "2026-11-03T23:02:23Z",
+      "head_commit_at": "2026-11-03T22:41:34Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/24a9d9a36645e536f1e1bdd9be4e7d1206733d02"
+    },
+    {
+      "pr": 3244,
+      "head_sha": null,
+      "created_at": "2026-11-03T04:41:32Z",
+      "merged_at": "2026-11-03T05:07:18Z",
+      "head_commit_at": null,
+      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+    },
+    {
+      "pr": 3246,
+      "head_sha": null,
+      "created_at": "2026-11-03T05:01:33Z",
+      "merged_at": "2026-11-03T12:58:57Z",
+      "head_commit_at": null,
+      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+    },
+    {
+      "pr": 3253,
+      "head_sha": null,
+      "created_at": "2026-11-03T05:13:51Z",
+      "merged_at": "2026-11-03T06:30:07Z",
+      "head_commit_at": null,
+      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+    },
+    {
+      "pr": 3254,
+      "head_sha": null,
+      "created_at": "2026-11-03T05:16:18Z",
+      "merged_at": "2026-11-03T16:21:20Z",
+      "head_commit_at": null,
+      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+    },
+    {
+      "pr": 3255,
+      "head_sha": null,
+      "created_at": "2026-11-03T05:16:40Z",
+      "merged_at": "2026-11-03T05:51:45Z",
+      "head_commit_at": null,
+      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+    },
+    {
+      "pr": 3257,
+      "head_sha": "d39d3dca192c96f5242cf66e55828ecf1f60dba3",
+      "created_at": "2026-11-03T05:21:20Z",
+      "merged_at": "2026-11-04T01:55:40Z",
+      "head_commit_at": "2026-11-04T01:41:54Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/d39d3dca192c96f5242cf66e55828ecf1f60dba3"
+    },
+    {
+      "pr": 3258,
+      "head_sha": null,
+      "created_at": "2026-11-03T05:21:28Z",
+      "merged_at": "2026-11-03T06:18:27Z",
+      "head_commit_at": null,
+      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+    }
+  ]
+}
