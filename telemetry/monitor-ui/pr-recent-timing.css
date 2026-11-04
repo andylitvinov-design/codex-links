@@ -1,0 +1,40 @@
+/* Read-only latest PR CI latency evidence, compact iPhone cards. */
+.ph-recent-live{margin:10px 0 16px;padding:13px;border:1px solid #497391;border-radius:13px;background:#0e263e;color:#edf5fe}
+.ph-recent-live *{box-sizing:border-box}
+.phr-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.phr-head h3{font-size:17px;margin:0 0 4px;color:#f2f7fe}
+.phr-head small{font-size:11px;color:#afcfe4;line-height:1.4}
+.phr-head button,.phr-pr button{border:1px solid #6596b9;color:#e4f4ff;background:#214a69;padding:7px 10px;border-radius:8px;font-size:11px;font-weight:720;cursor:pointer}
+.phr-head button:disabled{opacity:.55;cursor:default}
+.phr-note{color:#abc5d9;font-size:11px;line-height:1.52;margin:10px 0}
+.phr-note b{color:#e0eefb}
+.phr-error{color:#ffaeb2;font-size:12px;line-height:1.45}
+.phr-pr{padding:11px 0 12px;border-top:1px solid #375874}
+.phr-pr-title{display:flex;align-items:center;justify-content:space-between;gap:9px;font-variant-numeric:tabular-nums}
+.phr-pr-title a,.phr-job a,.phr-commit a{color:#9cd8ff;text-decoration:underline;font-weight:850}
+.phr-pr-title strong{color:#ffe1a3;font-size:17px}
+.phr-pr>p{font-size:11px;color:#cad9e5;margin:5px 0 9px;line-height:1.4}
+.phr-splits{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.phr-splits span{padding:7px 9px;border:1px solid #436b8a;border-radius:7px;background:#19364e;font-size:10px;color:#bed4e5}
+.phr-splits b{color:#ffdd98}
+.phr-pr .phr-critical{font-size:11px;color:#bdceda;line-height:1.5}
+.phr-critical b{color:#f6dbab}
+.phr-details{padding:11px 0 4px}
+.phr-details h4{margin:10px 0 7px;font-size:13px;color:#ddecf8}
+.phr-phase,.phr-job,.phr-commit{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 9px;border-top:1px solid #345670;padding:9px 4px}
+.phr-phase strong,.phr-job a,.phr-commit a{font-size:11px}
+.phr-phase b,.phr-job b{color:#ffdb96;font-size:12px;white-space:nowrap}
+.phr-phase small,.phr-job small,.phr-commit small{grid-column:1/-1;line-height:1.5;font-size:10px;color:#b5cbdc}
+.phr-job span,.phr-commit span{font-size:11px;color:#bed6e9;text-align:right}
+.phr-job b{grid-column:2}
+.phr-job small{grid-row:3}
+.phr-commit span{font-variant-numeric:tabular-nums}
+.phr-pr button:focus-visible,.phr-head button:focus-visible{outline:2px solid #addfff;outline-offset:3px}
+@media(max-width:750px){
+ .ph-recent-live{padding:10px}
+ .phr-head h3{font-size:15px}
+ .phr-head{gap:7px}
+ .phr-head button{flex-shrink:0;padding:7px}
+ .phr-splits span{flex:1 1 45%;line-height:1.5}
+ .phr-phase,.phr-job,.phr-commit{gap:4px}
+}
