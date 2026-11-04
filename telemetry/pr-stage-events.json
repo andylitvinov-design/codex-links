@@ -1,16 +1,16 @@
 {
   "schema": "HH_PR_TRANSITION_LEDGER_V1",
   "repo": "andylitvinov-design/books",
-  "generated_at": "2026-11-04T00:13:24.902Z",
+  "generated_at": "2026-11-04T01:24:34.096Z",
   "source": "GitHub PR-created cohort via existing HH PR Monitor; exact stage events from GitHub API",
   "window": {
     "hours": 48,
-    "from": "2026-11-02T00:13:24.902Z",
-    "to": "2026-11-04T00:13:24.902Z",
+    "from": "2026-11-02T01:24:34.096Z",
+    "to": "2026-11-04T01:24:34.096Z",
     "complete": false,
     "total": 331,
-    "start": "2026-11-02T00:13:24.902Z",
-    "end": "2026-11-04T00:13:24.902Z"
+    "start": "2026-11-02T01:24:34.096Z",
+    "end": "2026-11-04T01:24:34.096Z"
   },
   "coverage": {
     "timeline_checked": 4,
@@ -19,55 +19,59 @@
     "cohort": {
       "schema": "HH_PR_CREATED_COHORT_V1",
       "pages_read": 1,
-      "method": "Prior snapshot + targeted search PR created after 2026-11-03T23:14Z, 4 newly returned; no full 48h replay",
+      "method": "Prior 354-row snapshot preserved; exact GitHub created-after-last-snapshot search returned 0; refreshed 7 known PRs",
       "stage_events_complete": false
     },
     "recent_head_readback": {
-      "at": "2026-11-04T00:13:24.902Z",
+      "at": "2026-11-04T01:24:34.096Z",
       "prs": [
         3257,
-        3288,
         3301,
         3303,
-        3362,
-        3363,
-        3364,
-        3365
+        3288,
+        3323,
+        3242,
+        3279
       ],
-      "read_success": 8
+      "read_success": 7
     },
     "legacy_unverified_ready_removed": 5,
     "incremental": {
-      "at": "2026-11-04T00:13:24.902Z",
-      "previous_generated_at": "2026-11-03T23:14:53.003Z",
-      "new_prs_added": [
-        3362,
-        3363,
-        3364,
-        3365
-      ],
+      "at": "2026-11-04T01:24:34.096Z",
+      "previous_generated_at": "2026-11-04T00:13:24.902Z",
+      "new_prs_added": [],
       "updated_prs": [
         3257,
-        3288,
         3301,
         3303,
-        3362,
-        3363,
-        3364,
-        3365
+        3288,
+        3323,
+        3242,
+        3279
       ],
       "verified_native_merges_production": [
-        3362,
-        3363
+        3279
       ],
       "verified_exact_head_failed_runs": [
-        41743263750
+        41752830512,
+        41752830385,
+        41752830472,
+        41752830345,
+        41705200017,
+        41705199846,
+        41744047703,
+        41744165090
       ],
       "stage_events_complete": false,
       "unknown_runner_timestamps": true,
       "window_aligned": true,
       "old_head_failures_stale": true,
-      "concurrent_ci_not_replayed": true
+      "concurrent_ci_not_replayed": true,
+      "verified_instrumented_live_events": [
+        3242,
+        3279
+      ],
+      "unknown_first_ci_for_cohort": true
     }
   },
   "stages": [
@@ -1824,7 +1828,7 @@
       "state": "open",
       "created_at": "2026-11-03T17:51:07Z",
       "merged_at": null,
-      "head_sha": "77310c7acabb3054a089e2e37013ee1a3d3398d4",
+      "head_sha": "86622b9422d85e39eae33fa9a75e80d6fbc11a27",
       "stamps": {
         "created": {
           "at": "2026-11-03T17:51:07Z",
@@ -1839,14 +1843,27 @@
         "check_count": null,
         "duplicate_checks": null,
         "failed_wall_minutes": null,
-        "cycles": []
+        "cycles": [
+          {
+            "head_sha": "86622b9422d85e39eae33fa9a75e80d6fbc11a27",
+            "workflow_run_id": 41744165090,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T00:05:23Z",
+            "started_at": "2026-11-04T00:05:37Z",
+            "completed_at": "2026-11-04T00:22:44Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41744165090;jobs"
+          }
+        ]
       },
       "closed_at": null,
       "updated_at": "2026-11-03T21:53:04Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T22:13:34.566Z"
+      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "mergeable_state": "blocked"
     },
     {
       "number": 3322,
@@ -2497,7 +2514,9 @@
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T00:13:24.902Z"
+      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "mergeable_state": "dirty",
+      "observation_note": "Parent #3301 not merged; child PARENT_BLOCKED, cannot merge first."
     },
     {
       "number": 3302,
@@ -2550,14 +2569,39 @@
         "check_count": null,
         "duplicate_checks": null,
         "failed_wall_minutes": null,
-        "cycles": []
+        "cycles": [
+          {
+            "head_sha": "1b669d9afd71d761c6d47eaab29454bd12354f87",
+            "workflow_run_id": 41705200017,
+            "run_attempt": 1,
+            "queued_at": "2026-11-03T19:38:49Z",
+            "started_at": "2026-11-03T19:44:34Z",
+            "completed_at": "2026-11-03T19:54:26Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41705200017;jobs"
+          },
+          {
+            "head_sha": "1b669d9afd71d761c6d47eaab29454bd12354f87",
+            "workflow_run_id": 41705199846,
+            "run_attempt": 1,
+            "queued_at": "2026-11-03T19:38:49Z",
+            "started_at": "2026-11-03T19:41:39Z",
+            "completed_at": "2026-11-03T20:03:19Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41705199846;jobs"
+          }
+        ]
       },
       "closed_at": null,
       "updated_at": "2026-11-03T23:10:03Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T00:13:24.902Z"
+      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "mergeable_state": "dirty",
+      "observation_note": "Independent GitHub readback confirms DIRTY; Conflict owner source-preserving route, not mandatory Triage gate; current-head WebKit RU320 RED."
     },
     {
       "number": 3300,
@@ -2965,6 +3009,17 @@
             "completed_at": null,
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)"
+          },
+          {
+            "head_sha": "6082a6bfc56885bf0a77c62a07fb1863dde6b063",
+            "workflow_run_id": 41744047703,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T00:04:28Z",
+            "started_at": "2026-11-04T00:08:42Z",
+            "completed_at": "2026-11-04T00:29:04Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41744047703;jobs"
           }
         ]
       },
@@ -2973,7 +3028,8 @@
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T00:13:24.902Z"
+      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "mergeable_state": "blocked"
     },
     {
       "number": 3287,
@@ -3236,14 +3292,26 @@
       "number": 3279,
       "url": "https://github.com/andylitvinov-design/books/pull/3279",
       "title": "feat(services): one-idea photo/video landing screens and final CRM request",
-      "state": "open",
+      "state": "closed",
       "created_at": "2026-11-03T06:11:50Z",
-      "merged_at": null,
-      "head_sha": null,
+      "merged_at": "2026-11-04T00:57:02Z",
+      "head_sha": "fb063116daa1e985cf43191ca40b2109718ccac0",
       "stamps": {
         "created": {
           "at": "2026-11-03T06:11:50Z",
           "source": "github:created_at",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-04T00:57:02Z",
+          "source": "github:pulls/3279#merged_at",
+          "actor": "GitHub native merge (actor unverified)",
+          "verified": true
+        },
+        "LIVE_verified": {
+          "at": "2026-11-04T01:03:22.620Z",
+          "source": "instrumented:github:issuecomment/6619652972;vercel:dpl_8v6DW8fiWHkjhdDMp6gA12mLjZkV;PUBLIC_RUNTIME_EXACT_SHA_AND_DEPLOYMENT",
+          "actor": "LIVE acceptance process (actor not identified)",
           "verified": true
         }
       },
@@ -3256,10 +3324,12 @@
         "failed_wall_minutes": null,
         "cycles": []
       },
-      "closed_at": null,
+      "closed_at": "2026-11-04T00:57:02Z",
       "updated_at": "2026-11-03T16:52:40Z",
       "base": "codex/public-book-library",
-      "draft": false
+      "draft": false,
+      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "merge_commit_sha": "958f1a4136ed0ef1b9457c61e677b70336f6055c"
     },
     {
       "number": 3278,
@@ -3942,7 +4012,7 @@
       "state": "open",
       "created_at": "2026-11-03T05:21:20Z",
       "merged_at": null,
-      "head_sha": "924d5af520820b05c2fc5f7b023101f5b7cee5b0",
+      "head_sha": "c5af50dc008ec992e72e9d256502d4e9530db5f4",
       "stamps": {
         "created": {
           "at": "2026-11-03T05:21:20Z",
@@ -3997,15 +4067,72 @@
             "completed_at": null,
             "conclusion": null,
             "actor": "GitHub Actions (process; owner not established)"
+          },
+          {
+            "head_sha": "c5af50dc008ec992e72e9d256502d4e9530db5f4",
+            "workflow_run_id": 41752830512,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T01:15:49Z",
+            "started_at": "2026-11-04T01:15:53Z",
+            "completed_at": "2026-11-04T01:20:39Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41752830512;jobs"
+          },
+          {
+            "head_sha": "c5af50dc008ec992e72e9d256502d4e9530db5f4",
+            "workflow_run_id": 41752830385,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T01:15:49Z",
+            "started_at": "2026-11-04T01:16:26Z",
+            "completed_at": "2026-11-04T01:16:55Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41752830385;jobs"
+          },
+          {
+            "head_sha": "c5af50dc008ec992e72e9d256502d4e9530db5f4",
+            "workflow_run_id": 41752830479,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T01:15:49Z",
+            "started_at": "2026-11-04T01:16:27Z",
+            "completed_at": null,
+            "conclusion": null,
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41752830479;jobs"
+          },
+          {
+            "head_sha": "c5af50dc008ec992e72e9d256502d4e9530db5f4",
+            "workflow_run_id": 41752830472,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T01:15:49Z",
+            "started_at": "2026-11-04T01:16:58Z",
+            "completed_at": "2026-11-04T01:17:27Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41752830472;jobs"
+          },
+          {
+            "head_sha": "c5af50dc008ec992e72e9d256502d4e9530db5f4",
+            "workflow_run_id": 41752830345,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T01:15:49Z",
+            "started_at": "2026-11-04T01:16:15Z",
+            "completed_at": "2026-11-04T01:18:30Z",
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41752830345;jobs"
           }
         ]
       },
       "closed_at": null,
-      "updated_at": "2026-11-04T00:12:51Z",
+      "updated_at": "2026-11-04T01:15:48Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T00:13:24.902Z"
+      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "mergeable_state": "blocked",
+      "observation_note": "Exact current HEAD changed; previous 5ea browser/consent RED is STALE. Guard/CRM/IA failures recorded separately; Core and Mandala relevant attempts tracked in ci.cycles, no exact-HEAD green."
     },
     {
       "number": 3256,
@@ -4457,6 +4584,12 @@
           "source": "github:pulls/3242#merged_at",
           "actor": "GitHub native merge (actor unverified)",
           "verified": true
+        },
+        "LIVE_verified": {
+          "at": "2026-11-03T23:10:24.530Z",
+          "source": "instrumented:github:issuecomment/6617842166;vercel:dpl_7kk1dr1qvF8yTRbboBM8vigswAmU;PUBLIC_RUNTIME_ALIAS_SHA_AND_DEPLOYMENT_ANCESTRY",
+          "actor": "LIVE acceptance process (actor not identified)",
+          "verified": true
         }
       },
       "timeline_checked": false,
@@ -4504,7 +4637,7 @@
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-03T23:13:22.615Z",
+      "observed_at_utc": "2026-11-04T01:24:34.096Z",
       "merge_commit_sha": "cc8f48ae816e3b324207330fc57a4cdc66123fd7"
     },
     {
