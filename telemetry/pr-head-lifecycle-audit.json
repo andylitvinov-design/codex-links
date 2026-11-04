@@ -7,7 +7,7 @@
     "window_to": "2026-11-04T04:13:51.633Z",
     "expected": 72
   },
-  "recorded_at": "2026-11-04T05:40:52.814Z",
+  "recorded_at": "2026-11-04T05:41:18.059Z",
   "records": [
     {
       "pr": 3241,
@@ -207,6 +207,86 @@
       "head_commit_at": "2026-11-03T07:04:54Z",
       "commit_url": "https://github.com/andylitvinov-design/books/commit/d57949360258203a0f29764fb14d372f372f4fcc",
       "commits": 5,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3276,
+      "head_sha": "90c74734c8671dc1c166d83c19356a1fd4619fb4",
+      "created_at": "2026-11-03T05:37:00Z",
+      "merged_at": "2026-11-03T06:48:03Z",
+      "head_commit_at": "2026-11-03T06:41:43Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/90c74734c8671dc1c166d83c19356a1fd4619fb4",
+      "commits": 2,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3279,
+      "head_sha": "fb063116daa1e985cf43191ca40b2109718ccac0",
+      "created_at": "2026-11-03T06:11:50Z",
+      "merged_at": "2026-11-04T00:57:02Z",
+      "head_commit_at": "2026-11-04T00:45:08Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/fb063116daa1e985cf43191ca40b2109718ccac0",
+      "commits": 30,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3281,
+      "head_sha": "6ee662ca6e769edca0fdf245a12b9ed89ca98efa",
+      "created_at": "2026-11-03T06:20:59Z",
+      "merged_at": "2026-11-03T06:56:41Z",
+      "head_commit_at": "2026-11-03T06:42:36Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/6ee662ca6e769edca0fdf245a12b9ed89ca98efa",
+      "commits": 13,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3284,
+      "head_sha": "563e6237f2492fa6e1b8fb24269854ed66f66518",
+      "created_at": "2026-11-03T07:00:41Z",
+      "merged_at": "2026-11-03T07:25:36Z",
+      "head_commit_at": "2026-11-03T07:03:15Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/563e6237f2492fa6e1b8fb24269854ed66f66518",
+      "commits": 2,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3285,
+      "head_sha": "fbfc8dbd48961a1896947349fd693376fed8e1d0",
+      "created_at": "2026-11-03T07:04:02Z",
+      "merged_at": "2026-11-03T12:23:26Z",
+      "head_commit_at": "2026-11-03T09:30:10Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/fbfc8dbd48961a1896947349fd693376fed8e1d0",
+      "commits": 12,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3286,
+      "head_sha": "64b7ca8ef8210d590a6f06e34e2846103bb4c3be",
+      "created_at": "2026-11-03T07:25:40Z",
+      "merged_at": "2026-11-03T07:41:10Z",
+      "head_commit_at": "2026-11-03T07:34:49Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/64b7ca8ef8210d590a6f06e34e2846103bb4c3be",
+      "commits": 2,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3287,
+      "head_sha": "af83909e55889a97f374896d5898e1774cbccf6f",
+      "created_at": "2026-11-03T07:45:27Z",
+      "merged_at": "2026-11-03T07:49:45Z",
+      "head_commit_at": null,
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/af83909e55889a97f374896d5898e1774cbccf6f",
+      "commits": 1,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3291,
+      "head_sha": "29a814166297a0481eeb0a3083e7d7ebcf071b60",
+      "created_at": "2026-11-03T12:45:30Z",
+      "merged_at": "2026-11-03T12:46:57Z",
+      "head_commit_at": null,
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/29a814166297a0481eeb0a3083e7d7ebcf071b60",
+      "commits": 4,
       "source": "GITHUB_PR_COMMITS_LIST"
     }
   ]
