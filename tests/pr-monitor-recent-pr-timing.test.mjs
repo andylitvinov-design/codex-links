@@ -66,8 +66,8 @@ test('previous CI waves count only commits from the exact PR and do not invent r
  const history={total_count:4,workflow_runs:[
   {name:'HH PR core release gate',event:'pull_request',head_branch:pr.head.ref,head_sha:older,
    created_at:'2026-11-04T05:32:00Z',conclusion:'cancelled',html_url:'https://github.com/andylitvinov-design/books/actions/runs/900000001'},
-  {name:'HH PR core release gate',event:'pull_request',head_branch:pr.head.ref,head_sha:sha,
-   created_at:'2026-11-04T05:33:00Z',conclusion:'success',html_url:'https://github.com/andylitvinov-design/books/actions/runs/900000002'},
+  {id:run.id,name:'HH PR core release gate',event:'pull_request',head_branch:pr.head.ref,head_sha:sha,
+   created_at:run.created_at,conclusion:'success',html_url:run.html_url},
   {name:'HH PR core release gate',event:'pull_request',head_branch:pr.head.ref,head_sha:other,
    created_at:'2026-11-04T05:34:00Z',conclusion:'failure'},
   {name:'HH PR core release gate',event:'pull_request',head_branch:'another-branch',head_sha:sha,
