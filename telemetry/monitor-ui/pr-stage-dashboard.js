@@ -324,6 +324,7 @@
    ' · timeline '+(ledger&&ledger.coverage&&ledger.coverage.timeline_checked||0)+'/'+(ledger&&ledger.prs&&ledger.prs.length||0)+
    ' · CI '+(ledger&&ledger.coverage&&ledger.coverage.ci_checked||0)+'/'+(ledger&&ledger.prs&&ledger.prs.length||0)+'.</p>'+
    '<p>Детализация неполная: подтверждено чтение timeline '+(ledger&&ledger.coverage&&ledger.coverage.timeline_checked||0)+' PR за последнее обновление, но полный охват не доказан. Незаписанный интервал никогда не считается нулём. <button type="button" data-reload="1">Обновить данные</button></p></div>';
+  window.HHRecentPR?.mount(host);
  }
  async function load(){
   error=null;render();
@@ -355,6 +356,15 @@
   host=document.getElementById('pr-stage-dashboard')||document.getElementById('pr-transition-clock')||document.querySelector('.pr-stage-dashboard');
   if(!host){host=document.createElement('section');(document.querySelector('main')||document.body).appendChild(host)}
   host.id='pr-transition-clock';host.classList.add('pr5-v2');
+  // Independent latest-PR read-only visualization from the same GitHub source.
+  // CSP permits same-origin assets and direct public github.com API reads.
+  const recentStyle=document.createElement('link');
+  recentStyle.rel='stylesheet';recentStyle.href='/pr-recent-timing.css';
+  document.head.appendChild(recentStyle);
+  const recentScript=document.createElement('script');
+  recentScript.src='/pr-recent-timing.js';recentScript.defer=true;
+  recentScript.onload=()=>window.HHRecentPR?.mount(host);
+  document.head.appendChild(recentScript);
   // Put the main Created→Merged KPI and its additive breakdown near the top
   // of the page; preserve the existing monitor's other sections and controls.
   const main=host.closest('main')||document.querySelector('main');

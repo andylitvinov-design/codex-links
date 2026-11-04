@@ -38,7 +38,10 @@ function harness(){
  }};
  const main={querySelector:sel=>sel==='header.header'?header:null,contains:x=>x===host};
  host.closest=()=>main;
- const document={readyState:'loading',addEventListener(){},getElementById:()=>host,querySelector:()=>null};
+ const document={readyState:'loading',addEventListener(){},getElementById:()=>host,querySelector:()=>null,
+  createElement:tag=>({tagName:tag,rel:null,href:null,defer:false,src:null,onload:null}),
+  head:{appendChild(){}}
+ };
  const window={};
  const fetch=async url=>({
   ok:true,
