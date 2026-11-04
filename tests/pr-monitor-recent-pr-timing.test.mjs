@@ -10,14 +10,16 @@ const {normalize,analyzeChecks,fromJobs}=window.HHRecentPR;
 const sha='eebb003d5b4f7e82880da5dceaad205b7b04d7e2';
 const jobRoot='https://github.com/andylitvinov-design/books/actions/runs/41779762460/job/';
 const pr={number:3378,title:'MyTube dark UI',created_at:'2026-11-04T05:31:22Z',
- merged_at:'2026-11-04T05:42:38Z',head:{sha},base:{ref:'codex/public-book-library',
+ merged_at:'2026-11-04T05:42:38Z',head:{sha,ref:'feat/mytube-dark-video-feed-20261104'},base:{ref:'codex/public-book-library',
  repo:{full_name:'andylitvinov-design/books'}}};
 const run={id:41779762460,name:'HH PR core release gate',head_sha:sha,
  created_at:'2026-11-04T05:31:26Z',html_url:'https://github.com/andylitvinov-design/books/actions/runs/41779762460'};
 const times=(created,started,completed)=>({created_at:'2026-11-04T'+created+'Z',started_at:'2026-11-04T'+started+'Z',completed_at:'2026-11-04T'+completed+'Z'});
 const jobs={total_count:3,jobs:[
  {id:1,name:'core-lint-types-build',status:'completed',conclusion:'success',...times('05:31:26','05:31:29','05:35:57')},
- {id:2,name:'hh-specialist',status:'completed',conclusion:'success',...times('05:31:26','05:31:30','05:42:05')},
+ {id:2,name:'hh-specialist',status:'completed',conclusion:'success',...times('05:31:26','05:31:30','05:42:05'),
+  steps:[{name:'Validate exact-head risk and required specialist workflows',status:'completed',conclusion:'success',
+   started_at:'2026-11-04T05:31:51Z',completed_at:'2026-11-04T05:42:02Z'}]},
  {id:3,name:'hh-merge-check',status:'completed',conclusion:'success',...times('05:42:05','05:42:23','05:42:27')}
 ]};
 const checks={total_count:3,check_runs:jobs.jobs.map(j=>({
@@ -46,6 +48,7 @@ test('the exact-head final CI critical path is additive and separates runner que
  assert.equal(Math.round(specialist.runtime*60),635);
  assert.equal(Math.round(specialist.queue*60),4);
  assert.equal(detail.commits.length,1);
+ assert.equal(detail.jobs.find(x=>x.name==='hh-specialist').steps[0].duration*60,611);
 });
 
 test('no merge attribution from stale HEAD / failing gates / inaccessible jobs',()=>{
@@ -55,4 +58,28 @@ test('no merge attribution from stale HEAD / failing gates / inaccessible jobs',
  assert.throws(()=>fromJobs(row,{...run,head_sha:'f'.repeat(40)},jobs,commits),/чужая история HEAD/);
  assert.throws(()=>fromJobs(row,run,{...jobs,total_count:101},commits),/чужая история HEAD/);
  assert.throws(()=>fromJobs(row,run,{...jobs,jobs:jobs.jobs.map(x=>x.name==='hh-merge-check'?{...x,completed_at:'2026-11-04T05:42:50Z'}:x)},commits),/Core CI/);
+});
+
+test('previous CI waves count only commits from the exact PR and do not invent runner loss',()=>{
+ const row=analyzeChecks(normalize(pr),checks);
+ const older='1'.repeat(40),other='2'.repeat(40);
+ const history={total_count:4,workflow_runs:[
+  {name:'HH PR core release gate',event:'pull_request',head_branch:pr.head.ref,head_sha:older,
+   created_at:'2026-11-04T05:32:00Z',conclusion:'cancelled',html_url:'https://github.com/andylitvinov-design/books/actions/runs/900000001'},
+  {name:'HH PR core release gate',event:'pull_request',head_branch:pr.head.ref,head_sha:sha,
+   created_at:'2026-11-04T05:33:00Z',conclusion:'success',html_url:'https://github.com/andylitvinov-design/books/actions/runs/900000002'},
+  {name:'HH PR core release gate',event:'pull_request',head_branch:pr.head.ref,head_sha:other,
+   created_at:'2026-11-04T05:34:00Z',conclusion:'failure'},
+  {name:'HH PR core release gate',event:'pull_request',head_branch:'another-branch',head_sha:sha,
+   created_at:'2026-11-04T05:35:00Z',conclusion:'failure'}
+ ]};
+ const commits2=[{...commits[0]},{sha:older,commit:{committer:{date:'2026-11-04T05:32:00Z'},message:'fix'}}];
+ const d=fromJobs(row,run,jobs,commits2,history);
+ assert.equal(d.waveStats.uniqueCoreHeads,2);
+ assert.equal(d.waveStats.coreRuns,2);
+ assert.equal(d.waveStats.cancelled,1);
+ assert.equal(d.waveStats.failed,0);
+ assert.equal(d.waveStats.coverage,'COMPLETE_BRANCH_SAMPLE');
+ const partial=fromJobs(row,run,jobs,commits2,{...history,total_count:100});
+ assert.equal(partial.waveStats.coverage,'PARTIAL_OR_UNAVAILABLE');
 });
