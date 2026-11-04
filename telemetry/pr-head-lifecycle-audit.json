@@ -7,7 +7,7 @@
     "window_to": "2026-11-04T04:13:51.633Z",
     "expected": 72
   },
-  "recorded_at": "2026-11-04T05:41:18.059Z",
+  "recorded_at": "2026-11-04T05:43:06.935Z",
   "records": [
     {
       "pr": 3241,
@@ -27,7 +27,12 @@
       "head_commit_at": "2026-11-03T22:41:34Z",
       "commit_url": "https://github.com/andylitvinov-design/books/commit/24a9d9a36645e536f1e1bdd9be4e7d1206733d02",
       "commits": 23,
-      "source": "GITHUB_PR_COMMITS_LIST"
+      "source": "GITHUB_PR_COMMITS_LIST",
+      "last_head_first_successful_job_at": "2026-11-03T22:41:58Z",
+      "last_head_merge_gate_green_at": "2026-11-03T23:01:03Z",
+      "runner_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41733020315/job/126254962758",
+      "merge_gate_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41733020530/job/126263060897",
+      "exact_head_check_runs": 16
     },
     {
       "pr": 3244,
@@ -87,7 +92,12 @@
       "head_commit_at": "2026-11-04T01:41:54Z",
       "commit_url": "https://github.com/andylitvinov-design/books/commit/d39d3dca192c96f5242cf66e55828ecf1f60dba3",
       "commits": 55,
-      "source": "GITHUB_PR_COMMITS_LIST"
+      "source": "GITHUB_PR_COMMITS_LIST",
+      "last_head_first_successful_job_at": "2026-11-04T01:42:17Z",
+      "last_head_merge_gate_green_at": "2026-11-04T01:55:33Z",
+      "runner_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41755854205/job/126331668280",
+      "merge_gate_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41755858248/job/126336360357",
+      "exact_head_check_runs": 50
     },
     {
       "pr": 3258,
@@ -227,7 +237,12 @@
       "head_commit_at": "2026-11-04T00:45:08Z",
       "commit_url": "https://github.com/andylitvinov-design/books/commit/fb063116daa1e985cf43191ca40b2109718ccac0",
       "commits": 30,
-      "source": "GITHUB_PR_COMMITS_LIST"
+      "source": "GITHUB_PR_COMMITS_LIST",
+      "last_head_first_successful_job_at": "2026-11-04T00:45:21Z",
+      "last_head_merge_gate_green_at": "2026-11-04T00:56:48Z",
+      "runner_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41749173982/job/126309671784",
+      "merge_gate_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41749177294/job/126314167882",
+      "exact_head_check_runs": 20
     },
     {
       "pr": 3281,
@@ -288,6 +303,21 @@
       "commit_url": "https://github.com/andylitvinov-design/books/commit/29a814166297a0481eeb0a3083e7d7ebcf071b60",
       "commits": 4,
       "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3301,
+      "created_at": "2026-11-03T13:24:21Z",
+      "merged_at": "2026-11-04T02:42:44Z",
+      "head_sha": "c7f789943c09aa1829179f4e29d453cad8cd4c61",
+      "head_commit_at": "2026-11-04T02:29:49Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/c7f789943c09aa1829179f4e29d453cad8cd4c61",
+      "commits": 26,
+      "source": "GITHUB_PR_COMMITS_LIST",
+      "last_head_first_successful_job_at": "2026-11-04T02:30:13Z",
+      "last_head_merge_gate_green_at": "2026-11-04T02:41:58Z",
+      "runner_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41761153475/job/126348918447",
+      "merge_gate_job_url": "https://github.com/andylitvinov-design/books/actions/runs/41761156886/job/126352891912",
+      "exact_head_check_runs": 13
     }
   ]
 }
