@@ -5,6 +5,12 @@
  const ROOT='https://api.github.com/repos/andylitvinov-design/books';
  const state={windows:[],at:null,mode:'loading',error:null,target:null,selected:null,details:new Map(),busy:false,lastRequest:0};
  const TIMEZONE='America/Toronto',IDS=['two_weeks_ago','week_ago','last_day'];
+ // Audited examples among the slowest PRs, NOT cohort-wide stage averages.
+ const representativeGaps={
+  two_weeks_ago:[{pr:1318,minutes:81.85},{pr:1307,minutes:79.73},{pr:1329,minutes:38.23}],
+  week_ago:[{pr:2275,minutes:540.62},{pr:2367,minutes:410.55},{pr:2369,minutes:384.02}],
+  last_day:[{pr:3298,minutes:821.95},{pr:3320,minutes:736.68},{pr:3302,minutes:644.73}]
+ };
  const ms=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
  const escaped=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ru-RU',{maximumFractionDigits:1}):'—';
@@ -180,6 +186,14 @@
     fmt(b.pct)+'% → '+fmt(w.pct)+'% (+'+fmt(w.pct-b.pct)+' п.п.). Среднее до merge: '+fmt(b.avg)+' → '+
     fmt(w.avg)+' мин (рост в '+fmt(w.avg/b.avg)+' раза). Последние сутки: незакрытых '+fmt(cur.pct)+
     '%, среднее до merge '+fmt(cur.avg)+' мин. Это статистика всего PR, не измеренное ожидание Runner.</p>';
+  html+='<div class="phc-examples"><h4>Примеры длинных промежутков: первая CI → последний коммит</h4>'+
+   '<p class="phc-note">Измеренные события из GitHub только для выбранных долгих PR. Между ними могли быть исправления, повторные CI и ожидания; это <b>не доказанные минуты простоя</b> и не среднее по всем PR.</p>'+
+   IDS.map(id=>{
+    const cohort=rows.find(x=>x.id===id),examples=representativeGaps[id];
+    return '<div class="phc-example-group"><strong>'+escaped(cohort?.label||id)+'</strong>'+
+     examples.map(x=>'<span><a href="https://github.com/andylitvinov-design/books/pull/'+x.pr+'" target="_blank" rel="noopener noreferrer">#'+x.pr+'</a> '+
+      fmt(x.minutes)+' мин <button type="button" data-pr="'+x.pr+'">Этапы</button></span>').join('')+'</div>';
+   }).join('')+'</div>';
   html+=analysisCard()+
    '<p class="phc-note">«Этапы» показывает исходные метки каждого PR: первую CI, очередь Runner, исполнение, промежутки после ошибок и изменения кода. Периоды без событий остаются неизвестными. Обновление выполняется вручную, без cron и платных API.</p>';
   root.innerHTML=html;
