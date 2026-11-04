@@ -7,3 +7,65 @@
 .ph-substep .ph-time{white-space:normal;overflow-wrap:anywhere}
 .ph-phase .ph-phase-value small{white-space:normal;text-align:right;max-width:94px;line-height:1.3}
 @media(max-width:750px){.ph-window{padding:9px}.ph-window span{font-size:11px}.ph-phase .ph-phase-value small{max-width:84px}}
+
+/* PR lifecycle: prominent whole-PR average + additive evidence-scoped breakdown. */
+.pr5-v2{margin-top:10px;margin-bottom:17px}
+.ph-herotitle{font-size:16px;line-height:1.3}
+.ph-headstats{grid-template-columns:minmax(0,1fr) minmax(110px,0.54fr)}
+.ph-headstats .ph-total-primary strong{font-size:39px;color:#ffdf9b;letter-spacing:-1px}
+.ph-headstats .ph-total-primary span{font-size:12px;line-height:1.5}
+.ph-headstats .ph-total-live strong{font-size:22px;letter-spacing:0}
+.ph-decomp-title{display:flex;align-items:baseline;justify-content:space-between;gap:9px;flex-wrap:wrap}
+.ph-decomp-title h3{margin-bottom:5px}
+.ph-decomp-title span{font-size:11px;font-weight:750;color:#a7d2ec}
+.ph-decomp-guide,.ph-decomp-note{font-size:11px;line-height:1.45;color:#b4cede;margin:5px 0}
+.ph-decomp-note{margin-top:10px}
+.ph-breakdown-table{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:7px;text-align:left}
+.ph-breakdown-table th{font-size:10px;letter-spacing:.15px;color:#92b9d6;text-transform:uppercase;border-bottom:1px solid #4c6b83;padding:7px 5px}
+.ph-breakdown-table th:last-child{text-align:right;width:92px}
+.ph-breakdown-table td{padding:10px 5px;border-bottom:1px solid #355269;vertical-align:top;font-size:12px}
+.ph-breakdown-table td:first-child{overflow-wrap:anywhere}
+.ph-breakdown-table td small{display:block;color:#a6c3d5;font-size:10px;font-weight:450;line-height:1.45;margin:4px 0 0}
+.ph-stage-label{display:flex;align-items:baseline;gap:7px;min-width:0}
+.ph-stage-label strong{font-weight:720;line-height:1.3}
+.ph-stage-label .ph-key{flex:0 0 9px;height:9px}
+.ph-breakdown-table .ph-stage-value{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;font-size:14px;font-weight:820;color:#ffdc91}
+.ph-breakdown-table .ph-stage-value small{text-align:right}
+.ph-breakdown-table .ph-unallocated td{background:#182e43}
+.ph-breakdown-table .ph-unallocated .ph-stage-value{color:#dfe9f4}
+.ph-breakdown-table .ph-breakdown-total td{background:#193b53;border-top:2px solid #769bb4;border-bottom:0}
+.ph-breakdown-table .ph-breakdown-total strong{font-size:13px}
+.ph-breakdown-table .ph-breakdown-total .ph-stage-value{font-size:18px;color:#ffe1a4}
+.ph-direct{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:10px 9px;border:1px solid #476b87;border-radius:10px;background:#183a54}
+.ph-direct div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ph-direct b{font-size:12px;line-height:1.3}
+.ph-direct strong{white-space:nowrap;font-size:17px;color:#ffdc91}
+.ph-direct strong small{font-size:10px;font-weight:500}
+.ph-direct span{font-size:10px;color:#bbd1e1;white-space:nowrap}
+.ph-direct div small{font-size:10px;color:#afccdf}
+.ph-phase-metrics{font-size:11px;color:#b5cadb;line-height:1.5;margin:10px 0}
+.ph-optional{border-top:1px solid #38536d;margin-top:12px;padding-top:9px}
+.ph-optional>summary{cursor:pointer;list-style:none;color:#9fcde9;font-size:12px;font-weight:750}
+.ph-optional>summary::-webkit-details-marker{display:none}
+.ph-optional>summary span{float:right}
+.ph-optional>p{margin:10px 0}
+.ph-category-head{margin-top:13px}
+.ph-composition{margin-top:10px}
+@media(max-width:750px){
+ .pr5-v2{padding:10px}
+ .ph-headstats{grid-template-columns:minmax(0,1fr) minmax(0,0.45fr)}
+ .ph-headstats .ph-total-primary strong{font-size:34px;line-height:1.08}
+ .ph-headstats .ph-total-primary span{font-size:11px}
+ .ph-headstats .ph-total-live strong{font-size:17px}
+ .ph-headstats .ph-total-live small{font-size:10px}
+ .ph-breakdown-table th:last-child{width:82px}
+ .ph-breakdown-table td{padding:9px 3px}
+ .ph-breakdown-table .ph-stage-value{font-size:13px}
+ .ph-breakdown-table .ph-breakdown-total .ph-stage-value{font-size:15px}
+ .ph-stage-label{gap:5px}
+ .ph-stage-label strong{font-size:11px}
+ .ph-direct{gap:5px;grid-template-columns:minmax(0,1fr) auto}
+ .ph-direct span{grid-column:1/-1;text-align:right}
+ .ph-direct strong{font-size:17px}
+ .ph-decomp-title span{font-size:10px}
+}
