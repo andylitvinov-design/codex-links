@@ -197,7 +197,7 @@
     '<div class="ph-decomp-title"><h3>Куда прошло время до merge</h3><span>Одна выборка: '+v.n+' PR</span></div>'+
     '<p class="ph-decomp-guide">'+loading+'Проверены Core CI-волны и промежутки между ними. Вклад рассчитан по <b>одинаковым '+v.n+' PR</b>, не по разным подвыборкам.</p>'+
     '<p class="ph-cohort-coverage">Восстановлена история <b>'+v.covered+' / '+v.n+' PR</b> · '+
-    (v.totalMinutes>0?(100*v.coveredMinutes/v.totalMinutes).toLocaleString('ru-RU',{maximumFractionDigits:1})+'%')+
+    (v.totalMinutes>0?(100*v.coveredMinutes/v.totalMinutes).toLocaleString('ru-RU',{maximumFractionDigits:1})+'%':'—')+
     ' суммарного времени в выборке. Прочитано GitHub API: '+state.apiCalls+'/'+state.maxApiCalls+'.</p>'+
     '<table class="ph-breakdown-table"><thead><tr><th>Подтверждённый период</th><th>Вклад</th></tr></thead><tbody>'+data+
     '<tr class="ph-breakdown-total"><td><strong>Итого Created → Merged</strong><small>Среднее по '+v.n+' PR</small></td>'+
