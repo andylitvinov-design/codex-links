@@ -60,7 +60,12 @@
   ];
   if(phases.some(x=>x.end<x.begin||x.begin===null||x.end===null)||Math.abs(phases.reduce((s,x)=>s+(x.end-x.begin)/60000,0)-pr.total)>.02)throw Error('Периоды не складываются в полный PR');
   return {phases,jobs:valid.map(x=>({name:x.name,queue:m(x.created_at,x.started_at),runtime:m(x.started_at,x.completed_at),
-   created:x.created_at,started:x.started_at,completed:x.completed_at,url:'https://github.com/andylitvinov-design/books/actions/runs/'+run.id+'/job/'+x.id})),
+   created:x.created_at,started:x.started_at,completed:x.completed_at,url:'https://github.com/andylitvinov-design/books/actions/runs/'+run.id+'/job/'+x.id,
+   steps:Array.isArray(x.steps)?x.steps.filter(step=>step.status==='completed'&&t(step.started_at)!==null&&
+    t(step.completed_at)!==null&&t(step.completed_at)>=t(step.started_at)&&
+    t(step.completed_at)<=t(x.completed_at)).map(step=>({name:String(step.name||'').slice(0,120),
+    duration:m(step.started_at,step.completed_at),started:step.started_at,completed:step.completed_at,
+    conclusion:step.conclusion})).sort((a,b)=>b.duration-a.duration).slice(0,5):[]})),
    commits:commits.filter(x=>sha(x?.sha)&&t(x.commit?.committer?.date)!==null).map(x=>({sha:x.sha,at:x.commit.committer.date,
     msg:String(x.commit.message||'').split('\n')[0].slice(0,100)})),
    runUrl:run.html_url};
@@ -112,11 +117,14 @@
    '<h4>Какие проверки заняли время</h4>'+
    data.jobs.map(j=>'<div class="phr-job"><a href="'+esc(j.url)+'" target="_blank" rel="noopener noreferrer">'+esc(j.name)+'</a>'+
     '<span>Очередь '+dur(j.queue)+'</span><b>Runner '+dur(j.runtime)+'</b>'+
-    '<small>'+local(t(j.created))+' → '+local(t(j.started))+' → '+local(t(j.completed))+'</small></div>').join('')+
+    '<small>'+local(t(j.created))+' → '+local(t(j.started))+' → '+local(t(j.completed))+'</small>'+
+    (j.steps.length?'<details class="phr-steps"><summary>Шаги внутри '+esc(j.name)+' <span>⌄</span></summary>'+
+      j.steps.map(step=>'<div><span>'+esc(step.name)+'</span><b>'+dur(step.duration)+'</b><small>'+
+       local(t(step.started))+' → '+local(t(step.completed))+'</small></div>').join('')+'</details>':'')+'</div>').join('')+
    '<h4>Изменения кода: '+data.commits.length+' коммитов</h4>'+
    data.commits.slice(-8).map(j=>'<div class="phr-commit"><a href="https://github.com/andylitvinov-design/books/commit/'+j.sha+'" target="_blank" rel="noopener noreferrer">'+j.sha.slice(0,8)+'</a>'+
     '<span>'+esc(local(t(j.at)))+'</span><small>'+esc(j.msg)+'</small></div>').join('')+
-   '<p class="phr-note">Минуты между коммитами не равны бездействию. Исполнение Core и Specialist может идти параллельно; их длительности нельзя складывать.</p></div>';
+   '<p class="phr-note">Минуты между коммитами не равны бездействию. Исполнение Core и Specialist может идти параллельно; их длительности нельзя складывать. Шаг Specialist может включать ожидание и опрос зависимых GitHub workflows, а не только вычисления.</p></div>';
  }
  function draw(){
   if(!target)return;
