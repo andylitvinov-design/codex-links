@@ -325,6 +325,7 @@
    ' · CI '+(ledger&&ledger.coverage&&ledger.coverage.ci_checked||0)+'/'+(ledger&&ledger.prs&&ledger.prs.length||0)+'.</p>'+
    '<p>Детализация неполная: подтверждено чтение timeline '+(ledger&&ledger.coverage&&ledger.coverage.timeline_checked||0)+' PR за последнее обновление, но полный охват не доказан. Незаписанный интервал никогда не считается нулём. <button type="button" data-reload="1">Обновить данные</button></p></div>';
   window.HHRecentPR?.mount(host);
+  window.HHCohortCompare?.mount(host);
  }
  async function load(){
   error=null;render();
@@ -365,6 +366,19 @@
   recentScript.src='/pr-recent-timing.js';recentScript.defer=true;
   recentScript.onload=()=>window.HHRecentPR?.mount(host);
   document.head.appendChild(recentScript);
+  // No new polling: just the existing static monitor and user-triggered GitHub reads.
+  const cohortCSS=document.createElement('link');
+  cohortCSS.rel='stylesheet';cohortCSS.href='/pr-three-cohorts.css';
+  document.head.appendChild(cohortCSS);
+  const precommitScript=document.createElement('script');
+  precommitScript.src='/pr-precommit-slices.js';precommitScript.defer=true;
+  precommitScript.onload=()=>{
+   const cohortScript=document.createElement('script');
+   cohortScript.src='/pr-three-cohorts.js';cohortScript.defer=true;
+   cohortScript.onload=()=>window.HHCohortCompare?.mount(host);
+   document.head.appendChild(cohortScript);
+  };
+  document.head.appendChild(precommitScript);
   // Put the main Created→Merged KPI and its additive breakdown near the top
   // of the page; preserve the existing monitor's other sections and controls.
   const main=host.closest('main')||document.querySelector('main');
