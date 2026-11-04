@@ -1,21 +1,23 @@
 {
   "schema": "HH_PR_HEAD_LIFECYCLE_AUDIT_V1",
   "repo": "andylitvinov-design/books",
-  "source": "GitHub REST immutable commit.comitter.date for exact final PR HEAD, NOT proof of push time, continuous activity or waiting cause",
+  "source": "GitHub REST final PR commits list (SHA and committer timestamp), NOT verified GitHub push receipt or continuous work",
   "scope": {
     "window_from": "2026-11-03T04:13:51.633Z",
     "window_to": "2026-11-04T04:13:51.633Z",
     "expected": 72
   },
-  "recorded_at": "2026-11-04T05:37:54.912Z",
+  "recorded_at": "2026-11-04T05:38:28.264Z",
   "records": [
     {
       "pr": 3241,
-      "head_sha": null,
+      "head_sha": "262b9c4a7e67318bb79abb15251a43be5214e144",
       "created_at": "2026-11-03T04:15:13Z",
       "merged_at": "2026-11-03T04:25:38Z",
-      "head_commit_at": null,
-      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+      "head_commit_at": "2026-11-03T04:23:33Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/262b9c4a7e67318bb79abb15251a43be5214e144",
+      "commits": 14,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3242,
@@ -23,47 +25,59 @@
       "created_at": "2026-11-03T04:34:28Z",
       "merged_at": "2026-11-03T23:02:23Z",
       "head_commit_at": "2026-11-03T22:41:34Z",
-      "commit_url": "https://github.com/andylitvinov-design/books/commit/24a9d9a36645e536f1e1bdd9be4e7d1206733d02"
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/24a9d9a36645e536f1e1bdd9be4e7d1206733d02",
+      "commits": 23,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3244,
-      "head_sha": null,
+      "head_sha": "b73e382e0dc686396d4ed5118f06ef007fafa4f8",
       "created_at": "2026-11-03T04:41:32Z",
       "merged_at": "2026-11-03T05:07:18Z",
-      "head_commit_at": null,
-      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+      "head_commit_at": "2026-11-03T05:01:29Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/b73e382e0dc686396d4ed5118f06ef007fafa4f8",
+      "commits": 1,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3246,
-      "head_sha": null,
+      "head_sha": "7e083e1d33c7837bbdbe11b5e358ff007e4533e2",
       "created_at": "2026-11-03T05:01:33Z",
       "merged_at": "2026-11-03T12:58:57Z",
-      "head_commit_at": null,
-      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+      "head_commit_at": "2026-11-03T12:38:24Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/7e083e1d33c7837bbdbe11b5e358ff007e4533e2",
+      "commits": 2,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3253,
-      "head_sha": null,
+      "head_sha": "7e359bda2daeb2498e330d9dd28e99937711851a",
       "created_at": "2026-11-03T05:13:51Z",
       "merged_at": "2026-11-03T06:30:07Z",
-      "head_commit_at": null,
-      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+      "head_commit_at": "2026-11-03T06:12:40Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/7e359bda2daeb2498e330d9dd28e99937711851a",
+      "commits": 12,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3254,
-      "head_sha": null,
+      "head_sha": "e6f63b2260262c839717cb36ef4efd4405615738",
       "created_at": "2026-11-03T05:16:18Z",
       "merged_at": "2026-11-03T16:21:20Z",
-      "head_commit_at": null,
-      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+      "head_commit_at": "2026-11-03T16:01:02Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/e6f63b2260262c839717cb36ef4efd4405615738",
+      "commits": 3,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3255,
-      "head_sha": null,
+      "head_sha": "20b9d20c4b60b51ad0c6cec7fb19dd90cf51d76e",
       "created_at": "2026-11-03T05:16:40Z",
       "merged_at": "2026-11-03T05:51:45Z",
       "head_commit_at": null,
-      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/20b9d20c4b60b51ad0c6cec7fb19dd90cf51d76e",
+      "commits": 2,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3257,
@@ -71,15 +85,19 @@
       "created_at": "2026-11-03T05:21:20Z",
       "merged_at": "2026-11-04T01:55:40Z",
       "head_commit_at": "2026-11-04T01:41:54Z",
-      "commit_url": "https://github.com/andylitvinov-design/books/commit/d39d3dca192c96f5242cf66e55828ecf1f60dba3"
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/d39d3dca192c96f5242cf66e55828ecf1f60dba3",
+      "commits": 55,
+      "source": "GITHUB_PR_COMMITS_LIST"
     },
     {
       "pr": 3258,
-      "head_sha": null,
+      "head_sha": "a8e9bdec2750bca5e1b7f19958b577afe737a240",
       "created_at": "2026-11-03T05:21:28Z",
       "merged_at": "2026-11-03T06:18:27Z",
-      "head_commit_at": null,
-      "error": "INVALID_ARGUMENT: Error code: INVALID_ARGUMENT; Error: GitHub API error 422: {\"message\":\"No commit found for SHA: null\",\"documentation_url\":\"https://docs.github"
+      "head_commit_at": "2026-11-03T06:07:00Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/a8e9bdec2750bca5e1b7f19958b577afe737a240",
+      "commits": 3,
+      "source": "GITHUB_PR_COMMITS_LIST"
     }
   ]
 }
