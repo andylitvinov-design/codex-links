@@ -38,3 +38,12 @@
  .phr-splits span{flex:1 1 45%;line-height:1.5}
  .phr-phase,.phr-job,.phr-commit{gap:4px}
 }
+
+.phr-steps{grid-column:1/-1;margin-top:3px;border-top:1px dashed #426880;padding-top:6px}
+.phr-steps>summary{font-size:11px;color:#b4dcf4;font-weight:800;cursor:pointer;list-style:none}
+.phr-steps>summary::-webkit-details-marker{display:none}
+.phr-steps>summary span{float:right}
+.phr-steps>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px;border-bottom:1px solid #30556b;padding:7px 0}
+.phr-steps>div span{font-size:11px;color:#d5e4ef;text-align:left}
+.phr-steps>div b{color:#ffd99e;font-size:11px}
+.phr-steps>div small{grid-column:1/-1;font-size:10px;color:#aac6d8}
