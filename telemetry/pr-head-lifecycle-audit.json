@@ -7,7 +7,7 @@
     "window_to": "2026-11-04T04:13:51.633Z",
     "expected": 72
   },
-  "recorded_at": "2026-11-04T05:38:28.264Z",
+  "recorded_at": "2026-11-04T05:39:16.677Z",
   "records": [
     {
       "pr": 3241,
@@ -96,6 +96,96 @@
       "merged_at": "2026-11-03T06:18:27Z",
       "head_commit_at": "2026-11-03T06:07:00Z",
       "commit_url": "https://github.com/andylitvinov-design/books/commit/a8e9bdec2750bca5e1b7f19958b577afe737a240",
+      "commits": 3,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3259,
+      "head_sha": "949b55228e6b7641b4b238f4a6ea9f106dbb9197",
+      "created_at": "2026-11-03T05:21:45Z",
+      "merged_at": "2026-11-03T05:58:22Z",
+      "head_commit_at": null,
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/949b55228e6b7641b4b238f4a6ea9f106dbb9197",
+      "commits": 1,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3261,
+      "head_sha": "a97a97279c13f45f57f4dc92bf6ba3c3a506934b",
+      "created_at": "2026-11-03T05:23:47Z",
+      "merged_at": "2026-11-03T05:43:36Z",
+      "head_commit_at": null,
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/a97a97279c13f45f57f4dc92bf6ba3c3a506934b",
+      "commits": 3,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3262,
+      "head_sha": "944457038b21220b08fa4ab5bb9ff6fffee12633",
+      "created_at": "2026-11-03T05:24:48Z",
+      "merged_at": "2026-11-03T05:28:54Z",
+      "head_commit_at": null,
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/944457038b21220b08fa4ab5bb9ff6fffee12633",
+      "commits": 2,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3263,
+      "head_sha": "5dabd8d57ab8c5ca190c4eb205410064be452235",
+      "created_at": "2026-11-03T05:25:46Z",
+      "merged_at": "2026-11-03T12:46:27Z",
+      "head_commit_at": "2026-11-03T12:41:11Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/5dabd8d57ab8c5ca190c4eb205410064be452235",
+      "commits": 4,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3268,
+      "head_sha": "74284eb25bfc85e870f7a977a4150f5e2ae7435f",
+      "created_at": "2026-11-03T05:28:49Z",
+      "merged_at": "2026-11-03T05:53:17Z",
+      "head_commit_at": null,
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/74284eb25bfc85e870f7a977a4150f5e2ae7435f",
+      "commits": 1,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3269,
+      "head_sha": "d8f60ca1e907bb5a71e328509e991ef088b514ce",
+      "created_at": "2026-11-03T05:29:06Z",
+      "merged_at": "2026-11-03T06:55:46Z",
+      "head_commit_at": "2026-11-03T06:47:30Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/d8f60ca1e907bb5a71e328509e991ef088b514ce",
+      "commits": 3,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3270,
+      "head_sha": "f60470eda8b86aa0c6199921774a2c0226436c73",
+      "created_at": "2026-11-03T05:30:26Z",
+      "merged_at": "2026-11-03T08:25:56Z",
+      "head_commit_at": "2026-11-03T08:15:03Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/f60470eda8b86aa0c6199921774a2c0226436c73",
+      "commits": 5,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3271,
+      "head_sha": "67799205436de82c1f931c49a6e5a27bf94b3165",
+      "created_at": "2026-11-03T05:32:51Z",
+      "merged_at": "2026-11-03T12:31:41Z",
+      "head_commit_at": "2026-11-03T12:29:59Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/67799205436de82c1f931c49a6e5a27bf94b3165",
+      "commits": 7,
+      "source": "GITHUB_PR_COMMITS_LIST"
+    },
+    {
+      "pr": 3273,
+      "head_sha": "ae455842d1eda0f5a793072c1dabe9129cefc2a1",
+      "created_at": "2026-11-03T05:36:04Z",
+      "merged_at": "2026-11-03T12:40:10Z",
+      "head_commit_at": "2026-11-03T12:35:34Z",
+      "commit_url": "https://github.com/andylitvinov-design/books/commit/ae455842d1eda0f5a793072c1dabe9129cefc2a1",
       "commits": 3,
       "source": "GITHUB_PR_COMMITS_LIST"
     }
