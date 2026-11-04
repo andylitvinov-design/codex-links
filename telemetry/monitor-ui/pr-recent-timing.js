@@ -22,11 +22,11 @@
   return response.json();
  }
  function normalize(pr){
-  if(!n(pr?.number)||!sha(pr?.head?.sha)||!pr.merged_at||!pr.created_at||pr.base?.ref!==PROD||pr.base?.repo?.full_name!=='andylitvinov-design/books')return null;
+  if(!n(pr?.number)||!sha(pr?.head?.sha)||!pr.merged_at||!pr.created_at||pr.base?.ref!==PROD||pr.base?.repo?.full_name!=='andylitvinov-design/books'||!/^[A-Za-z0-9._\/-]{1,160}$/.test(pr.head?.ref||''))return null;
   const elapsed=m(pr.created_at,pr.merged_at);
   if(elapsed===null)return null;
   return {number:pr.number,title:String(pr.title||'').slice(0,160),created_at:pr.created_at,
-   merged_at:pr.merged_at,head_sha:pr.head.sha,total:elapsed,ci:'pending',first:null,gateAt:null,gate:null,critical:null};
+   merged_at:pr.merged_at,head_sha:pr.head.sha,head_branch:pr.head.ref,total:elapsed,ci:'pending',first:null,gateAt:null,gate:null,critical:null};
  }
  function analyzeChecks(pr,src){
   if(!src||!Array.isArray(src.check_runs)||src.total_count>100)return {...pr,ci:'partial'};
@@ -41,7 +41,7 @@
    gate:{id:gate.id,url:gate.html_url,completed_at:gate.completed_at},
    critical:slow?{name:slow.name,min:m(slow.started_at,slow.completed_at),url:slow.html_url}:null};
  }
- function fromJobs(pr,run,jobs,commits){
+ function fromJobs(pr,run,jobs,commits,runsData=null){
   if(run?.head_sha!==pr.head_sha||run?.name!=='HH PR core release gate'||!Array.isArray(jobs?.jobs)||
    jobs.total_count>100||!Array.isArray(commits)||commits.length>=100)throw Error('Неполная или чужая история HEAD');
   const a=t(pr.created_at),b=t(pr.merged_at),q=t(run.created_at),g=t(pr.gateAt);
@@ -59,6 +59,21 @@
    {title:'После зелёного Gate до merge',begin:g,end:b,source:'GitHub Merge Gate завершён → PR merged_at'}
   ];
   if(phases.some(x=>x.end<x.begin||x.begin===null||x.end===null)||Math.abs(phases.reduce((s,x)=>s+(x.end-x.begin)/60000,0)-pr.total)>.02)throw Error('Периоды не складываются в полный PR');
+  // Count previous exact-SHA waves only when linked to this PR's commit history.
+  // GitHub can paginate runs; counts from truncated results are NOT totals.
+  const commitShas=new Set(commits.filter(x=>sha(x?.sha)).map(x=>x.sha.toLowerCase()));
+  const runInventoryComplete=Array.isArray(runsData?.workflow_runs)&&
+   Number.isSafeInteger(runsData?.total_count)&&runsData.total_count<100;
+  const matchedRuns=Array.isArray(runsData?.workflow_runs)?runsData.workflow_runs
+   .filter(x=>x.head_branch===pr.head_branch&&sha(x.head_sha)&&commitShas.has(x.head_sha.toLowerCase())&&
+    x.event==='pull_request'&&t(x.created_at)>=a&&t(x.created_at)<=b).sort((x,y)=>t(x.created_at)-t(y.created_at)):[];
+  const coreWaves=matchedRuns.filter(x=>x.name==='HH PR core release gate');
+  const waveStats={coverage:runInventoryComplete?'COMPLETE_BRANCH_SAMPLE':'PARTIAL_OR_UNAVAILABLE',
+   observedWorkflows:matchedRuns.length,uniqueCoreHeads:new Set(coreWaves.map(x=>x.head_sha)).size,
+   coreRuns:coreWaves.length,cancelled:matchedRuns.filter(x=>x.conclusion==='cancelled').length,
+   failed:matchedRuns.filter(x=>x.conclusion==='failure').length,
+   recent:coreWaves.slice(-12).map(x=>({sha:x.head_sha,at:x.created_at,conclusion:x.conclusion||x.status,
+    url:/^https:\/\/github\.com\/andylitvinov-design\/books\/actions\/runs\/\d+$/.test(x.html_url||'')?x.html_url:null}))};
   return {phases,jobs:valid.map(x=>({name:x.name,queue:m(x.created_at,x.started_at),runtime:m(x.started_at,x.completed_at),
    created:x.created_at,started:x.started_at,completed:x.completed_at,url:'https://github.com/andylitvinov-design/books/actions/runs/'+run.id+'/job/'+x.id,
    steps:Array.isArray(x.steps)?x.steps.filter(step=>step.status==='completed'&&t(step.started_at)!==null&&
@@ -68,7 +83,7 @@
     conclusion:step.conclusion})).sort((a,b)=>b.duration-a.duration).slice(0,5):[]})),
    commits:commits.filter(x=>sha(x?.sha)&&t(x.commit?.committer?.date)!==null).map(x=>({sha:x.sha,at:x.commit.committer.date,
     msg:String(x.commit.message||'').split('\n')[0].slice(0,100)})),
-   runUrl:run.html_url};
+   runUrl:run.html_url,waveStats};
  }
  async function refresh(){
   if(state.status==='loading')return;
@@ -98,10 +113,11 @@
   if(!rid||!/^\d{8,16}$/.test(rid)){state.details.set(num,{error:'Нет точного workflow run ID'});draw();return}
   state.loading.add(num);draw();
   try{
-   const [run,jobs,commits]=await Promise.all([
+   const [run,jobs,commits,runHistory]=await Promise.all([
     read(GH+'/actions/runs/'+rid),read(GH+'/actions/runs/'+rid+'/jobs?per_page=100'),
-    read(GH+'/pulls/'+num+'/commits?per_page=100')]);
-   state.details.set(num,fromJobs(row,run,jobs,commits));
+    read(GH+'/pulls/'+num+'/commits?per_page=100'),
+    read(GH+'/actions/runs?branch='+encodeURIComponent(row.head_branch)+'&per_page=100').catch(()=>null)]);
+   state.details.set(num,fromJobs(row,run,jobs,commits,runHistory));
   }catch(ex){state.details.set(num,{error:String(ex?.message||ex)})}
   state.loading.delete(num);draw();
  }
@@ -121,6 +137,15 @@
     (j.steps.length?'<details class="phr-steps"><summary>Шаги внутри '+esc(j.name)+' <span>⌄</span></summary>'+
       j.steps.map(step=>'<div><span>'+esc(step.name)+'</span><b>'+dur(step.duration)+'</b><small>'+
        local(t(step.started))+' → '+local(t(step.completed))+'</small></div>').join('')+'</details>':'')+'</div>').join('')+
+   '<h4>Повторные волны CI для этого PR</h4>'+
+   '<p class="phr-note">Подтверждено Core-волн: <b>'+data.waveStats.coreRuns+'</b> на <b>'+
+    data.waveStats.uniqueCoreHeads+'</b> версиях HEAD. В наблюдаемых GitHub workflows: отменено '+
+    data.waveStats.cancelled+', ошибок '+data.waveStats.failed+
+    '. Охват: '+(data.waveStats.coverage==='COMPLETE_BRANCH_SAMPLE'?'полный ответ GitHub для ветки':'частичный / недоступен')+
+    '. Отмена ещё не означает потраченные runner-минуты.</p>'+
+   data.waveStats.recent.slice(-6).map(r=>'<div class="phr-wave">'+
+    (r.url?'<a href="'+esc(r.url)+'" target="_blank" rel="noopener noreferrer">'+r.sha.slice(0,8)+'</a>':'<b>'+r.sha.slice(0,8)+'</b>')+
+    '<span>'+esc(local(t(r.at)))+'</span><small>'+esc(r.conclusion)+'</small></div>').join('')+
    '<h4>Изменения кода: '+data.commits.length+' коммитов</h4>'+
    data.commits.slice(-8).map(j=>'<div class="phr-commit"><a href="https://github.com/andylitvinov-design/books/commit/'+j.sha+'" target="_blank" rel="noopener noreferrer">'+j.sha.slice(0,8)+'</a>'+
     '<span>'+esc(local(t(j.at)))+'</span><small>'+esc(j.msg)+'</small></div>').join('')+
