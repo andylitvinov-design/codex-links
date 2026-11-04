@@ -253,6 +253,10 @@
    '</section>';
  }
  function compositionCard(a){
+  // Prioritize actual Core workflow waves in the selected created-at cohort.
+  // The historical commit audit is a fallback, not a current-period clock.
+  const core=window.HHCohortTimeline?.compose(a);
+  if(typeof core==='string')return core;
   if(headAudit&&Array.isArray(headAudit.records))return auditedCompositionCard(a);
   if(!a.total.n)return '<section class="ph-composition ph-empty" data-role="decomposition"><h3>Из чего складывается среднее до merge</h3>'+
    '<p class="ph-note">За выбранный период пока нет PR, которые успели пройти Created → Merged. Выберите больший период: отсутствие завершённых PR не означает ноль минут.</p></section>';
@@ -300,6 +304,7 @@
   if(error){host.innerHTML='<h2>Этапы PR до LIVE</h2><p class="ph-warning">Данные временно недоступны: '+e(error)+'. Другие разделы монитора не затронуты.</p><button data-reload="1">Повторить</button>';return}
   if(!cohortData&&!ledger){host.innerHTML='<h2>Этапы PR до LIVE</h2><p class="ph-muted">Загрузка подтверждённых событий GitHub…</p>';return}
   const a=analysis(),s=a.select,ci=a.select.merged.filter(p=>{const r=byPr().get(Number(p.number));return r&&r.ci&&r.ci.checked===true});
+  window.HHCohortTimeline?.setCohort(s,render);
   const repeats=ci.reduce((count,p)=>{const r=byPr().get(Number(p.number)),cycles=r.ci.cycles||[];return count+cycles.reduce((n,x)=>n+Math.max(0,Number(x.run_attempt||x.attempt||1)-1),0)},0);
   const dup=ci.reduce((n,p)=>n+number(byPr().get(Number(p.number)).ci.duplicate_checks),0);
   const m=a.total;
@@ -365,6 +370,14 @@
   recentScript.src='/pr-recent-timing.js';recentScript.defer=true;
   recentScript.onload=()=>window.HHRecentPR?.mount(host);
   document.head.appendChild(recentScript);
+  // Same-origin assets; all GitHub reads are bounded and read-only.
+  const cohortStyle=document.createElement('link');
+  cohortStyle.rel='stylesheet';cohortStyle.href='/pr-cohort-timing.css';
+  document.head.appendChild(cohortStyle);
+  const cohortScript=document.createElement('script');
+  cohortScript.src='/pr-cohort-timing.js';cohortScript.defer=true;
+  cohortScript.onload=()=>{window.HHCohortTimeline?.setCohort(analysis().select,render);render();};
+  document.head.appendChild(cohortScript);
   // Put the main Created→Merged KPI and its additive breakdown near the top
   // of the page; preserve the existing monitor's other sections and controls.
   const main=host.closest('main')||document.querySelector('main');
@@ -374,8 +387,9 @@
   host.addEventListener('click',ev=>{
    const t=ev.target&&ev.target.closest;
    if(!t)return;
-   const btn=t.call(ev.target,'button[data-period],button[data-scope],button[data-reload]');
+   const btn=t.call(ev.target,'button[data-period],button[data-scope],button[data-reload],button[data-cohort-more]');
    if(!btn)return;
+   if(btn.hasAttribute('data-cohort-more')){window.HHCohortTimeline?.more();return}
    if(btn.hasAttribute('data-reload')){load();return}
    if(btn.hasAttribute('data-period')){
     const n=Number(btn.getAttribute('data-period'));if(HOUR_OPTIONS.includes(n)){hours=n;render()}return;

@@ -1,0 +1,32 @@
+/* Verified Core CI-wave lifecycle categories, kept within iPhone viewport. */
+.pr5-v2 .ph-cohort-coverage{font-size:11px;color:#b8d4e8;line-height:1.5;margin:9px 0 7px;font-variant-numeric:tabular-nums}
+.pr5-v2 [data-role="cohort-core-latency"] .ph-breakdown-table th:last-child{width:88px}
+.pr5-v2 [data-role="cohort-core-latency"] .ph-breakdown-table td strong{font-size:12px;line-height:1.3}
+.pr5-v2 [data-role="cohort-core-latency"] .ph-breakdown-table td small{line-height:1.5}
+.pr5-v2 [data-cohort-more]{cursor:pointer;padding:10px 12px;border:1px solid #6597bc;color:#e6f5ff;background:#194b6b;border-radius:9px;font-size:12px;font-weight:760;margin:6px 0 12px}
+.pr5-v2 .ph-cohort-examples{border:1px solid #3f6480;border-radius:10px;padding:9px 11px;margin:9px 0;background:#102b42}
+.pr5-v2 .ph-cohort-examples>summary{font-size:12px;color:#b7e1fa;font-weight:760;cursor:pointer;list-style:none;line-height:1.45}
+.pr5-v2 .ph-cohort-examples>summary::-webkit-details-marker{display:none}
+.pr5-v2 .ph-cohort-examples>summary>span{float:right}
+.pr5-v2 .ph-cohort-pr{border-top:1px solid #355772;padding:10px 2px}
+.pr5-v2 .ph-cohort-pr:first-child{margin-top:10px}
+.pr5-v2 .ph-cohort-pr>summary{cursor:pointer;list-style:none;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.pr5-v2 .ph-cohort-pr>summary::-webkit-details-marker{display:none}
+.pr5-v2 .ph-cohort-pr>summary a{color:#89d4ff;text-decoration:underline;font-weight:800;font-size:13px}
+.pr5-v2 .ph-cohort-pr>summary strong{font-size:13px;color:#ffdb9a;margin-left:auto;font-variant-numeric:tabular-nums}
+.pr5-v2 .ph-cohort-pr>summary small{font-size:11px;color:#bed3e3;flex-basis:100%}
+.pr5-v2 .ph-cohort-pr>div{margin:9px 0 0;padding:7px;border-radius:8px;background:#17334b}
+.pr5-v2 .ph-cohort-pr>div>p{color:#acc6d9;font-size:11px;line-height:1.5;margin:5px 0 10px}
+.pr5-v2 .ph-cohort-period{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 9px;align-items:center;padding:8px 0;border-bottom:1px solid #34556f}
+.pr5-v2 .ph-cohort-period span{font-size:11px;line-height:1.4;color:#d8e7f2}
+.pr5-v2 .ph-cohort-period b{font-size:12px;color:#ffdc9e;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pr5-v2 .ph-cohort-period small{grid-column:1/-1;font-size:10px;color:#adc9dc;line-height:1.45}
+.pr5-v2 .ph-cohort-period small a{color:#99d8ff;text-decoration:underline}
+@media(max-width:750px){
+ .pr5-v2 [data-role="cohort-core-latency"] .ph-breakdown-table th:last-child{width:79px}
+ .pr5-v2 [data-role="cohort-core-latency"] .ph-breakdown-table td strong{font-size:11px}
+ .pr5-v2 .ph-cohort-examples{padding:8px}
+ .pr5-v2 .ph-cohort-period{grid-template-columns:minmax(0,1fr) auto;gap:3px}
+ .pr5-v2 .ph-cohort-period span{font-size:10px}
+ .pr5-v2 .ph-cohort-period b{font-size:11px}
+}
