@@ -36,7 +36,7 @@
  const link=p=>'<a href="https://github.com/andylitvinov-design/books/pull/'+Number(p.number)+'" target="_blank" rel="noopener noreferrer">#'+Number(p.number)+'</a>';
  const number=v=>Number.isFinite(v)?v:0;
  const PRODUCTION='codex/public-book-library';
- let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(),error=null;
+ let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(),error=null,headAudit=null,auditError=null;
  function aggregate(nums){
   const v=nums.filter(x=>typeof x==='number'&&Number.isFinite(x)&&x>=0).sort((a,b)=>a-b),n=v.length;
   return {n,mean:n?v.reduce((a,b)=>a+b,0)/n:null,
@@ -168,7 +168,82 @@
    '<button type="button" data-scope="all" class="'+(scope==='all'?'ph-selected':'')+'">Все PR</button>'+
    '<button type="button" data-scope="prod" class="'+(scope==='prod'?'ph-selected':'')+'">Production</button></div></div>';
  }
+
+ // A separate, timestamp-backed source-history audit. This is NOT a clock of
+ // continuous developer activity: commit timestamps are not GitHub push times.
+ function auditParts(a){
+  const counts=[0,0,0,0,0,0],sums=[0,0,0,0,0,0],audited=[];
+  const refs=new Map((headAudit&&headAudit.records||[]).map(r=>[Number(r.pr),r]));
+  for(const p of a.select.merged){
+   const cr=ts(p.created_at),me=ts(p.merged_at),total=delta(cr,me),rec=refs.get(Number(p.number));
+   if(total===null)continue;
+   let pointer=cr;
+   const good=rec&&rec.created_at===p.created_at&&rec.merged_at===p.merged_at&&
+    /^[a-f0-9]{40}$/i.test(rec.head_sha||'')&&(!p.head_sha||p.head_sha===rec.head_sha)&&
+    /^https:\/\/github\.com\/andylitvinov-design\/books\/commit\/[a-f0-9]{40}$/i.test(rec.commit_url||'');
+   const head=good?ts(rec.head_commit_at):null;
+   if(head===null||head<cr||head>me){sums[5]+=total;continue}
+   counts[0]++;sums[0]+=(head-cr)/60000;pointer=head;
+   const runner=ts(rec.last_head_first_successful_job_at);
+   const gate=ts(rec.last_head_merge_gate_green_at);
+   const runnerLink=rec.runner_job_url||'',gateLink=rec.merge_gate_job_url||'';
+   const validRun=runner!==null&&runner>=head&&runner<=me&&
+    /^https:\/\/github\.com\/andylitvinov-design\/books\/actions\/runs\/\d+\/job\/\d+$/.test(runnerLink);
+   const validGate=validRun&&gate!==null&&gate>=runner&&gate<=me&&
+    /^https:\/\/github\.com\/andylitvinov-design\/books\/actions\/runs\/\d+\/job\/\d+$/.test(gateLink);
+   if(validRun){
+    counts[1]++;sums[1]+=(runner-head)/60000;pointer=runner;
+    if(validGate){
+     counts[2]++;counts[3]++;
+     sums[2]+=(gate-runner)/60000;sums[3]+=(me-gate)/60000;pointer=me;
+    }
+   }
+   if(pointer<me){counts[4]++;sums[4]+=(me-pointer)/60000}
+   audited.push({p,rec,head,runner:validRun?runner:null,gate:validGate?gate:null,created:cr,merged:me,total,pre:(head-cr)/60000,post:(me-head)/60000});
+  }
+  const n=a.total.n||1,means=sums.map(x=>x/n);
+  return {n:a.total.n,counts,sums,means,audited:audited.sort((x,y)=>y.total-x.total),sum:means.reduce((x,y)=>x+y,0)};
+ }
+ function auditedCompositionCard(a){
+  if(!a.total.n)return '<section class="ph-composition ph-empty"><h3>Где проходит время до merge</h3><p class="ph-note">За этот период завершённых PR нет. Выберите больший период.</p></section>';
+  const b=auditParts(a),data=[
+   ['До последнего коммита PR','Создание → дата последнего коммита; включает разработку, повторные исправления и ожидания. Не равно времени непрерывной работы.'],
+   ['После коммита → старт Runner','Изменение финального SHA → первый подтверждённый успешный job на этом SHA.'],
+   ['Финальные проверки до Merge Gate','Первый job → успешный hh-merge-check. Включает ожидания между проверками, не равно расходу runner-минут.'],
+   ['Merge Gate → Merged','Успешный защитный GitHub check → фактическое слияние.'],
+   ['После коммита: недостаточно меток CI','Остаток известного PR после последнего коммита без подтверждённого полного маршрута Runner → Gate → Merge.'],
+   ['Нет проверенной даты финального коммита','Длительность PR, для которых последняя коммитная метка отсутствует или недостоверна.']
+  ];
+  const table=data.map(([name,note],i)=>'<tr'+(i>=4?' class="ph-unallocated"':'')+'><td><strong>'+(i+1)+'. '+e(name)+'</strong>'+
+   '<small>'+e(note)+'</small><small>Проверено: '+b.counts[i]+' из '+a.total.n+' PR</small></td>'+
+   '<td class="ph-stage-value">'+moneyMin(b.means[i])+'<small>мин/PR</small></td></tr>').join('');
+  const top=b.audited.slice(0,12).map(x=>{
+   const u='https://github.com/andylitvinov-design/books/pull/'+Number(x.p.number);
+   const timeline=[
+    ['Создан',x.created,u],
+    ['Последний коммит',x.head,x.rec.commit_url],
+    ['Первый успешный job финального HEAD',x.runner,x.rec.runner_job_url],
+    ['Merge Gate зелёный',x.gate,x.rec.merge_gate_job_url],
+    ['Merged',x.merged,u]
+   ].filter(([,at])=>at!==null);
+   return '<details class="ph-timeline-pr"><summary><b>PR #'+Number(x.p.number)+'</b><span>'+fmt(x.total)+' мин всего</span><span>'+fmt(x.pre)+' до коммита</span><span>⌄</span></summary>'+
+    '<div class="ph-timeline-body">'+timeline.map(([label,at,url])=>'<div><span>'+e(label)+'</span>'+
+     '<a href="'+e(url)+'" target="_blank" rel="noopener noreferrer">'+e(human(new Date(at).toISOString()))+'</a></div>').join('')+
+    '<p>После последнего коммита до merge: <b>'+fmt(x.post)+' мин</b>. Это не обязательно время очереди CI; источники перечислены выше.</p></div></details>';
+  }).join('');
+  return '<section class="ph-composition" data-role="evidence-decomposition">'+
+   '<div class="ph-decomp-title"><h3>Где прошло время до merge</h3><span>Одна выборка: '+a.total.n+' PR</span></div>'+
+   '<p class="ph-decomp-guide">Восстановлено по проверяемым датам последнего коммита и GitHub Actions. Это <b>временные границы, а не догадки о причинах задержки</b>. Все строки используют один знаменатель — '+a.total.n+' PR.</p>'+
+   '<table class="ph-breakdown-table"><thead><tr><th>Период</th><th>Вклад</th></tr></thead>'+
+   '<tbody>'+table+'<tr class="ph-breakdown-total"><td><strong>Итого Created → Merged</strong><small>Среднее по '+a.total.n+' смерженным PR</small></td><td class="ph-stage-value">'+moneyMin(a.total.mean)+'<small>мин/PR</small></td></tr></tbody></table>'+
+   '<p class="ph-decomp-note"><b>Охват истории: '+b.audited.length+' / '+a.total.n+' PR</b>. GitHub-коммит датирован локально, но время фактического push может отличаться. Значения «нет меток» нельзя считать простоями. Время LIVE после merge здесь не участвует.</p>'+
+   '<details class="ph-proof-list"><summary>Когда именно: '+Math.min(12,b.audited.length)+' самых долгих PR с датами и ссылками <span>⌄</span></summary>'+
+   '<div class="ph-proof-rows">'+top+'</div></details>'+
+   '<p class="ph-foot-proof">Источник: GitHub PR commits + exact-HEAD Actions; аудит '+e(human(headAudit.recorded_at))+'. '+(Math.abs(b.sum-a.total.mean)>0.01?'ОШИБКА арифметики, требуется проверка.':'Сумма интервалов проверена.')+'</p>'+
+   '</section>';
+ }
  function compositionCard(a){
+  if(headAudit&&Array.isArray(headAudit.records))return auditedCompositionCard(a);
   if(!a.total.n)return '<section class="ph-composition ph-empty" data-role="decomposition"><h3>Из чего складывается среднее до merge</h3>'+
    '<p class="ph-note">За выбранный период пока нет PR, которые успели пройти Created → Merged. Выберите больший период: отсутствие завершённых PR не означает ноль минут.</p></section>';
   const groups=a.groups.filter(g=>g.end<=9),total=a.total.mean,unallocated=a.unknownAverage;
@@ -226,7 +301,7 @@
    '<p class="ph-summary"><b>Создано '+s.all.length+' PR</b> · <b>Смержено '+s.merged.length+'</b> · <b>Ещё открыто '+s.pending.length+'</b> · закрыто без merge '+s.closed.length+
    '. Среднее рассчитано по <b>'+m.n+' завершённым PR</b> из когорты созданных за '+hours+' ч.</p></section>'+
    compositionCard(a)+
-   '<div class="ph-category-head"><h3>Подробнее по пяти этапам</h3><span>Нажмите, чтобы раскрыть</span></div>'+
+   '<div class="ph-category-head"><h3>Технические этапы CI</h3><span>Отдельная статистика по PR с метками</span></div>'+
    '<div class="ph-categories">'+a.groups.map((g,i)=>phaseHTML(g,i,m.n,g.contribution)).join('')+'</div>'+
    '<section class="ph-post"><h3>Повторы CI и потери</h3>'+
    '<div class="ph-postrow"><span>PR с собранной CI-телеметрией</span><b>'+ci.length+' / '+s.merged.length+'</b></div>'+
@@ -245,10 +320,23 @@
   try{
     const results=await Promise.allSettled([
      fetch('/api/pr-created-cohort?hours=48',{headers:{Accept:'application/json'}}).then(async r=>{if(!r.ok)throw Error('cohort HTTP '+r.status);return r.json()}),
-     fetch('/api/pr-transition-clock',{headers:{Accept:'application/json'}}).then(async r=>{if(!r.ok)throw Error('ledger HTTP '+r.status);return r.json()})
+     fetch('/api/pr-transition-clock',{headers:{Accept:'application/json'}}).then(async r=>{if(!r.ok)throw Error('ledger HTTP '+r.status);return r.json()}),
+     fetch('https://api.github.com/repos/andylitvinov-design/codex-links/contents/telemetry/pr-head-lifecycle-audit.json?ref=telemetry%2Fpr-monitor',
+      {headers:{Accept:'application/vnd.github+json'}}).then(async r=>{
+       if(!r.ok)throw Error('audit HTTP '+r.status);
+       const d=await r.json();
+       if(d.encoding!=='base64'||typeof d.content!=='string')throw Error('audit encoding');
+       const binary=atob(d.content.replace(/\\s/g,'')),buf=Uint8Array.from(binary,c=>c.charCodeAt(0));
+       const audit=JSON.parse(new TextDecoder().decode(buf));
+       if(audit.schema!=='HH_PR_HEAD_LIFECYCLE_AUDIT_V1'||audit.repo!=='andylitvinov-design/books'||
+        !Array.isArray(audit.records)||audit.records.length>500)throw Error('audit schema');
+       return audit;
+      })
     ]);
     cohortData=results[0].status==='fulfilled'&&Array.isArray(results[0].value.rows)?results[0].value:null;
     ledger=results[1].status==='fulfilled'&&Array.isArray(results[1].value.prs)?results[1].value:null;
+    headAudit=results[2].status==='fulfilled'?results[2].value:null;
+    auditError=results[2].status==='rejected'?String(results[2].reason?.message||results[2].reason):null;
     if(!cohortData&&!ledger)throw Error('Недоступны GitHub cohort и журнал этапов');
     render();
   }catch(ex){error=String(ex.message||ex);render()}
