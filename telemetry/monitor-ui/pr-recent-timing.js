@@ -62,11 +62,16 @@
   // Count previous exact-SHA waves only when linked to this PR's commit history.
   // GitHub can paginate runs; counts from truncated results are NOT totals.
   const commitShas=new Set(commits.filter(x=>sha(x?.sha)).map(x=>x.sha.toLowerCase()));
-  const runInventoryComplete=Array.isArray(runsData?.workflow_runs)&&
-   Number.isSafeInteger(runsData?.total_count)&&runsData.total_count<100;
   const matchedRuns=Array.isArray(runsData?.workflow_runs)?runsData.workflow_runs
    .filter(x=>x.head_branch===pr.head_branch&&sha(x.head_sha)&&commitShas.has(x.head_sha.toLowerCase())&&
     x.event==='pull_request'&&t(x.created_at)>=a&&t(x.created_at)<=b).sort((x,y)=>t(x.created_at)-t(y.created_at)):[];
+  const runInventoryComplete=Array.isArray(runsData?.workflow_runs)&&
+   Number.isSafeInteger(runsData?.total_count)&&runsData.total_count>0&&runsData.total_count<100&&
+   matchedRuns.some(x=>x.id===run.id);
+  // Even if branch history is deleted or rate limited, the independently
+  // read exact final Core run remains one confirmed wave.
+  if(!matchedRuns.length||!Array.isArray(runsData?.workflow_runs))
+   matchedRuns.push({...run,name:'HH PR core release gate',head_sha:pr.head_sha});
   const coreWaves=matchedRuns.filter(x=>x.name==='HH PR core release gate');
   const waveStats={coverage:runInventoryComplete?'COMPLETE_BRANCH_SAMPLE':'PARTIAL_OR_UNAVAILABLE',
    observedWorkflows:matchedRuns.length,uniqueCoreHeads:new Set(coreWaves.map(x=>x.head_sha)).size,
