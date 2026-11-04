@@ -63,16 +63,16 @@ test('do not attribute time to wrong repo, PR, HEAD, event or truncated GitHub h
 test('cohort display uses one denominator and explicitly accounts for unmatched PRs',async()=>{
  const fakeWindow={};
  const meta={...pr};
- const replies=[
-  meta,
-  commits,
-  history
- ];
  let calls=0;
  new Function('window','fetch',source)(fakeWindow,async(url)=>{
   const suffix=url.split('andylitvinov-design/books')[1];
-  assert.ok(suffix.startsWith('/'));
-  const data=replies[calls++];return {ok:true,status:200,json:async()=>data};
+  assert.ok(suffix.startsWith('/'));calls++;
+  if(suffix.startsWith('/pulls/3299'))return {ok:false,status:404,json:async()=>({})};
+  const data=suffix==='/pulls/3298'?meta:
+   suffix.startsWith('/pulls/3298/commits?')?commits:
+   suffix.startsWith('/actions/runs?')?history:null;
+  assert.ok(data,'Unexpected GitHub URL '+suffix);
+  return {ok:true,status:200,json:async()=>data};
  });
  const engine=fakeWindow.HHCohortTimeline;
  const select={begin:Date.parse('2026-11-03T00:00:00Z'),asOf:Date.parse('2026-11-04T03:00:00Z'),
