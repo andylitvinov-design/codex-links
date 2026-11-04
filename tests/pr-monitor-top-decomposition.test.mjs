@@ -68,7 +68,7 @@ test('table is near the top, before expanded diagnostics; direct first-stage ave
  const html=host.innerHTML;
  assert.ok(html.indexOf('Среднее время одного PR от создания до merge')>=0);
  assert.ok(html.indexOf('Разложение среднего до merge')>html.indexOf('Среднее время одного PR от создания до merge'));
- assert.ok(html.indexOf('Подробнее по пяти этапам')>html.indexOf('Разложение среднего до merge'));
+ assert.ok(html.indexOf('Технические этапы CI')>html.indexOf('Разложение среднего до merge'));
  assert.match(html,/Не распределено — нет меток/);
  assert.match(html,/30,00/);
  assert.match(html,/45,00/);
