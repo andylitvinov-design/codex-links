@@ -46,6 +46,7 @@ function harness(){
  });
  new Function('window','document','fetch',injected)(window,document,fetch);
  window.__probe.set(ledger,24);
+ window.__probe.setHost(host);
  return {probe:window.__probe,host,header};
 }
 
