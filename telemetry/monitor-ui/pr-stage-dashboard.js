@@ -1,5 +1,5 @@
 'use strict';
-/* HH_PR_PIPELINE_FIVE_PHASES_V2
+/* HH_PR_PIPELINE_FIVE_PHASES_V3
  * Real created-cohort average, additive verified timeline contributions,
  * unknown gaps kept separate. No invented timestamps or CI runs.
  */
@@ -30,12 +30,13 @@
  const e=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>c==='&'?'&amp;':c==='<'?'&lt;':c==='>'?'&gt;':c==='"'?'&quot;':'&#39;');
  const ts=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ru-RU',{maximumFractionDigits:1}):'—';
+ const moneyMin=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
  const delta=(a,b)=>a!==null&&b!==null&&b>=a?(b-a)/60000:null;
  const human=v=>v?new Date(v).toLocaleString('ru-RU',{timeZone:'America/Toronto',year:'numeric',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
  const link=p=>'<a href="https://github.com/andylitvinov-design/books/pull/'+Number(p.number)+'" target="_blank" rel="noopener noreferrer">#'+Number(p.number)+'</a>';
  const number=v=>Number.isFinite(v)?v:0;
  const PRODUCTION='codex/public-book-library';
- let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(['pre_ci']),error=null;
+ let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(),error=null;
  function aggregate(nums){
   const v=nums.filter(x=>typeof x==='number'&&Number.isFinite(x)&&x>=0).sort((a,b)=>a-b),n=v.length;
   return {n,mean:n?v.reduce((a,b)=>a+b,0)/n:null,
@@ -142,21 +143,23 @@
  }
  function phaseHTML(g,i,denom,additive){
   const s=g.statistics,open=openGroups.has(g.id);
-  const measured=s.n?'Измерено '+s.n+' полных интервалов':'Нет полной пары начала и конца';
-  const partial=g.observedPRs>s.n?' · Отдельные отметки: '+(g.observedPRs-s.n)+' PR':'';
-  const note=i===0?
-   ' Triage, Claimed и Repair — необязательные переходы. Быстрый PR идёт прямо в CI, поэтому они не должны блокировать расчёт этого интервала.':
-   i===4?' Этот период наступает после merge и не прибавляется к Created → Merged.':'';
+  const first=i===0, last=i===4;
+  const fullName=first?'Создан → Очередь CI':g.desc;
+  const primary='<div class="ph-direct"><div><b>'+e(fullName)+'</b><small>Подтверждённый полный интервал</small></div>'+
+    '<strong>'+fmt(s.mean)+' <small>мин</small></strong><span>'+s.n+'/'+denom+' PR</span></div>';
+  const drill=first?'<details class="ph-optional"><summary>Необязательные действия: Ready / Triage / Repair <span>⌄</span></summary>'+
+    '<p class="ph-note">Это исключения и дополнительные операции. Они не нужны каждому PR и не заменяют полный замер от создания до CI.</p>'+
+    g.substeps.map(r=>substepHTML(r,denom)).join('')+'</details>':
+    (g.substeps.length?'<details class="ph-optional"><summary>Технические метки и источник <span>⌄</span></summary>'+
+     g.substeps.map(r=>substepHTML(r,denom)).join('')+'</details>':'');
   return '<details class="ph-phase" data-phase="'+e(g.id)+'"'+(open?' open':'')+'><summary>'+
-   '<span class="ph-number">'+(i+1)+'</span><span class="ph-phase-title"><strong>'+e(g.title)+'</strong><small>'+e(g.desc)+'</small></span>'+
-   '<span class="ph-phase-value"><b>'+fmt(s.mean)+'</b><small>'+(s.n?'мин · ':'нет замеров · ')+s.n+'/'+denom+' PR</small></span><span class="ph-chevron">⌄</span></summary>'+
-   '<div class="ph-body"><p class="ph-intro">'+e(measured)+e(partial)+'.'+e(note)+'</p>'+
-   '<div class="ph-subhead"><span>Подэтап (нажмите для деталей)</span><span>Среднее</span><span>PR</span></div>'+
-   g.substeps.map(r=>substepHTML(r,denom)).join('')+
-   '<p class="ph-coverage">Полный период <b>'+e(g.desc)+'</b>: среднее <b>'+fmt(s.mean)+' мин</b>, медиана <b>'+fmt(s.median)+' мин</b>, P90 <b>'+fmt(s.p90)+' мин</b> (n='+s.n+' из '+denom+').</p>'+
-   (i===4?'<p class="ph-note">LIVE входит в отдельную метрику Created → LIVE verified, только с реальной проверкой production.</p>':
-   '<p class="ph-note">Подтверждённый вклад в Created → Merged на единой выборке из '+denom+' PR: <b>'+fmt(additive)+' мин на PR</b>. Это не среднее категории: у категорий разные n.</p>')+
-   '</div></details>';
+    '<span class="ph-number">'+(i+1)+'</span><span class="ph-phase-title"><strong>'+e(g.title)+'</strong><small>'+e(g.desc)+'</small></span>'+
+    '<span class="ph-phase-value"><b>'+fmt(s.mean)+'</b><small>'+(s.n?'мин · ':'не измерено · ')+s.n+'/'+denom+' PR</small></span><span class="ph-chevron">⌄</span></summary>'+
+    '<div class="ph-body">'+primary+
+    '<p class="ph-phase-metrics">Среднее '+fmt(s.mean)+' мин · медиана '+fmt(s.median)+' мин · P90 '+fmt(s.p90)+' мин. '+
+    (s.n?'Измерено '+s.n+' из '+denom+' смерженных PR.':'Нет PR с двумя проверенными временными метками.')+'</p>'+
+    (last?'<p class="ph-note">LIVE происходит после merge и не входит в среднее Created → Merged.</p>':'')+
+    detailSamples(g.rows,5)+drill+'</div></details>';
  }
  function headingControls(){
   return '<div class="ph-filters"><div class="ph-period" role="group" aria-label="Период создания PR">'+HOUR_OPTIONS.map(h=>
@@ -166,24 +169,33 @@
    '<button type="button" data-scope="prod" class="'+(scope==='prod'?'ph-selected':'')+'">Production</button></div></div>';
  }
  function compositionCard(a){
-  if(!a.total.n)return '<p class="ph-note">В выбранном периоде пока нет смерженных PR; разложение времени недоступно.</p>';
-  const breakdown=a.groups.filter(g=>g.end<=9).map(g=>({id:g.id,name:g.title,value:g.contribution,observed:g.observedPRs}));
-  const totalAvg=a.total.mean,unknown=number(a.unknownAverage);
-  const parts=breakdown.map((p,i)=>({...p,index:i,width:totalAvg>0?Math.max(0,100*p.value/totalAvg):0}));
-  const unknownWidth=totalAvg>0?Math.max(0,100*unknown/totalAvg):0;
-  const equal=parts.reduce((sum,p)=>sum+p.value,0)+unknown;
-  return '<section class="ph-composition"><h3>Из чего складывается среднее время до merge</h3>'+
-   '<p class="ph-muted">Все слагаемые ниже рассчитаны по <b>одной и той же</b> группе из '+a.total.n+' смерженных PR, созданных в выбранный период.</p>'+
-   '<div class="ph-equation"><strong>'+fmt(totalAvg)+' мин</strong><span>=</span><b>'+fmt(a.knownAverage)+' мин</b><span>подтверждённые участки</span><b>+</b><b>'+fmt(a.unknownAverage)+' мин</b><span>время без детальных меток</span></div>'+
-   '<div class="ph-bars" aria-label="Распределение известных и неизвестных временных интервалов">'+
-   parts.map(p=>p.value>0?'<span class="ph-bar ph-bar-'+p.index+'" style="width:'+p.width.toFixed(5)+'%" title="'+e(p.name)+' — '+fmt(p.value)+' мин"></span>':'').join('')+
-   (unknownWidth>0?'<span class="ph-bar ph-bar-unknown" style="width:'+unknownWidth.toFixed(5)+'%" title="Не распределено по этапам — '+fmt(unknown)+' мин"></span>':'')+
-   '</div>'+
-   '<div class="ph-contributions">'+parts.map((p,i)=>
-   '<div><span class="ph-key ph-key-'+i+'"></span><span>'+e(p.name)+'</span><strong>'+ (p.observed?fmt(p.value)+' мин':'—')+'</strong><small>'+p.observed+' PR</small></div>').join('')+
-   '<div class="ph-contribution-unknown"><span class="ph-key ph-key-unknown"></span><span>Не распределено (нет меток)</span><strong>'+fmt(unknown)+' мин</strong><small>остаток</small></div></div>'+
-   '<p class="ph-note">Вклад этапа — только проверенные неперекрывающиеся интервалы, делённые на одно число смерженных PR. Пятый этап LIVE после merge в эту сумму не входит. Отсутствующая метка <b>не означает ноль минут</b>: её время включено в нераспределённый остаток. Средние карточек с разными выборками складывать нельзя.</p>'+
-   (Math.abs(equal-totalAvg)>0.05?'<p class="ph-warning">Проверка арифметики: есть несовпадение; часть событий требует дополнительной проверки.</p>':'')+
+  if(!a.total.n)return '<section class="ph-composition ph-empty" data-role="decomposition"><h3>Из чего складывается среднее до merge</h3>'+
+   '<p class="ph-note">За выбранный период пока нет PR, которые успели пройти Created → Merged. Выберите больший период: отсутствие завершённых PR не означает ноль минут.</p></section>';
+  const groups=a.groups.filter(g=>g.end<=9),total=a.total.mean,unallocated=a.unknownAverage;
+  const observedSum=groups.reduce((acc,g)=>acc+(g.contribution||0),0);
+  const residualCheck=Math.abs(observedSum+unallocated-total);
+  const counts=groups.map(g=>g.statistics.n);
+  const bar=groups.map((g,i)=>g.contribution>0?
+    '<span class="ph-bar ph-bar-'+i+'" style="width:'+Math.max(0,100*g.contribution/total).toFixed(5)+'%" title="'+e(g.title)+': '+moneyMin(g.contribution)+' мин/PR"></span>':'').join('')+
+    (unallocated>0?'<span class="ph-bar ph-bar-unknown" style="width:'+Math.max(0,100*unallocated/total).toFixed(5)+'%" title="Без подтверждённых переходов: '+moneyMin(unallocated)+' мин/PR"></span>':'');
+  const rows=groups.map((g,i)=>
+   '<tr><td><div class="ph-stage-label"><span class="ph-key ph-key-'+i+'"></span><strong>'+(i+1)+'. '+e(g.title)+'</strong></div>'+
+   '<small>'+(g.statistics.n?'Замер этапа: '+fmt(g.statistics.mean)+' мин · '+g.statistics.n+'/'+a.total.n+' PR':'Пока нет пар временных меток')+'</small></td>'+
+   '<td class="ph-stage-value">'+(g.statistics.n?'+'+moneyMin(g.contribution):'—')+'<small>мин/PR</small></td></tr>').join('');
+  return '<section class="ph-composition" data-role="decomposition">'+
+   '<div class="ph-decomp-title"><h3>Разложение среднего до merge</h3><span>Одна выборка: '+a.total.n+' PR</span></div>'+
+   '<p class="ph-decomp-guide">Правая колонка — <b>вклад в среднее время одного PR</b>, а не среднее выбранных PR с метками. По этим строкам можно проверить итог.</p>'+
+   '<div class="ph-bars" role="img" aria-label="Подтверждённые участки и нераспределённое время">'+bar+'</div>'+
+   '<table class="ph-breakdown-table"><thead><tr><th scope="col">Составляющая</th><th scope="col">Вклад</th></tr></thead>'+
+   '<tbody>'+rows+
+   '<tr class="ph-unallocated"><td><div class="ph-stage-label"><span class="ph-key ph-key-unknown"></span><strong>Не распределено — нет меток</strong></div>'+
+   '<small>Реальное время внутри Created → Merged, для которого пока нет достоверных границ этапов</small></td>'+
+   '<td class="ph-stage-value">'+moneyMin(unallocated)+'<small>мин/PR</small></td></tr>'+
+   '<tr class="ph-breakdown-total"><td><strong>Итого Created → Merged</strong><small>Среднее по '+a.total.n+' завершённым PR</small></td>'+
+   '<td class="ph-stage-value"><b>'+moneyMin(total)+'</b><small>мин/PR</small></td></tr>'+
+   '</tbody></table>'+
+   '<p class="ph-decomp-note">Вклад = сумма подтверждённых минут этапа / '+a.total.n+' PR. Остальное входит в «Не распределено», а не подменяется нулём. Публикация LIVE измеряется после merge отдельно. Возможна разница 0,01 мин из-за округления.</p>'+
+   (residualCheck>0.01?'<p class="ph-warning">Внутренняя проверка разбивки не сошлась. Не используйте сумму строк до проверки.</p>':'')+
    '</section>';
  }
  function holdersCard(a){
@@ -208,13 +220,13 @@
   const m=a.total;
   host.innerHTML='<div class="ph-header"><div><small>PR MONITOR · ПО ЭТАПАМ</small><h2>Этапы PR до LIVE</h2><p>Среднее время <b>от создания до merge</b> и подробная хронология под ним. Нажмите на категорию, затем на подэтап.</p></div>'+
    headingControls()+'</div>'+
-   '<section class="ph-hero"><div class="ph-window"><strong>Период измерения: '+hours+' ч</strong><span>'+human(new Date(s.begin).toISOString())+' — '+human(new Date(s.asOf).toISOString())+' · Торонто</span><small>Выборка по дате создания PR; расчёт среднего только по успевшим смержиться в этом окне.</small></div><div class="ph-herotitle">Средняя длительность нового PR</div>'+
-   '<div class="ph-headstats"><div><small>Created → Merged</small><strong>'+fmt(m.mean)+' <em>мин</em></strong><span>Медиана '+fmt(m.median)+' мин · P90 '+fmt(m.p90)+' мин</span></div>'+
-   '<div><small>Created → LIVE verified</small><strong>'+fmt(a.live.mean)+' <em>мин</em></strong><span>'+a.live.n+' PR с проверенной LIVE-версией</span></div></div>'+
+   '<section class="ph-hero"><div class="ph-window"><strong>Период создания PR: '+hours+' ч</strong><span>'+human(new Date(s.begin).toISOString())+' — '+human(new Date(s.asOf).toISOString())+' · Торонто</span><small>Среднее только по PR, созданным за этот период и успевшим смержиться к концу периода.</small></div><div class="ph-herotitle">Среднее время одного PR от создания до merge</div>'+
+   '<div class="ph-headstats"><div class="ph-total-primary"><small>Created → Merged · среднее на 1 PR</small><strong>'+fmt(m.mean)+' <em>мин</em></strong><span><b>'+m.n+' PR</b> с подтверждёнными created_at и merged_at · медиана '+fmt(m.median)+' мин · P90 '+fmt(m.p90)+' мин</span></div>'+
+   '<div class="ph-total-live"><small>От создания до LIVE (отдельно)</small><strong>'+fmt(a.live.mean)+' <em>мин</em></strong><span>'+a.live.n+' PR с проверенным LIVE</span></div></div>'+
    '<p class="ph-summary"><b>Создано '+s.all.length+' PR</b> · <b>Смержено '+s.merged.length+'</b> · <b>Ещё открыто '+s.pending.length+'</b> · закрыто без merge '+s.closed.length+
    '. Среднее рассчитано по <b>'+m.n+' завершённым PR</b> из когорты созданных за '+hours+' ч.</p></section>'+
    compositionCard(a)+
-   '<div class="ph-category-head"><h3>5 измеримых этапов</h3><span>Среднее только по PR с обеими метками</span></div>'+
+   '<div class="ph-category-head"><h3>Подробнее по пяти этапам</h3><span>Нажмите, чтобы раскрыть</span></div>'+
    '<div class="ph-categories">'+a.groups.map((g,i)=>phaseHTML(g,i,m.n,g.contribution)).join('')+'</div>'+
    '<section class="ph-post"><h3>Повторы CI и потери</h3>'+
    '<div class="ph-postrow"><span>PR с собранной CI-телеметрией</span><b>'+ci.length+' / '+s.merged.length+'</b></div>'+
@@ -245,6 +257,12 @@
   host=document.getElementById('pr-stage-dashboard')||document.getElementById('pr-transition-clock')||document.querySelector('.pr-stage-dashboard');
   if(!host){host=document.createElement('section');(document.querySelector('main')||document.body).appendChild(host)}
   host.id='pr-transition-clock';host.classList.add('pr5-v2');
+  // Put the main Created→Merged KPI and its additive breakdown near the top
+  // of the page; preserve the existing monitor's other sections and controls.
+  const main=host.closest('main')||document.querySelector('main');
+  const header=main&&main.querySelector('header.header');
+  if(header&&main.contains(host)&&!header.contains(host)&&header.nextElementSibling!==host)
+   header.insertAdjacentElement('afterend',host);
   host.addEventListener('click',ev=>{
    const t=ev.target&&ev.target.closest;
    if(!t)return;
