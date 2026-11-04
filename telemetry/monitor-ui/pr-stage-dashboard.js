@@ -17,23 +17,25 @@
   ['CI_green','merged','CI зелёный → Merged','От успешного CI до фактического GitHub merge.','Merge Gate / auto-merge','GitHub pull_request.merged_at'],
   ['merged','LIVE_verified','Merged → LIVE','От merge до подтверждённой production-версии.','Deployment verifier','Vercel READY + проверка production SHA']
  ];
+ // Triage and Repair are optional exceptions, not required for every PR.
+ // These five non-overlapping boundaries are measurable on the fast path.
  const GROUPS=[
-  {id:'ready',title:'Создание и готовность',desc:'Created → Ready',start:0,end:1,steps:[0]},
-  {id:'triage',title:'Триаж и назначение',desc:'Ready → Triage → Claimed',start:1,end:3,steps:[1,2]},
-  {id:'repair',title:'Исправление и публикация',desc:'Claimed → Repair started → Source published',start:3,end:5,steps:[3,4]},
-  {id:'ci',title:'Очередь и проверки CI',desc:'Source published → CI queued → Runner started → CI green',start:5,end:8,steps:[5,6,7]},
-  {id:'merge',title:'Слияние и LIVE',desc:'CI green → Merged → LIVE verified',start:8,end:9,steps:[8,9]}
+  {id:'pre_ci',title:'Подготовка и запуск CI',desc:'Created → CI queued',start:0,end:6,steps:[0,1,2,3,4,5]},
+  {id:'ci_queue',title:'Очередь CI',desc:'CI queued → Runner started',start:6,end:7,steps:[6]},
+  {id:'ci_checks',title:'Проверки CI',desc:'Runner started → CI green',start:7,end:8,steps:[7]},
+  {id:'merge',title:'Слияние PR',desc:'CI green → Merged',start:8,end:9,steps:[8]},
+  {id:'live',title:'Публикация LIVE',desc:'Merged → LIVE verified',start:9,end:10,steps:[9]}
  ];
  const IDS=['created','ready','triage','claimed','repair_started','source_published','CI_queued','runner_started','CI_green','merged','LIVE_verified'];
  const e=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>c==='&'?'&amp;':c==='<'?'&lt;':c==='>'?'&gt;':c==='"'?'&quot;':'&#39;');
  const ts=v=>{const n=Date.parse(v||'');return Number.isFinite(n)?n:null};
  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ru-RU',{maximumFractionDigits:1}):'—';
  const delta=(a,b)=>a!==null&&b!==null&&b>=a?(b-a)/60000:null;
- const human=v=>v?new Date(v).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+ const human=v=>v?new Date(v).toLocaleString('ru-RU',{timeZone:'America/Toronto',year:'numeric',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
  const link=p=>'<a href="https://github.com/andylitvinov-design/books/pull/'+Number(p.number)+'" target="_blank" rel="noopener noreferrer">#'+Number(p.number)+'</a>';
  const number=v=>Number.isFinite(v)?v:0;
  const PRODUCTION='codex/public-book-library';
- let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(['ready']),error=null;
+ let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(['pre_ci']),error=null;
  function aggregate(nums){
   const v=nums.filter(x=>typeof x==='number'&&Number.isFinite(x)&&x>=0).sort((a,b)=>a-b),n=v.length;
   return {n,mean:n?v.reduce((a,b)=>a+b,0)/n:null,
@@ -76,31 +78,27 @@
    durations.push(total);
    const times=IDS.map(k=>eventAt(p,k,rec));
    const live=delta(times[0],times[10]);if(live!==null)liveValues.push(live);
-   const segments=[];
+   // Child receipts are shown for diagnosis; never sum them with their parent.
    const attribution=GROUPS.map(()=>0);
-   for(let i=0;i<9;i++){
+   for(let i=0;i<STEPS.length;i++){
     const duration=delta(times[i],times[i+1]);
     if(duration===null)continue;
-    segments.push({i,a:times[i],b:times[i+1],minutes:duration});
-   }
-   segments.sort((a,b)=>a.i-b.i);
-   let previousEnd=-Infinity,known=0;
-   for(const s of segments){
-    if(s.a<previousEnd){invalidSpans++;continue}
-    previousEnd=s.b;
-    const groupIndex=GROUPS.findIndex(g=>g.steps.includes(s.i));
-    known+=s.minutes;
-    attribution[groupIndex]+=s.minutes;
-    verifiedSteps[s.i].push({p,minutes:s.minutes,stamp:rec&&rec.stamps&&rec.stamps[STEPS[s.i][1]]});
+    verifiedSteps[i].push({p,minutes:duration,stamp:rec&&rec.stamps&&rec.stamps[STEPS[i][1]]});
     touched.add(p.number);
    }
-   const livePart=delta(times[9],times[10]);
-   if(livePart!==null)verifiedSteps[9].push({p,minutes:livePart,stamp:rec&&rec.stamps&&rec.stamps.LIVE_verified});
+   let known=0;
    GROUPS.forEach((g,i)=>{
-    const a=times[g.start],b=times[g.end],duration=delta(a,b);
-    if(duration!==null)groupValues[i].push({p,minutes:duration,partial:g.steps.some(k=>k<9&&!verifiedSteps[k].some(x=>x.p.number===p.number))});
-    contrib[i]+=attribution[i];
+    const duration=delta(times[g.start],times[g.end]);
+    if(duration===null)return;
+    groupValues[i].push({p,minutes:duration});
+    // Delivery occurs after merge, not in Created → Merged accounting.
+    if(g.end<=9){
+     attribution[i]=duration;
+     contrib[i]+=duration;
+     known+=duration;
+    }
    });
+   if(known>total+0.05)invalidSpans++;
    known=Math.min(total,known);
    verifiedSum+=known;
    unknownSum+=Math.max(0,total-known);
@@ -115,7 +113,8 @@
    const rows=groupValues[i].slice().sort((a,b)=>b.minutes-a.minutes);
    return {...group,index:i,rows,statistics:aggregate(rows.map(x=>x.minutes)),substeps:group.steps.map(k=>substeps[k]),
      contribution:allMerged?contrib[i]/allMerged:null,
-     observedPRs:ended.filter(p=>group.steps.some(k=>verifiedSteps[k].some(r=>r.p.number===p.number))).length};
+     observedPRs:new Set([...rows.map(r=>r.p.number),
+      ...group.steps.flatMap(k=>verifiedSteps[k].map(r=>r.p.number))]).size};
   });
   const knownAverage=allMerged?verifiedSum/allMerged:null,unknownAverage=allMerged?unknownSum/allMerged:null;
   return {select,total,live,groups,substeps,details,knownAverage,unknownAverage,invalidSpans,seen:touched.size};
@@ -133,25 +132,30 @@
   const s=row.statistics,step=row.step,source=step[5];
   return '<details class="ph-substep"><summary>'+
    '<span class="ph-subheading">'+e(step[2])+'</span>'+
-   '<span class="ph-time">'+(s.n?statTitle(s):'—')+'</span>'+
+   '<span class="ph-time">'+(s.n?statTitle(s):'нет замера')+'</span>'+
    '<span class="ph-count">'+s.n+' PR</span><span class="ph-chevron">⌄</span></summary>'+
    '<div class="ph-subdetail"><p>'+e(step[3])+'</p>'+
    '<div class="ph-substats"><span>Среднее: <b>'+fmt(s.mean)+' мин</b></span><span>Медиана: <b>'+fmt(s.median)+' мин</b></span><span>P90: <b>'+fmt(s.p90)+' мин</b></span></div>'+
-   '<p>Измерено: <b>'+s.n+' / '+denom+' смерженных PR</b>. Ответственный процесс: '+e(step[4])+'. Источник: '+e(source)+'.</p>'+
+   '<p>Измерено: <b>'+s.n+' из '+denom+' смерженных PR</b> в выбранном окне создания. Нужны две подтверждённые последовательные отметки. Источник: '+e(source)+'.</p>'+
+   '<p>Ответственный процесс: '+e(step[4])+'.'+(!s.n?' Для этого перехода подтверждённых пар нет; нулевая длительность не предполагается.':'')+'</p>'+
    '<div class="ph-sample-title">Самые долгие измеренные PR</div>'+detailSamples(row.rows,6)+'</div></details>';
  }
  function phaseHTML(g,i,denom,additive){
   const s=g.statistics,open=openGroups.has(g.id);
-  const measured=s.n?'Среднее по '+s.n+' PR':'Нет полного измерения';
-  const partial=g.observedPRs>0?('Подтверждены части: '+g.observedPRs+' PR'):'Нет подтверждённых подэтапов';
+  const measured=s.n?'Измерено '+s.n+' полных интервалов':'Нет полной пары начала и конца';
+  const partial=g.observedPRs>s.n?' · Отдельные отметки: '+(g.observedPRs-s.n)+' PR':'';
+  const note=i===0?
+   ' Triage, Claimed и Repair — необязательные переходы. Быстрый PR идёт прямо в CI, поэтому они не должны блокировать расчёт этого интервала.':
+   i===4?' Этот период наступает после merge и не прибавляется к Created → Merged.':'';
   return '<details class="ph-phase" data-phase="'+e(g.id)+'"'+(open?' open':'')+'><summary>'+
    '<span class="ph-number">'+(i+1)+'</span><span class="ph-phase-title"><strong>'+e(g.title)+'</strong><small>'+e(g.desc)+'</small></span>'+
-   '<span class="ph-phase-value"><b>'+fmt(s.mean)+'</b><small>мин · '+s.n+' PR</small></span><span class="ph-chevron">⌄</span></summary>'+
-   '<div class="ph-body"><p class="ph-intro">'+e(measured)+' · '+e(partial)+'.'+(i===4?' Среднее группы относится только к CI green → Merged; публикация LIVE указана отдельно.':'')+'</p>'+
+   '<span class="ph-phase-value"><b>'+fmt(s.mean)+'</b><small>'+(s.n?'мин · ':'нет замеров · ')+s.n+'/'+denom+' PR</small></span><span class="ph-chevron">⌄</span></summary>'+
+   '<div class="ph-body"><p class="ph-intro">'+e(measured)+e(partial)+'.'+e(note)+'</p>'+
    '<div class="ph-subhead"><span>Подэтап (нажмите для деталей)</span><span>Среднее</span><span>PR</span></div>'+
    g.substeps.map(r=>substepHTML(r,denom)).join('')+
-   '<p class="ph-coverage">Среднее для полностью измеренной категории: <b>'+fmt(s.mean)+' мин</b>, медиана <b>'+fmt(s.median)+' мин</b> (n='+s.n+'). '+
-   'Подтверждённый вклад в общую среднюю Created → Merged: <b>'+fmt(additive)+' мин</b> на PR при единой выборке n='+denom+'. Эти две величины нельзя смешивать.</p>'+
+   '<p class="ph-coverage">Полный период <b>'+e(g.desc)+'</b>: среднее <b>'+fmt(s.mean)+' мин</b>, медиана <b>'+fmt(s.median)+' мин</b>, P90 <b>'+fmt(s.p90)+' мин</b> (n='+s.n+' из '+denom+').</p>'+
+   (i===4?'<p class="ph-note">LIVE входит в отдельную метрику Created → LIVE verified, только с реальной проверкой production.</p>':
+   '<p class="ph-note">Подтверждённый вклад в Created → Merged на единой выборке из '+denom+' PR: <b>'+fmt(additive)+' мин на PR</b>. Это не среднее категории: у категорий разные n.</p>')+
    '</div></details>';
  }
  function headingControls(){
@@ -163,7 +167,7 @@
  }
  function compositionCard(a){
   if(!a.total.n)return '<p class="ph-note">В выбранном периоде пока нет смерженных PR; разложение времени недоступно.</p>';
-  const breakdown=a.groups.map(g=>({id:g.id,name:g.title,value:g.contribution,observed:g.observedPRs}));
+  const breakdown=a.groups.filter(g=>g.end<=9).map(g=>({id:g.id,name:g.title,value:g.contribution,observed:g.observedPRs}));
   const totalAvg=a.total.mean,unknown=number(a.unknownAverage);
   const parts=breakdown.map((p,i)=>({...p,index:i,width:totalAvg>0?Math.max(0,100*p.value/totalAvg):0}));
   const unknownWidth=totalAvg>0?Math.max(0,100*unknown/totalAvg):0;
@@ -178,7 +182,7 @@
    '<div class="ph-contributions">'+parts.map((p,i)=>
    '<div><span class="ph-key ph-key-'+i+'"></span><span>'+e(p.name)+'</span><strong>'+ (p.observed?fmt(p.value)+' мин':'—')+'</strong><small>'+p.observed+' PR</small></div>').join('')+
    '<div class="ph-contribution-unknown"><span class="ph-key ph-key-unknown"></span><span>Не распределено (нет меток)</span><strong>'+fmt(unknown)+' мин</strong><small>остаток</small></div></div>'+
-   '<p class="ph-note">Вклад этапа — только подтверждённые последовательные интервалы, делённые на общее количество смерженных PR. Отсутствующая метка <b>не означает ноль минут</b>: её время включено в нераспределённый остаток. Разные выборки из раскрытых карточек складывать нельзя.</p>'+
+   '<p class="ph-note">Вклад этапа — только проверенные неперекрывающиеся интервалы, делённые на одно число смерженных PR. Пятый этап LIVE после merge в эту сумму не входит. Отсутствующая метка <b>не означает ноль минут</b>: её время включено в нераспределённый остаток. Средние карточек с разными выборками складывать нельзя.</p>'+
    (Math.abs(equal-totalAvg)>0.05?'<p class="ph-warning">Проверка арифметики: есть несовпадение; часть событий требует дополнительной проверки.</p>':'')+
    '</section>';
  }
@@ -204,25 +208,25 @@
   const m=a.total;
   host.innerHTML='<div class="ph-header"><div><small>PR MONITOR · ПО ЭТАПАМ</small><h2>Этапы PR до LIVE</h2><p>Среднее время <b>от создания до merge</b> и подробная хронология под ним. Нажмите на категорию, затем на подэтап.</p></div>'+
    headingControls()+'</div>'+
-   '<section class="ph-hero"><div class="ph-herotitle">Средняя длительность нового PR</div>'+
+   '<section class="ph-hero"><div class="ph-window"><strong>Период измерения: '+hours+' ч</strong><span>'+human(new Date(s.begin).toISOString())+' — '+human(new Date(s.asOf).toISOString())+' · Торонто</span><small>Выборка по дате создания PR; расчёт среднего только по успевшим смержиться в этом окне.</small></div><div class="ph-herotitle">Средняя длительность нового PR</div>'+
    '<div class="ph-headstats"><div><small>Created → Merged</small><strong>'+fmt(m.mean)+' <em>мин</em></strong><span>Медиана '+fmt(m.median)+' мин · P90 '+fmt(m.p90)+' мин</span></div>'+
    '<div><small>Created → LIVE verified</small><strong>'+fmt(a.live.mean)+' <em>мин</em></strong><span>'+a.live.n+' PR с проверенной LIVE-версией</span></div></div>'+
    '<p class="ph-summary"><b>Создано '+s.all.length+' PR</b> · <b>Смержено '+s.merged.length+'</b> · <b>Ещё открыто '+s.pending.length+'</b> · закрыто без merge '+s.closed.length+
    '. Среднее рассчитано по <b>'+m.n+' завершённым PR</b> из когорты созданных за '+hours+' ч.</p></section>'+
    compositionCard(a)+
-   '<div class="ph-category-head"><h3>5 основных этапов</h3><span>Средняя длительность · число измеренных PR</span></div>'+
+   '<div class="ph-category-head"><h3>5 измеримых этапов</h3><span>Среднее только по PR с обеими метками</span></div>'+
    '<div class="ph-categories">'+a.groups.map((g,i)=>phaseHTML(g,i,m.n,g.contribution)).join('')+'</div>'+
    '<section class="ph-post"><h3>Повторы CI и потери</h3>'+
    '<div class="ph-postrow"><span>PR с собранной CI-телеметрией</span><b>'+ci.length+' / '+s.merged.length+'</b></div>'+
    '<div class="ph-postrow"><span>Повторы запусков (из наблюдаемых)</span><b>'+ (ci.length?repeats:'—')+'</b></div>'+
    '<div class="ph-postrow"><span>Дублирующиеся checks (из наблюдаемых)</span><b>'+ (ci.length?dup:'—')+'</b></div>'+
-   '<p class="ph-note">Недостающие HEAD и неохваченные PR не считаются нулевыми повторами. Этапы Triage/Repair могут отсутствовать, если их события не были инструментированы.</p></section>'+
+   '<p class="ph-note">Недостающие HEAD и неохваченные PR не считаются нулевыми повторами. Triage и Repair — условные маршруты. Отсутствие их меток не означает задержку или ноль минут.</p></section>'+
    holdersCard(a)+
    '<div class="ph-foot"><p>Период по <b>created_at</b>: '+human(new Date(s.begin).toISOString())+' — '+human(new Date(s.asOf).toISOString())+'. Ветка: '+(scope==='all'?'все':'только '+PRODUCTION)+'.</p>'+
    '<p>Источник среднего: '+e(s.source)+'. Журнал подэтапов: '+human(ledger&&ledger.generated_at)+
    ' · timeline '+(ledger&&ledger.coverage&&ledger.coverage.timeline_checked||0)+'/'+(ledger&&ledger.prs&&ledger.prs.length||0)+
    ' · CI '+(ledger&&ledger.coverage&&ledger.coverage.ci_checked||0)+'/'+(ledger&&ledger.prs&&ledger.prs.length||0)+'.</p>'+
-   '<p>Пустые значения — недостаточно подтверждённых временных отметок, не 0 минут. <button type="button" data-reload="1">Обновить данные</button></p></div>';
+   '<p>Детализация неполная: подтверждено чтение timeline '+(ledger&&ledger.coverage&&ledger.coverage.timeline_checked||0)+' PR за последнее обновление, но полный охват не доказан. Незаписанный интервал никогда не считается нулём. <button type="button" data-reload="1">Обновить данные</button></p></div>';
  }
  async function load(){
   error=null;render();
