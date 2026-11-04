@@ -47,3 +47,9 @@
 .phr-steps>div span{font-size:11px;color:#d5e4ef;text-align:left}
 .phr-steps>div b{color:#ffd99e;font-size:11px}
 .phr-steps>div small{grid-column:1/-1;font-size:10px;color:#aac6d8}
+
+.phr-wave{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;border-top:1px solid #365873;padding:6px 2px;font-size:11px;align-items:center}
+.phr-wave a{color:#9ed9ff;text-decoration:underline;font-weight:750}
+.phr-wave span{color:#c6dbea;text-align:right;font-variant-numeric:tabular-nums}
+.phr-wave small{color:#e6c99a;text-align:right;font-size:10px}
+@media(max-width:750px){.phr-wave{gap:4px;font-size:10px}.phr-wave small{font-size:9px}}
