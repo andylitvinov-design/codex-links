@@ -54,7 +54,8 @@
   const commitShas=new Set(commits.map(c=>c.sha).filter(okSha).map(x=>x.toLowerCase()));
   const runs=history.workflow_runs.filter(x=>x.name==='HH PR core release gate'&&
    x.event==='pull_request'&&x.head_branch===pr.head.ref&&okSha(x.head_sha)&&
-   commitShas.has(x.head_sha.toLowerCase())&&ms(x.created_at)!==null&&ms(x.updated_at)!==null&&
+   (commitShas.has(x.head_sha.toLowerCase())||x.head_repository?.full_name==='andylitvinov-design/books')&&
+   ms(x.created_at)!==null&&ms(x.updated_at)!==null&&
    x.status==='completed'&&ms(x.created_at)>=start&&ms(x.created_at)<end&&
    ms(x.updated_at)>=ms(x.created_at)&&
    ['success','failure','cancelled','timed_out','action_required','skipped'].includes(x.conclusion)
@@ -96,11 +97,12 @@
   }
   const sum=Object.values(sums).reduce((a,b)=>a+b,0);
   if(Math.abs(sum-(end-start)/60000)>.0001)throw Error('Несовпадение сумм временных интервалов');
+  const historicalHeads=runs.filter(x=>!commitShas.has(x.head_sha.toLowerCase())).length;
   const byStatus={green:runs.filter(x=>x.conclusion==='success').length,
    failed:runs.filter(x=>x.conclusion==='failure'||x.conclusion==='timed_out').length,
    cancelled:runs.filter(x=>x.conclusion==='cancelled').length};
   const longest=intervals.filter(x=>x.kind==='after_red').sort((a,b)=>b.min-a.min)[0]||null;
-  return {pr:row.number,start,end,head:pr.head.sha,waves:runs.length,byStatus,sums,intervals,
+  return {pr:row.number,start,end,head:pr.head.sha,waves:runs.length,historicalHeads,byStatus,sums,intervals,
    longestGap:longest,commits:commits.length,source:'GitHub PR commits + exact branch Core workflow runs',
    checked_at:new Date().toISOString()};
  }
@@ -190,7 +192,7 @@
     '" target="_blank" rel="noopener noreferrer">#'+p.pr+'</a><strong>'+fmt((p.end-p.start)/60000)+'</strong>'+
     '<small>'+(gap?'После красной CI: '+fmt(gap.min):'Core CI-волн: '+p.waves)+'</small></summary>'+
     '<div><p>Core CI: '+p.waves+' волн · ошибок '+p.byStatus.failed+
-    ' · отмен '+p.byStatus.cancelled+' · успешных '+p.byStatus.green+'. Даты по Торонто.</p>'+parts+
+    ' · отмен '+p.byStatus.cancelled+' · успешных '+p.byStatus.green+(' · прежних SHA после rebase '+p.historicalHeads)+'. Даты по Торонто.</p>'+parts+
     '<p>Между попытками могли быть изменения кода и ожидания; отсутствие Core CI не доказывает простой.</p></div></details>';
   }).join('');
   return '<section class="ph-composition" data-role="cohort-core-latency">'+
