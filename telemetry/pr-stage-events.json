@@ -1,7 +1,7 @@
 {
   "schema": "HH_PR_TRANSITION_LEDGER_V1",
   "repo": "andylitvinov-design/books",
-  "generated_at": "2026-11-04T04:13:51.633Z",
+  "generated_at": "2026-11-04T05:17:28.125Z",
   "source": "GitHub PR-created cohort via existing HH PR Monitor; exact stage events from GitHub API",
   "window": {
     "hours": 48,
@@ -19,54 +19,48 @@
     "cohort": {
       "schema": "HH_PR_CREATED_COHORT_V1",
       "pages_read": 1,
-      "method": "Incremental GitHub created_at search: 7 new numbered PRs after 03:15Z; preserved all previous historic entries and closed PRs. Complete 48-hour timeline still unverified.",
+      "method": "Incremental latest created PR page 30 + previously preserved historical/closed entries; exact check-runs inspected for 3368/3323 only; full 48h completeness unverified.",
       "stage_events_complete": false
     },
     "recent_head_readback": {
-      "at": "2026-11-04T04:13:51.633Z",
+      "at": "2026-11-04T05:17:28.125Z",
       "prs": [
-        3288,
-        3303,
-        3323,
-        3366,
-        3367,
         3368,
-        3369,
+        3323,
         3371,
         3372,
-        3373
+        3373,
+        3374,
+        3375,
+        3376
       ],
-      "read_success": 10
+      "read_success": 8
     },
     "legacy_unverified_ready_removed": 5,
     "incremental": {
-      "at": "2026-11-04T04:13:51.633Z",
-      "previous_generated_at": "2026-11-04T03:18:05.346Z",
+      "at": "2026-11-04T05:17:28.125Z",
+      "previous_generated_at": "2026-11-04T04:13:51.633Z",
       "new_prs_added": [
-        3366,
-        3367,
-        3368,
-        3369,
-        3371,
-        3372,
-        3373
+        3376,
+        3375,
+        3374
       ],
       "updated_prs": [
-        3288,
-        3303,
-        3323
+        3323,
+        3368,
+        3371,
+        3373
       ],
       "verified_native_merges_production": [
-        3366,
-        3367
+        3371,
+        3373
       ],
       "verified_instrumented_live_events": [],
       "verified_exact_head_success_runs": [],
-      "old_routes_closed_unmerged": [
-        3288,
-        3303
+      "source_red": [
+        3323
       ],
-      "successor_wait_ci": [
+      "base_advanced_red": [
         3368
       ],
       "stage_events_complete": false,
@@ -94,15 +88,21 @@
       "number": 3373,
       "url": "https://github.com/andylitvinov-design/books/pull/3373",
       "title": "feat(mytube): original Creative Timeline — transitions, shot looks, zoom and caption editing",
-      "state": "open",
+      "state": "closed",
       "created_at": "2026-11-04T04:08:38Z",
-      "merged_at": null,
-      "head_sha": "75ba3e58f8588b4c009db06499b5504e5aa59a4e",
+      "merged_at": "2026-11-04T04:22:37Z",
+      "head_sha": "c09665a1e77e9982f109dae03a969f6a05ea19ef",
       "stamps": {
         "created": {
           "at": "2026-11-04T04:08:38Z",
           "source": "github:pulls/3373/created_at",
           "actor": "GitHub (actor not independently established)",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-04T04:22:37Z",
+          "source": "github:pulls/3373/merged_at",
+          "actor": "GitHub merge (actor not independently established)",
           "verified": true
         }
       },
@@ -116,12 +116,13 @@
         "cycles": []
       },
       "base": "codex/public-book-library",
-      "closed_at": null,
-      "updated_at": "2026-11-04T04:10:12Z",
+      "closed_at": "2026-11-04T04:22:37Z",
+      "updated_at": "2026-11-04T04:29:06Z",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T04:13:51.633Z",
-      "mergeable_state": "clean"
+      "observed_at_utc": "2026-11-04T05:17:28.125Z",
+      "mergeable_state": "clean",
+      "merge_commit_sha": "b1b3b9f51c293e7119585197358d40ed600f254d"
     },
     {
       "number": 3372,
@@ -159,7 +160,7 @@
       "updated_at": "2026-11-04T04:10:21Z",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T04:13:51.633Z",
+      "observed_at_utc": "2026-11-04T05:17:28.125Z",
       "mergeable_state": "closed",
       "merge_commit_sha": "4fd3d9267f041bea9770b3209d84e36249b50138"
     },
@@ -167,15 +168,21 @@
       "number": 3371,
       "url": "https://github.com/andylitvinov-design/books/pull/3371",
       "title": "feat(dot): make LIVE Telegram plot picker produce real audio-synced licensed MP4",
-      "state": "open",
+      "state": "closed",
       "created_at": "2026-11-04T04:04:14Z",
-      "merged_at": null,
-      "head_sha": "90defc8a9545dc5cb95baaeaa8f10722f757f7ca",
+      "merged_at": "2026-11-04T05:05:01Z",
+      "head_sha": "80cc8e77439226d97eddbc20a79fafce3440ac59",
       "stamps": {
         "created": {
           "at": "2026-11-04T04:04:14Z",
           "source": "github:pulls/3371/created_at",
           "actor": "GitHub (actor not independently established)",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-04T05:05:01Z",
+          "source": "github:pulls/3371/merged_at",
+          "actor": "GitHub merge (actor not independently established)",
           "verified": true
         }
       },
@@ -189,12 +196,13 @@
         "cycles": []
       },
       "base": "codex/public-book-library",
-      "closed_at": null,
-      "updated_at": "2026-11-04T04:07:47Z",
+      "closed_at": "2026-11-04T05:05:01Z",
+      "updated_at": "2026-11-04T05:14:09Z",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T04:13:51.633Z",
-      "mergeable_state": "clean"
+      "observed_at_utc": "2026-11-04T05:17:28.125Z",
+      "mergeable_state": "clean",
+      "merge_commit_sha": "92ac293ec3d3b4ecee9fbc7f28440e5285b8e7f5"
     },
     {
       "number": 3369,
@@ -256,14 +264,14 @@
           {
             "head_sha": "ebbb5e86c87988aea4c904f6fa495d60dc324d36",
             "workflow_run_id": 41770506624,
-            "run_attempt": null,
-            "queued_at": null,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T04:00:14Z",
             "started_at": null,
             "completed_at": null,
-            "conclusion": null,
-            "status": "in_progress (observed GitHub run; no verified runner timestamp)",
-            "actor": "GitHub Actions (owner not established)",
-            "source": "github:actions/runs/41770506624"
+            "conclusion": "failure",
+            "status": "completed",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41770506624;job/126378854358"
           }
         ]
       },
@@ -272,9 +280,9 @@
       "updated_at": "2026-11-04T04:00:09Z",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T04:13:51.633Z",
+      "observed_at_utc": "2026-11-04T05:17:28.125Z",
       "mergeable_state": "clean",
-      "observation_note": "OPEN clean replacement for closed unmerged #3288; exact-head Core run 41770506624 IN_PROGRESS at observed slice; no current-HEAD green/merged/LIVE claim."
+      "observation_note": "OPEN clean CI-only successor #3368; current exact-HEAD Core 41770506624 terminal FAILURE step7 job 126378854358 first causal BASE_ADVANCED:PRODUCTION_BASE_CHANGED after protected production advanced to 92ac293e. Lint/types SUCCESS; hh-merge-check FAIL downstream; route existing Shared :05 in #1419 comment 6623238607 and Sheet row165. No rerun/source/merge/LIVE."
     },
     {
       "number": 3367,
@@ -2132,7 +2140,8 @@
             "completed_at": null,
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)",
-            "source": "github:actions/runs/41744165172;browser-job/126292868138"
+            "source": "github:actions/runs/41744165172;browser-job/126292868138",
+            "status": "completed"
           }
         ]
       },
@@ -2141,9 +2150,9 @@
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T04:13:51.633Z",
+      "observed_at_utc": "2026-11-04T05:17:28.125Z",
       "mergeable_state": "clean",
-      "observation_note": "OPEN exact HEAD WebKit browser job 126292868138 FAILURE and Core hh-specialist job 126292874645 FAILURE; existing Product/WebKit lease, no Triage rerun or source work."
+      "observation_note": "OPEN current exact HEAD 86622b9, Tantra browser 41744165172 job126292868138 terminal WebKit EN390 real decoded-frame/clock post-reopen failure script:228. Specialist 41744165090 job126292874645 fails because Tantra; Product/WebKit owner active. One pause/play recovery disproven, no rerun/source/merge/LIVE."
     },
     {
       "number": 3322,
@@ -12676,6 +12685,99 @@
       "updated_at": "2026-11-01T22:16:38Z",
       "base": "codex/bootstrap-books",
       "draft": false
+    },
+    {
+      "number": 3376,
+      "url": "https://github.com/andylitvinov-design/books/pull/3376",
+      "title": "fix(video): restore compact Studio tabs and top player on mobile",
+      "state": "open",
+      "created_at": "2026-11-04T05:11:34Z",
+      "merged_at": null,
+      "head_sha": "50bae3827707274416f5f4efcfdadb202952e889",
+      "stamps": {
+        "created": {
+          "at": "2026-11-04T05:11:34Z",
+          "source": "github:pulls/3376/created_at",
+          "actor": "GitHub (actor not independently established)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "closed_at": null,
+      "updated_at": "2026-11-04T05:18:50Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "observed_at_utc": "2026-11-04T05:17:28.125Z"
+    },
+    {
+      "number": 3375,
+      "url": "https://github.com/andylitvinov-design/books/pull/3375",
+      "title": "fix(messages): stable AI / Orders / Clients header and tabs on iPhone",
+      "state": "open",
+      "created_at": "2026-11-04T05:10:08Z",
+      "merged_at": null,
+      "head_sha": "92c70fe9469bbf3acd1babdc1ddccc5268f5583e",
+      "stamps": {
+        "created": {
+          "at": "2026-11-04T05:10:08Z",
+          "source": "github:pulls/3375/created_at",
+          "actor": "GitHub (actor not independently established)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "closed_at": null,
+      "updated_at": "2026-11-04T05:10:40Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "observed_at_utc": "2026-11-04T05:17:28.125Z"
+    },
+    {
+      "number": 3374,
+      "url": "https://github.com/andylitvinov-design/books/pull/3374",
+      "title": "Fix original motion scenes in exported films",
+      "state": "open",
+      "created_at": "2026-11-04T04:42:48Z",
+      "merged_at": null,
+      "head_sha": "af2510b1dc622e0761bdb868adb5ed197b669418",
+      "stamps": {
+        "created": {
+          "at": "2026-11-04T04:42:48Z",
+          "source": "github:pulls/3374/created_at",
+          "actor": "GitHub (actor not independently established)",
+          "verified": true
+        }
+      },
+      "timeline_checked": false,
+      "ci": {
+        "checked": false,
+        "run_count": null,
+        "check_count": null,
+        "duplicate_checks": null,
+        "failed_wall_minutes": null,
+        "cycles": []
+      },
+      "closed_at": null,
+      "updated_at": "2026-11-04T05:09:12Z",
+      "base": "codex/public-book-library",
+      "draft": false,
+      "observed_at_utc": "2026-11-04T05:17:28.125Z"
     }
   ]
 }
