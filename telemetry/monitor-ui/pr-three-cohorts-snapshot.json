@@ -1,0 +1,2978 @@
+{
+  "schema": "HH_PR_THREE_CREATED_COHORTS_V1",
+  "repo": "andylitvinov-design/books",
+  "timezone": "America/Toronto",
+  "generated_at": "2026-11-04T13:14:49.089Z",
+  "notes": "Created-at PR cohorts in three 24-hour UTC windows aligned to 08:05 Toronto local clock. Count open at end using closed_at>end; merged within uses merged_at<=end. All PR target branches included; same observation rule per cohort.",
+  "windows": [
+    {
+      "id": "last_day",
+      "label": "Последние сутки",
+      "from": "2026-11-03T13:05:00Z",
+      "to": "2026-11-04T13:05:00Z",
+      "complete": true,
+      "source": "GitHub Search issues PR, complete pages 1-2",
+      "expected_count": 86,
+      "rows": [
+        {
+          "number": 3300,
+          "created_at": "2026-11-03T13:18:01Z",
+          "closed_at": "2026-11-03T13:42:49Z",
+          "merged_at": "2026-11-03T13:42:49Z",
+          "state": "closed",
+          "title": "fix(video): enforce unique stories across all 5 category branches"
+        },
+        {
+          "number": 3301,
+          "created_at": "2026-11-03T13:24:21Z",
+          "closed_at": "2026-11-04T02:42:44Z",
+          "merged_at": "2026-11-04T02:42:44Z",
+          "state": "closed",
+          "title": "fix(video): free narration of the exact selected phrase in any of six voices"
+        },
+        {
+          "number": 3302,
+          "created_at": "2026-11-03T13:24:31Z",
+          "closed_at": "2026-11-04T00:31:15Z",
+          "merged_at": "2026-11-04T00:31:15Z",
+          "state": "closed",
+          "title": "test(video): 120-scenario 4×MP4 + 4×MP3 coverage audit and fail-closed acceptance"
+        },
+        {
+          "number": 3303,
+          "created_at": "2026-11-03T13:34:58Z",
+          "closed_at": "2026-11-04T03:28:25Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "fix(voice): selecting a preview also selects the free narrator for the approved phrase"
+        },
+        {
+          "number": 3304,
+          "created_at": "2026-11-03T14:04:52Z",
+          "closed_at": "2026-11-03T14:26:44Z",
+          "merged_at": "2026-11-03T14:26:43Z",
+          "state": "closed",
+          "title": "feat(mytube): add search-led 4x4x4 content taxonomy"
+        },
+        {
+          "number": 3305,
+          "created_at": "2026-11-03T14:21:15Z",
+          "closed_at": "2026-11-03T15:31:36Z",
+          "merged_at": "2026-11-03T15:31:36Z",
+          "state": "closed",
+          "title": "fix(ci): bounded GitHub API retries for exact-HEAD Specialist"
+        },
+        {
+          "number": 3306,
+          "created_at": "2026-11-03T14:23:33Z",
+          "closed_at": "2026-11-03T15:46:02Z",
+          "merged_at": "2026-11-03T15:46:02Z",
+          "state": "closed",
+          "title": "P0 fix(ci): focus free Repair on reproduced source and verify remote publish SHA"
+        },
+        {
+          "number": 3307,
+          "created_at": "2026-11-03T14:29:50Z",
+          "closed_at": "2026-11-03T14:51:29Z",
+          "merged_at": "2026-11-03T14:51:28Z",
+          "state": "closed",
+          "title": "fix(ci): fail Repair Worker when a claimed source repair publishes no SHA"
+        },
+        {
+          "number": 3308,
+          "created_at": "2026-11-03T14:41:34Z",
+          "closed_at": "2026-11-03T14:59:43Z",
+          "merged_at": "2026-11-03T14:59:43Z",
+          "state": "closed",
+          "title": "P0 fix(ci): rescue Watchdog under saturated Actions queue and report honest handoff KPIs"
+        },
+        {
+          "number": 3309,
+          "created_at": "2026-11-03T14:44:05Z",
+          "closed_at": "2026-11-03T15:21:42Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "P0 fix(ci): truthful Watchdog backlog, handoff proof and monotonic KPI feed"
+        },
+        {
+          "number": 3310,
+          "created_at": "2026-11-03T14:53:58Z",
+          "closed_at": "2026-11-03T15:55:32Z",
+          "merged_at": "2026-11-03T15:55:31Z",
+          "state": "closed",
+          "title": "perf(ci): 9-file clean HEAD-stability and browser cache (replaces #3290)"
+        },
+        {
+          "number": 3311,
+          "created_at": "2026-11-03T15:21:08Z",
+          "closed_at": "2026-11-03T16:34:06Z",
+          "merged_at": "2026-11-03T16:34:06Z",
+          "state": "closed",
+          "title": "fix(ci): truthful Watchdog KPI and monotonic runner proof — clean #3309"
+        },
+        {
+          "number": 3312,
+          "created_at": "2026-11-03T15:40:43Z",
+          "closed_at": "2026-11-03T15:48:20Z",
+          "merged_at": "2026-11-03T15:48:20Z",
+          "state": "closed",
+          "title": "P0 fix(ci): recover Watchdog handoff from scheduled CI-worker completion"
+        },
+        {
+          "number": 3313,
+          "created_at": "2026-11-03T15:51:06Z",
+          "closed_at": "2026-11-03T15:57:13Z",
+          "merged_at": "2026-11-03T15:57:13Z",
+          "state": "closed",
+          "title": "P0 hotfix(ci): restore Watchdog workflow syntax and guard regressions"
+        },
+        {
+          "number": 3314,
+          "created_at": "2026-11-03T16:39:02Z",
+          "closed_at": "2026-11-03T17:51:34Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "fix(ci): align Gauntlet privacy and Tantra iframe real-browser contracts"
+        },
+        {
+          "number": 3315,
+          "created_at": "2026-11-03T16:39:35Z",
+          "closed_at": "2026-11-03T16:45:51Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(mytube): align site and video studio to four content directions"
+        },
+        {
+          "number": 3316,
+          "created_at": "2026-11-03T16:45:20Z",
+          "closed_at": "2026-11-03T19:21:42Z",
+          "merged_at": "2026-11-03T19:21:42Z",
+          "state": "closed",
+          "title": "feat(mytube): align site and video studio to four content directions"
+        },
+        {
+          "number": 3317,
+          "created_at": "2026-11-03T16:47:13Z",
+          "closed_at": "2026-11-03T17:34:02Z",
+          "merged_at": "2026-11-03T17:34:02Z",
+          "state": "closed",
+          "title": "P0 fix(ci): recover stale Watchdog CI hold only with verified current Core runner"
+        },
+        {
+          "number": 3318,
+          "created_at": "2026-11-03T17:05:17Z",
+          "closed_at": "2026-11-03T17:47:18Z",
+          "merged_at": "2026-11-03T17:47:18Z",
+          "state": "closed",
+          "title": "fix(ci): wait for queued Specialist dependencies until bounded global deadline"
+        },
+        {
+          "number": 3319,
+          "created_at": "2026-11-03T17:31:41Z",
+          "closed_at": "2026-11-03T17:46:25Z",
+          "merged_at": "2026-11-03T17:46:25Z",
+          "state": "closed",
+          "title": "fix(monitor): version deployed Watchdog blocker diagnostics"
+        },
+        {
+          "number": 3320,
+          "created_at": "2026-11-03T17:38:28Z",
+          "closed_at": "2026-11-04T06:22:02Z",
+          "merged_at": "2026-11-04T06:22:02Z",
+          "state": "closed",
+          "title": "feat(telegram): ask owner for seconds between audio tracks before assembly"
+        },
+        {
+          "number": 3321,
+          "created_at": "2026-11-03T17:40:09Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(mandala): integrate original Mentalica photo builder into Holistic House"
+        },
+        {
+          "number": 3322,
+          "created_at": "2026-11-03T17:51:00Z",
+          "closed_at": "2026-11-03T22:24:02Z",
+          "merged_at": "2026-11-03T22:24:02Z",
+          "state": "closed",
+          "title": "feat(mytube): integrate approved category tree across site and director"
+        },
+        {
+          "number": 3323,
+          "created_at": "2026-11-03T17:51:07Z",
+          "closed_at": "2026-11-04T12:33:50Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "test(ci): exact-current-base Tantra WebKit and Privacy contracts (replaces #3314)"
+        },
+        {
+          "number": 3324,
+          "created_at": "2026-11-03T17:52:12Z",
+          "closed_at": "2026-11-03T19:02:23Z",
+          "merged_at": "2026-11-03T19:02:23Z",
+          "state": "closed",
+          "title": "perf(ci): remove duplicate Mandala Chromium/Next builds from PR critical path"
+        },
+        {
+          "number": 3325,
+          "created_at": "2026-11-03T17:59:17Z",
+          "closed_at": "2026-11-03T18:37:04Z",
+          "merged_at": "2026-11-03T18:37:03Z",
+          "state": "closed",
+          "title": "perf(ci): stop Specialist blocking on Mandala behind mandatory Core media contracts"
+        },
+        {
+          "number": 3326,
+          "created_at": "2026-11-03T19:36:38Z",
+          "closed_at": "2026-11-03T19:49:57Z",
+          "merged_at": "2026-11-03T19:49:57Z",
+          "state": "closed",
+          "title": "fix(ci): avoid redundant Specialist gating for verified V2 concurrency-only edits"
+        },
+        {
+          "number": 3327,
+          "created_at": "2026-11-03T19:44:06Z",
+          "closed_at": "2026-11-03T20:27:44Z",
+          "merged_at": "2026-11-03T20:27:43Z",
+          "state": "closed",
+          "title": "fix(ci): stop unrelated Browser/WebKit checks from blocking Specialist on CI-only PRs"
+        },
+        {
+          "number": 3328,
+          "created_at": "2026-11-03T19:48:04Z",
+          "closed_at": "2026-11-03T19:57:07Z",
+          "merged_at": "2026-11-03T19:57:07Z",
+          "state": "closed",
+          "title": "feat(ci): phase-by-phase PR time metrics without extra scheduled runners"
+        },
+        {
+          "number": 3329,
+          "created_at": "2026-11-03T19:49:12Z",
+          "closed_at": "2026-11-03T21:07:09Z",
+          "merged_at": "2026-11-03T21:07:08Z",
+          "state": "closed",
+          "title": "perf(ci): remove 29 redundant feature workflow self-triggers, preserve required gates"
+        },
+        {
+          "number": 3330,
+          "created_at": "2026-11-03T19:50:09Z",
+          "closed_at": "2026-11-03T20:00:40Z",
+          "merged_at": "2026-11-03T20:00:40Z",
+          "state": "closed",
+          "title": "perf(ci): direct failed-Core handoff without full Watchdog PR scan"
+        },
+        {
+          "number": 3331,
+          "created_at": "2026-11-03T19:54:12Z",
+          "closed_at": "2026-11-03T20:13:48Z",
+          "merged_at": "2026-11-03T20:13:48Z",
+          "state": "closed",
+          "title": "perf(ci): safely remove redundant workflow YAML self-trigger runs under Core/actionlint"
+        },
+        {
+          "number": 3332,
+          "created_at": "2026-11-03T20:42:42Z",
+          "closed_at": "2026-11-03T20:59:37Z",
+          "merged_at": "2026-11-03T20:59:37Z",
+          "state": "closed",
+          "title": "fix(ci): preserve branch-specific Profile Axis skip after selective YAML migration"
+        },
+        {
+          "number": 3333,
+          "created_at": "2026-11-03T20:42:46Z",
+          "closed_at": "2026-11-03T21:23:26Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "fix(consultation): reliable one-click optional name on iPhone/WebKit"
+        },
+        {
+          "number": 3334,
+          "created_at": "2026-11-03T20:49:20Z",
+          "closed_at": "2026-11-03T21:23:03Z",
+          "merged_at": "2026-11-03T21:23:03Z",
+          "state": "closed",
+          "title": "feat(mytube): rank all 44 existing video scenes and public videos in 4×4×4×4 taxonomy"
+        },
+        {
+          "number": 3335,
+          "created_at": "2026-11-03T20:54:36Z",
+          "closed_at": "2026-11-04T00:32:52Z",
+          "merged_at": "2026-11-04T00:32:52Z",
+          "state": "closed",
+          "title": "feat(video): grow source library toward 320 real clips with 16 reviewed-source candidates and strict QA"
+        },
+        {
+          "number": 3336,
+          "created_at": "2026-11-03T21:04:48Z",
+          "closed_at": "2026-11-03T21:14:03Z",
+          "merged_at": "2026-11-03T21:14:03Z",
+          "state": "closed",
+          "title": "docs(ci): open Ready PR immediately, use Triage only for failed checks"
+        },
+        {
+          "number": 3337,
+          "created_at": "2026-11-03T21:18:44Z",
+          "closed_at": "2026-11-03T21:40:43Z",
+          "merged_at": "2026-11-03T21:40:43Z",
+          "state": "closed",
+          "title": "feat(video): build four real licensed scenes from a visitor's prompt"
+        },
+        {
+          "number": 3338,
+          "created_at": "2026-11-03T21:18:56Z",
+          "closed_at": "2026-11-03T21:36:51Z",
+          "merged_at": "2026-11-03T21:36:51Z",
+          "state": "closed",
+          "title": "perf(ci): stop stale browser/billing/mobile jobs after PR head update"
+        },
+        {
+          "number": 3339,
+          "created_at": "2026-11-03T21:21:20Z",
+          "closed_at": "2026-11-03T22:21:27Z",
+          "merged_at": "2026-11-03T22:21:27Z",
+          "state": "closed",
+          "title": "fix(consultation): safe one-click optional name on current production (replaces #3333)"
+        },
+        {
+          "number": 3341,
+          "created_at": "2026-11-03T21:32:43Z",
+          "closed_at": "2026-11-03T21:46:04Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "content(mytube): replace generic story templates with 256 unique multilingual narratives"
+        },
+        {
+          "number": 3343,
+          "created_at": "2026-11-03T21:41:14Z",
+          "closed_at": "2026-11-03T21:42:55Z",
+          "merged_at": "2026-11-03T21:42:55Z",
+          "state": "closed",
+          "title": "feat(mytube): 256 original topic-specific video storyboards in RU/EN/ES"
+        },
+        {
+          "number": 3345,
+          "created_at": "2026-11-03T21:57:08Z",
+          "closed_at": "2026-11-03T22:30:27Z",
+          "merged_at": "2026-11-03T22:30:27Z",
+          "state": "closed",
+          "title": "feat(dot): 1024 plot treatments + soundtrack-length licensed-scene planner"
+        },
+        {
+          "number": 3346,
+          "created_at": "2026-11-03T22:00:33Z",
+          "closed_at": "2026-11-04T12:13:37Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "MyTube: 4 selectable plots for each of 256 scenarios (1024 storyboards)"
+        },
+        {
+          "number": 3347,
+          "created_at": "2026-11-03T22:07:32Z",
+          "closed_at": "2026-11-03T22:32:25Z",
+          "merged_at": "2026-11-03T22:32:25Z",
+          "state": "closed",
+          "title": "feat(ci): record Ready, Triage, Claimed, Repair started and Source published timestamps"
+        },
+        {
+          "number": 3348,
+          "created_at": "2026-11-03T22:12:07Z",
+          "closed_at": "2026-11-03T22:14:16Z",
+          "merged_at": "2026-11-03T22:14:16Z",
+          "state": "closed",
+          "title": "feat(mytube): add 4 plot choices for each of 256 scenarios (1024 plots)"
+        },
+        {
+          "number": 3349,
+          "created_at": "2026-11-03T22:30:39Z",
+          "closed_at": "2026-11-03T22:42:07Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(mytube): plot-aware licensed montage for 1024 story concepts"
+        },
+        {
+          "number": 3350,
+          "created_at": "2026-11-03T22:30:53Z",
+          "closed_at": "2026-11-04T03:58:38Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(video): add 320 original abstract motion MP4 masters and 64 thematic film choices"
+        },
+        {
+          "number": 3351,
+          "created_at": "2026-11-03T22:38:39Z",
+          "closed_at": "2026-11-04T04:13:50Z",
+          "merged_at": "2026-11-04T04:13:50Z",
+          "state": "closed",
+          "title": "feat(video): 728 MP4 sources — 684 original motion clips, 44 licensed, 128 film presets"
+        },
+        {
+          "number": 3352,
+          "created_at": "2026-11-03T22:38:58Z",
+          "closed_at": "2026-11-03T22:41:10Z",
+          "merged_at": "2026-11-03T22:41:10Z",
+          "state": "closed",
+          "title": "feat(mytube): safe plot-aware montage and caption fallback on active MyTube branch"
+        },
+        {
+          "number": 3353,
+          "created_at": "2026-11-03T22:41:09Z",
+          "closed_at": "2026-11-04T03:38:35Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot): owner-only Telegram story picker with private revisioned DB state"
+        },
+        {
+          "number": 3354,
+          "created_at": "2026-11-03T22:41:33Z",
+          "closed_at": "2026-11-04T06:11:47Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot-video): connect owner story picker to real licensed MP4 soundtrack montage"
+        },
+        {
+          "number": 3355,
+          "created_at": "2026-11-03T22:41:52Z",
+          "closed_at": "2026-11-03T22:50:06Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot-video): wire verified story MP4 montage to original soundtrack in Telegram"
+        },
+        {
+          "number": 3356,
+          "created_at": "2026-11-03T22:49:29Z",
+          "closed_at": "2026-11-04T00:07:39Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot-video): protected production-based audio-length MP4 story montage"
+        },
+        {
+          "number": 3357,
+          "created_at": "2026-11-03T22:51:58Z",
+          "closed_at": "2026-11-03T23:14:21Z",
+          "merged_at": "2026-11-03T23:14:21Z",
+          "state": "closed",
+          "title": "fix(ci): allow 650-file video imports through trusted full Core instead of INVALID_DIFF_ROWS"
+        },
+        {
+          "number": 3358,
+          "created_at": "2026-11-03T22:58:10Z",
+          "closed_at": "2026-11-03T23:10:05Z",
+          "merged_at": "2026-11-03T23:10:05Z",
+          "state": "closed",
+          "title": "test(privacy): remove retired analytics popup oracle blocking Gauntlet CI"
+        },
+        {
+          "number": 3359,
+          "created_at": "2026-11-03T22:59:34Z",
+          "closed_at": "2026-11-03T23:08:23Z",
+          "merged_at": "2026-11-03T23:08:23Z",
+          "state": "closed",
+          "title": "fix(ci): never restart cancelled/failed Core as infrastructure recovery"
+        },
+        {
+          "number": 3360,
+          "created_at": "2026-11-03T23:03:32Z",
+          "closed_at": "2026-11-03T23:10:29Z",
+          "merged_at": "2026-11-03T23:10:29Z",
+          "state": "closed",
+          "title": "test(ci): correct retired Cabinet journey Core gate assertion"
+        },
+        {
+          "number": 3361,
+          "created_at": "2026-11-03T23:03:36Z",
+          "closed_at": "2026-11-04T05:28:47Z",
+          "merged_at": "2026-11-04T05:28:47Z",
+          "state": "closed",
+          "title": "feat(mytube): exact-topic original animation bridge for 1024 plot montages"
+        },
+        {
+          "number": 3362,
+          "created_at": "2026-11-03T23:47:01Z",
+          "closed_at": "2026-11-03T23:56:47Z",
+          "merged_at": "2026-11-03T23:56:47Z",
+          "state": "closed",
+          "title": "test(ci): await one real WebKit free-review CTA state commit"
+        },
+        {
+          "number": 3363,
+          "created_at": "2026-11-03T23:49:24Z",
+          "closed_at": "2026-11-03T23:52:21Z",
+          "merged_at": "2026-11-03T23:52:21Z",
+          "state": "closed",
+          "title": "perf(ci): remove three unrelated Browser/UI self-YAML PR triggers"
+        },
+        {
+          "number": 3364,
+          "created_at": "2026-11-04T00:07:26Z",
+          "closed_at": "2026-11-04T03:50:52Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot-video): verified soundtrack-length story montage (production-reconciled)"
+        },
+        {
+          "number": 3365,
+          "created_at": "2026-11-04T00:07:58Z",
+          "closed_at": "2026-11-04T00:30:16Z",
+          "merged_at": "2026-11-04T00:30:16Z",
+          "state": "closed",
+          "title": "feat(video): approved first-screen flow with 16:9 sample rail and prompt-first goals"
+        },
+        {
+          "number": 3366,
+          "created_at": "2026-11-04T03:38:31Z",
+          "closed_at": "2026-11-04T03:52:37Z",
+          "merged_at": "2026-11-04T03:52:37Z",
+          "state": "closed",
+          "title": "feat(dot): production-current private Telegram story picker (replacement #3353)"
+        },
+        {
+          "number": 3367,
+          "created_at": "2026-11-04T03:40:21Z",
+          "closed_at": "2026-11-04T03:54:28Z",
+          "merged_at": "2026-11-04T03:54:28Z",
+          "state": "closed",
+          "title": "fix(mobile): stop iPhone Safari shared dock jumping above bottom edge"
+        },
+        {
+          "number": 3368,
+          "created_at": "2026-11-04T03:41:06Z",
+          "closed_at": "2026-11-04T12:21:19Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "perf(ci): 64 scoped HEAD-cancellation fixes with trusted Profile Axis (replaces #3288)"
+        },
+        {
+          "number": 3369,
+          "created_at": "2026-11-04T03:50:30Z",
+          "closed_at": "2026-11-04T04:04:38Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot-video): LIVE-bound canonical 1024 MyTube plots, verified soundtrack montage, rights"
+        },
+        {
+          "number": 3371,
+          "created_at": "2026-11-04T04:04:14Z",
+          "closed_at": "2026-11-04T05:05:01Z",
+          "merged_at": "2026-11-04T05:05:01Z",
+          "state": "closed",
+          "title": "feat(dot): make LIVE Telegram plot picker produce real audio-synced licensed MP4"
+        },
+        {
+          "number": 3372,
+          "created_at": "2026-11-04T04:04:58Z",
+          "closed_at": "2026-11-04T04:10:21Z",
+          "merged_at": "2026-11-04T04:10:21Z",
+          "state": "closed",
+          "title": "fix(ci): require affected Mandala release checks"
+        },
+        {
+          "number": 3373,
+          "created_at": "2026-11-04T04:08:38Z",
+          "closed_at": "2026-11-04T04:22:37Z",
+          "merged_at": "2026-11-04T04:22:37Z",
+          "state": "closed",
+          "title": "feat(mytube): original Creative Timeline — transitions, shot looks, zoom and caption editing"
+        },
+        {
+          "number": 3374,
+          "created_at": "2026-11-04T04:42:48Z",
+          "closed_at": "2026-11-04T05:20:02Z",
+          "merged_at": "2026-11-04T05:20:02Z",
+          "state": "closed",
+          "title": "Fix original motion scenes in exported films"
+        },
+        {
+          "number": 3375,
+          "created_at": "2026-11-04T05:10:08Z",
+          "closed_at": "2026-11-04T12:43:29Z",
+          "merged_at": "2026-11-04T12:43:29Z",
+          "state": "closed",
+          "title": "fix(messages): stable AI / Orders / Clients header and tabs on iPhone"
+        },
+        {
+          "number": 3376,
+          "created_at": "2026-11-04T05:11:34Z",
+          "closed_at": "2026-11-04T05:36:13Z",
+          "merged_at": "2026-11-04T05:36:13Z",
+          "state": "closed",
+          "title": "fix(video): restore compact Studio tabs and top player on mobile"
+        },
+        {
+          "number": 3377,
+          "created_at": "2026-11-04T05:29:13Z",
+          "closed_at": "2026-11-04T05:54:34Z",
+          "merged_at": "2026-11-04T05:54:34Z",
+          "state": "closed",
+          "title": "style: Warm & Alive sunlit ivory backgrounds across Holistic House public pages"
+        },
+        {
+          "number": 3378,
+          "created_at": "2026-11-04T05:31:22Z",
+          "closed_at": "2026-11-04T05:42:38Z",
+          "merged_at": "2026-11-04T05:42:38Z",
+          "state": "closed",
+          "title": "feat(mytube): YouTube-style dark UI on MyTube only (RU/EN/ES)"
+        },
+        {
+          "number": 3379,
+          "created_at": "2026-11-04T05:36:13Z",
+          "closed_at": "2026-11-04T06:31:04Z",
+          "merged_at": "2026-11-04T06:31:04Z",
+          "state": "closed",
+          "title": "fix(mytube): YouTube-dark video-first screen, no promo, safe RU/EN/ES"
+        },
+        {
+          "number": 3380,
+          "created_at": "2026-11-04T05:46:03Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(mytube): native editor undo/redo and verified local project drafts"
+        },
+        {
+          "number": 3381,
+          "created_at": "2026-11-04T05:46:13Z",
+          "closed_at": "2026-11-04T05:53:01Z",
+          "merged_at": "2026-11-04T05:53:01Z",
+          "state": "closed",
+          "title": "fix(video): remove remaining global review banner above Video Studio"
+        },
+        {
+          "number": 3382,
+          "created_at": "2026-11-04T06:02:50Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(mytube): beat-aware video cuts, animated captions and SRT import/export"
+        },
+        {
+          "number": 3383,
+          "created_at": "2026-11-04T06:20:19Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(video): quality-first HD footage review, real-motion verification and improved source ranking"
+        },
+        {
+          "number": 3384,
+          "created_at": "2026-11-04T12:20:16Z",
+          "closed_at": "2026-11-04T12:29:26Z",
+          "merged_at": "2026-11-04T12:29:26Z",
+          "state": "closed",
+          "title": "perf(ci): clean exact-base 65-file concurrency release (replaces #3368)"
+        },
+        {
+          "number": 3385,
+          "created_at": "2026-11-04T12:22:23Z",
+          "closed_at": "2026-11-04T12:24:22Z",
+          "merged_at": "2026-11-04T12:24:21Z",
+          "state": "closed",
+          "title": "fix(ci): restore truthful PR Core KPI coverage using live job names"
+        },
+        {
+          "number": 3386,
+          "created_at": "2026-11-04T12:26:22Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "fix(tantra): restore real WebKit playback using one fresh decoder after explicit Play"
+        },
+        {
+          "number": 3387,
+          "created_at": "2026-11-04T12:28:28Z",
+          "closed_at": "2026-11-04T12:30:53Z",
+          "merged_at": "2026-11-04T12:30:53Z",
+          "state": "closed",
+          "title": "fix(ci): measure authenticated Ready → Triage → Repair stage durations"
+        },
+        {
+          "number": 3388,
+          "created_at": "2026-11-04T12:32:55Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "fix(video): clean Tantra decoder + post-fix WebKit real-browser acceptance (replaces #3323)"
+        },
+        {
+          "number": 3389,
+          "created_at": "2026-11-04T12:46:35Z",
+          "closed_at": "2026-11-04T13:00:30Z",
+          "merged_at": "2026-11-04T13:00:30Z",
+          "state": "closed",
+          "title": "feat(ci): reconcile PR Created → Merged duration on one verified cohort"
+        }
+      ]
+    },
+    {
+      "id": "week_ago",
+      "label": "Неделю назад",
+      "from": "2026-10-27T12:05:00Z",
+      "to": "2026-10-28T12:05:00Z",
+      "complete": true,
+      "source": "GitHub Search issues PR, complete pages 1-2",
+      "expected_count": 130,
+      "rows": [
+        {
+          "number": 2243,
+          "created_at": "2026-10-27T12:12:46Z",
+          "closed_at": "2026-10-27T12:40:33Z",
+          "merged_at": "2026-10-27T12:40:33Z",
+          "state": "closed",
+          "title": "fix(ci): run real energy-card click in free review mobile QA"
+        },
+        {
+          "number": 2244,
+          "created_at": "2026-10-27T12:25:26Z",
+          "closed_at": "2026-10-27T12:47:57Z",
+          "merged_at": "2026-10-27T12:47:57Z",
+          "state": "closed",
+          "title": "feat(pwa): free Holistic House installation for iPhone and Android, EN/RU/ES"
+        },
+        {
+          "number": 2245,
+          "created_at": "2026-10-27T12:29:32Z",
+          "closed_at": "2026-10-27T14:52:50Z",
+          "merged_at": "2026-10-27T14:52:50Z",
+          "state": "closed",
+          "title": "feat(profile): fifth Goal Profile with 3 private ratings, tests and services"
+        },
+        {
+          "number": 2246,
+          "created_at": "2026-10-27T12:41:26Z",
+          "closed_at": "2026-10-27T12:58:24Z",
+          "merged_at": "2026-10-27T12:58:24Z",
+          "state": "closed",
+          "title": "feat(dot): send forwardable native Telegram voice alongside combined OGG document"
+        },
+        {
+          "number": 2247,
+          "created_at": "2026-10-27T12:41:41Z",
+          "closed_at": "2026-11-02T23:00:51Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(quality): quota-safe OpenCode Gauntlet and verified Free Express hook fix"
+        },
+        {
+          "number": 2248,
+          "created_at": "2026-10-27T12:44:57Z",
+          "closed_at": "2026-10-27T12:52:46Z",
+          "merged_at": "2026-10-27T12:52:46Z",
+          "state": "closed",
+          "title": "fix(council): Gemini 4 Argon as optional free-credit fifth chair, default $0 Gemma"
+        },
+        {
+          "number": 2249,
+          "created_at": "2026-10-27T12:52:21Z",
+          "closed_at": "2026-11-01T19:00:32Z",
+          "merged_at": "2026-11-01T19:00:32Z",
+          "state": "closed",
+          "title": "feat(video): local scene-cut proposals, no needless SFX on talking-head videos"
+        },
+        {
+          "number": 2250,
+          "created_at": "2026-10-27T12:52:54Z",
+          "closed_at": "2026-10-30T13:30:09Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: COMPAS-W and mwTool primary psychometric source editions"
+        },
+        {
+          "number": 2251,
+          "created_at": "2026-10-27T12:52:55Z",
+          "closed_at": "2026-10-27T13:03:36Z",
+          "merged_at": "2026-10-27T13:03:36Z",
+          "state": "closed",
+          "title": "fix(CRM): show Andrey's exact six Telegram V2 messages in Automations"
+        },
+        {
+          "number": 2252,
+          "created_at": "2026-10-27T12:54:55Z",
+          "closed_at": "2026-10-27T14:48:55Z",
+          "merged_at": "2026-10-27T14:48:55Z",
+          "state": "closed",
+          "title": "fix(telegram): Audio and Video menu in verified owner Dot + working MP4 route"
+        },
+        {
+          "number": 2253,
+          "created_at": "2026-10-27T13:02:08Z",
+          "closed_at": "2026-10-27T14:02:57Z",
+          "merged_at": "2026-10-27T14:02:57Z",
+          "state": "closed",
+          "title": "fix(Messages): restore Telegram photos when getFile omits size"
+        },
+        {
+          "number": 2254,
+          "created_at": "2026-10-27T13:12:26Z",
+          "closed_at": "2026-10-27T14:33:16Z",
+          "merged_at": "2026-10-27T14:33:16Z",
+          "state": "closed",
+          "title": "feat(CRM): route free express review EN/RU/ES to approved Telegram dialogue and honest WhatsApp handoff"
+        },
+        {
+          "number": 2258,
+          "created_at": "2026-10-27T13:36:00Z",
+          "closed_at": "2026-10-27T14:07:52Z",
+          "merged_at": "2026-10-27T14:07:52Z",
+          "state": "closed",
+          "title": "feat(video): Kling scene studio with secure owner gate and no paid default"
+        },
+        {
+          "number": 2259,
+          "created_at": "2026-10-27T13:38:28Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "@tao.ideas: safe Instagram → Telegram Dao Wisdom intake + 12-Reel launch pack"
+        },
+        {
+          "number": 2260,
+          "created_at": "2026-10-27T13:46:34Z",
+          "closed_at": "2026-10-27T15:24:52Z",
+          "merged_at": "2026-10-27T15:24:52Z",
+          "state": "closed",
+          "title": "fix(Holistic Support): remove duplicate Practices & Support section"
+        },
+        {
+          "number": 2262,
+          "created_at": "2026-10-27T13:52:45Z",
+          "closed_at": "2026-10-27T14:02:51Z",
+          "merged_at": "2026-10-27T14:02:51Z",
+          "state": "closed",
+          "title": "feat(Holistic Support): rotating author Taoist koan board (EN/RU/ES)"
+        },
+        {
+          "number": 2263,
+          "created_at": "2026-10-27T13:53:03Z",
+          "closed_at": "2026-10-30T13:30:06Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: nurse PCCS-12 original and validated Persian PCCS-11"
+        },
+        {
+          "number": 2264,
+          "created_at": "2026-10-27T14:08:17Z",
+          "closed_at": "2026-10-27T14:13:20Z",
+          "merged_at": "2026-10-27T14:13:20Z",
+          "state": "closed",
+          "title": "feat(dao): photographic cards for Taoist koans on Holistic Support"
+        },
+        {
+          "number": 2265,
+          "created_at": "2026-10-27T14:14:00Z",
+          "closed_at": "2026-10-27T14:45:48Z",
+          "merged_at": "2026-10-27T14:45:48Z",
+          "state": "closed",
+          "title": "Holistic Support: inline talisman & energy enquiries with practitioner selection"
+        },
+        {
+          "number": 2266,
+          "created_at": "2026-10-27T14:38:55Z",
+          "closed_at": "2026-10-27T15:31:27Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(alchemy): Book a Session by phone/Google → owner-confirmed Pay Your Session"
+        },
+        {
+          "number": 2267,
+          "created_at": "2026-10-27T14:42:41Z",
+          "closed_at": "2026-10-27T15:14:17Z",
+          "merged_at": "2026-10-27T15:14:17Z",
+          "state": "closed",
+          "title": "feat(booking): Book a Session → master-confirmed Pay Your Session (EN/RU/ES)"
+        },
+        {
+          "number": 2268,
+          "created_at": "2026-10-27T14:54:06Z",
+          "closed_at": "2026-10-30T13:30:03Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: MHLq-YA Portuguese, Spanish, Greek editions and PTGDI-X Russian evidence"
+        },
+        {
+          "number": 2269,
+          "created_at": "2026-10-27T14:56:39Z",
+          "closed_at": "2026-11-02T22:14:47Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "CRM: @tao.ideas Instagram Direct → encrypted Holistic House Messages"
+        },
+        {
+          "number": 2270,
+          "created_at": "2026-10-27T15:05:30Z",
+          "closed_at": "2026-10-27T15:17:30Z",
+          "merged_at": "2026-10-27T15:17:30Z",
+          "state": "closed",
+          "title": "test(holistic): repair CI contracts for inline energy and talisman order"
+        },
+        {
+          "number": 2271,
+          "created_at": "2026-10-27T15:05:47Z",
+          "closed_at": "2026-10-27T15:43:57Z",
+          "merged_at": "2026-10-27T15:43:57Z",
+          "state": "closed",
+          "title": "fix(video): confirm processed RU YouTube status before success"
+        },
+        {
+          "number": 2272,
+          "created_at": "2026-10-27T15:21:41Z",
+          "closed_at": "2026-11-02T06:43:16Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "test(benchmark): verify actual Business direction journey instead of retired finder"
+        },
+        {
+          "number": 2273,
+          "created_at": "2026-10-27T15:23:19Z",
+          "closed_at": "2026-10-27T22:41:14Z",
+          "merged_at": "2026-10-27T22:41:14Z",
+          "state": "closed",
+          "title": "feat(video): Kling Avatar owner face-and-voice pilot in existing video admin"
+        },
+        {
+          "number": 2274,
+          "created_at": "2026-10-27T15:36:06Z",
+          "closed_at": "2026-10-27T20:41:29Z",
+          "merged_at": "2026-10-27T20:41:29Z",
+          "state": "closed",
+          "title": "feat(holistic): compact meditation gallery with Business/Love/Energy/Health filters"
+        },
+        {
+          "number": 2275,
+          "created_at": "2026-10-27T15:43:04Z",
+          "closed_at": "2026-10-28T00:46:55Z",
+          "merged_at": "2026-10-28T00:46:55Z",
+          "state": "closed",
+          "title": "fix(free-review): brand Telegram/WhatsApp request buttons and remove duplicate CTA"
+        },
+        {
+          "number": 2276,
+          "created_at": "2026-10-27T15:43:32Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(free-review): three-part benefits graphic (correct RU/EN constellation videos pending)"
+        },
+        {
+          "number": 2277,
+          "created_at": "2026-10-27T15:45:40Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(dao): original parable illustrations, all 18 stages and free review"
+        },
+        {
+          "number": 2278,
+          "created_at": "2026-10-27T15:47:18Z",
+          "closed_at": "2026-10-27T18:09:10Z",
+          "merged_at": "2026-10-27T18:09:10Z",
+          "state": "closed",
+          "title": "fix(telegram): reliable video start link and persistent owner /video command"
+        },
+        {
+          "number": 2279,
+          "created_at": "2026-10-27T15:54:02Z",
+          "closed_at": "2026-10-28T16:53:16Z",
+          "merged_at": "2026-10-28T16:53:16Z",
+          "state": "closed",
+          "title": "fix(telegram): make Let's begin a single full-width button"
+        },
+        {
+          "number": 2280,
+          "created_at": "2026-10-27T15:56:05Z",
+          "closed_at": "2026-10-28T16:53:37Z",
+          "merged_at": "2026-10-28T16:53:37Z",
+          "state": "closed",
+          "title": "fix(telegram): recognize natural typed yes/да/sí to advance to message 2"
+        },
+        {
+          "number": 2281,
+          "created_at": "2026-10-27T15:56:52Z",
+          "closed_at": "2026-10-30T13:30:01Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: French FoMO, Hungarian SHI and relationship measures"
+        },
+        {
+          "number": 2282,
+          "created_at": "2026-10-27T16:00:22Z",
+          "closed_at": "2026-10-27T18:55:20Z",
+          "merged_at": "2026-10-27T18:55:20Z",
+          "state": "closed",
+          "title": "Profile wizard: separate Scales, Topics and Tests (EN/RU/ES)"
+        },
+        {
+          "number": 2283,
+          "created_at": "2026-10-27T16:02:10Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "fix(profile): scope optional tests to client's selected topics and scales"
+        },
+        {
+          "number": 2284,
+          "created_at": "2026-10-27T16:04:39Z",
+          "closed_at": "2026-10-27T18:56:43Z",
+          "merged_at": "2026-10-27T18:56:42Z",
+          "state": "closed",
+          "title": "fix(youtube): reuse configured Google Web OAuth on iPhone, no second Client ID setup"
+        },
+        {
+          "number": 2285,
+          "created_at": "2026-10-27T16:11:29Z",
+          "closed_at": "2026-10-27T22:29:13Z",
+          "merged_at": "2026-10-27T22:29:13Z",
+          "state": "closed",
+          "title": "fix(profile): persist unchecked test cards, rank 3+5 suggestions with fit %"
+        },
+        {
+          "number": 2286,
+          "created_at": "2026-10-27T16:20:08Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "test(holistic): align mobile topic flow with inline talisman and energy orders"
+        },
+        {
+          "number": 2287,
+          "created_at": "2026-10-27T16:26:38Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "seo: clarify Toronto individual constellations in existing EN/RU/ES landing"
+        },
+        {
+          "number": 2288,
+          "created_at": "2026-10-27T16:29:17Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "fix(remote support): optional preferred time and one-tap inline CRM confirmation"
+        },
+        {
+          "number": 2289,
+          "created_at": "2026-10-27T16:31:26Z",
+          "closed_at": "2026-10-27T17:53:17Z",
+          "merged_at": "2026-10-27T17:53:17Z",
+          "state": "closed",
+          "title": "feat(holistic): full-width one-screen topic/service/budget search"
+        },
+        {
+          "number": 2290,
+          "created_at": "2026-10-27T16:37:12Z",
+          "closed_at": "2026-10-27T17:09:18Z",
+          "merged_at": "2026-10-27T17:09:18Z",
+          "state": "closed",
+          "title": "Noon Telegram: deliver separate Marketing and SEO report files"
+        },
+        {
+          "number": 2291,
+          "created_at": "2026-10-27T16:37:51Z",
+          "closed_at": "2026-10-27T17:11:34Z",
+          "merged_at": "2026-10-27T17:11:34Z",
+          "state": "closed",
+          "title": "feat: mobile Daoist talisman catalog and selected-design enquiry"
+        },
+        {
+          "number": 2292,
+          "created_at": "2026-10-27T16:51:36Z",
+          "closed_at": "2026-10-30T13:29:58Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: AI cognitive offloading (20-item) and dependent/autonomous (4+4) measures"
+        },
+        {
+          "number": 2293,
+          "created_at": "2026-10-27T17:28:27Z",
+          "closed_at": "2026-10-27T18:05:15Z",
+          "merged_at": "2026-10-27T18:05:15Z",
+          "state": "closed",
+          "title": "fix(telegram-video): install and trace FFmpeg on Vercel instead of silently failing"
+        },
+        {
+          "number": 2294,
+          "created_at": "2026-10-27T17:50:39Z",
+          "closed_at": "2026-10-30T13:28:33Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: 7 primary-source psychometric editions (PEACE, IUS, SDQ, POAS, POIS)"
+        },
+        {
+          "number": 2295,
+          "created_at": "2026-10-27T18:08:40Z",
+          "closed_at": "2026-10-27T18:40:30Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "test(billing): cover live PayPal.Me and current ZEN book-first flow"
+        },
+        {
+          "number": 2296,
+          "created_at": "2026-10-27T18:12:41Z",
+          "closed_at": "2026-10-27T18:21:27Z",
+          "merged_at": "2026-10-27T18:21:27Z",
+          "state": "closed",
+          "title": "fix(holistic): one-click talisman enquiry from Daoist catalog"
+        },
+        {
+          "number": 2297,
+          "created_at": "2026-10-27T18:24:59Z",
+          "closed_at": "2026-10-27T18:39:27Z",
+          "merged_at": "2026-10-27T18:39:27Z",
+          "state": "closed",
+          "title": "feat(payments): verified Square CA$50 button + PayPal/Zen billing QA"
+        },
+        {
+          "number": 2298,
+          "created_at": "2026-10-27T18:54:08Z",
+          "closed_at": "2026-10-30T13:28:30Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: DWB-12 (Miao) and IPS-STIC-22 psychometrics"
+        },
+        {
+          "number": 2299,
+          "created_at": "2026-10-27T19:00:38Z",
+          "closed_at": "2026-10-27T19:03:08Z",
+          "merged_at": "2026-10-27T19:03:08Z",
+          "state": "closed",
+          "title": "feat(payments): add owner-verified Square CA$40 checkout next to CA$50"
+        },
+        {
+          "number": 2300,
+          "created_at": "2026-10-27T19:40:08Z",
+          "closed_at": "2026-10-27T19:48:39Z",
+          "merged_at": "2026-10-27T19:48:39Z",
+          "state": "closed",
+          "title": "fix(telegram): make owner voice-combine button open reliable /combine flow"
+        },
+        {
+          "number": 2301,
+          "created_at": "2026-10-27T19:45:05Z",
+          "closed_at": "2026-10-27T20:12:07Z",
+          "merged_at": "2026-10-27T20:12:07Z",
+          "state": "closed",
+          "title": "fix(telegram-video): send start-time receipt while Dot builds MP4"
+        },
+        {
+          "number": 2302,
+          "created_at": "2026-10-27T19:47:09Z",
+          "closed_at": "2026-11-02T22:53:48Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot): choose Russian or English YouTube, publish reviewed MP4 and send link in Telegram"
+        },
+        {
+          "number": 2303,
+          "created_at": "2026-10-27T19:47:14Z",
+          "closed_at": "2026-10-27T19:52:26Z",
+          "merged_at": "2026-10-27T19:52:26Z",
+          "state": "closed",
+          "title": "fix(telegram-video): immediate /video_done reply and reliable private MP4 delivery status"
+        },
+        {
+          "number": 2304,
+          "created_at": "2026-10-27T19:56:47Z",
+          "closed_at": "2026-10-30T13:28:28Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: CU-40/CU-20 US, German and Turkish psychometric editions"
+        },
+        {
+          "number": 2305,
+          "created_at": "2026-10-27T20:04:25Z",
+          "closed_at": "2026-10-27T21:01:45Z",
+          "merged_at": "2026-10-27T21:01:45Z",
+          "state": "closed",
+          "title": "fix(dot-video): verify entire 11-audio/3-photo batch and render full soundtrack"
+        },
+        {
+          "number": 2306,
+          "created_at": "2026-10-27T20:34:40Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(Instagram): @tao.ideas free native Reel handoff without Metricool"
+        },
+        {
+          "number": 2307,
+          "created_at": "2026-10-27T20:36:38Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(events): approved Square/PayPal ticket checkout on moderated events"
+        },
+        {
+          "number": 2308,
+          "created_at": "2026-10-27T20:50:16Z",
+          "closed_at": "2026-11-01T14:01:00Z",
+          "merged_at": "2026-11-01T14:01:00Z",
+          "state": "closed",
+          "title": "feat(meditations): full-screen app with fixed YouTube player, four topics and course/tradition menus"
+        },
+        {
+          "number": 2309,
+          "created_at": "2026-10-27T20:51:36Z",
+          "closed_at": "2026-10-30T13:28:25Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research-only: social-media motives/appraisals and RRDFS digital fidelity"
+        },
+        {
+          "number": 2310,
+          "created_at": "2026-10-27T20:57:50Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(videos): verified master attribution and all-videos profile gallery"
+        },
+        {
+          "number": 2311,
+          "created_at": "2026-10-27T20:58:30Z",
+          "closed_at": "2026-10-27T21:01:14Z",
+          "merged_at": "2026-10-27T21:01:14Z",
+          "state": "closed",
+          "title": "fix(holistic): remove standalone audio cards from meditation gallery"
+        },
+        {
+          "number": 2313,
+          "created_at": "2026-10-27T21:04:19Z",
+          "closed_at": "2026-10-27T22:26:21Z",
+          "merged_at": "2026-10-27T22:26:20Z",
+          "state": "closed",
+          "title": "feat(holistic): Daoist talisman basket with consented quote and honest payment gate"
+        },
+        {
+          "number": 2314,
+          "created_at": "2026-10-27T21:05:46Z",
+          "closed_at": "2026-10-27T22:38:36Z",
+          "merged_at": "2026-10-27T22:38:36Z",
+          "state": "closed",
+          "title": "feat(cart): photo-led service cards, CRM order by phone/Google, large payment CTA"
+        },
+        {
+          "number": 2315,
+          "created_at": "2026-10-27T21:08:36Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(holistic): standalone talisman catalogue and automatically visible support providers"
+        },
+        {
+          "number": 2316,
+          "created_at": "2026-10-27T21:09:31Z",
+          "closed_at": "2026-10-27T22:39:48Z",
+          "merged_at": "2026-10-27T22:39:48Z",
+          "state": "closed",
+          "title": "feat(holistic): personal photo mandala meditation from legacy Power Place"
+        },
+        {
+          "number": 2318,
+          "created_at": "2026-10-27T21:15:10Z",
+          "closed_at": "2026-10-28T03:26:52Z",
+          "merged_at": "2026-10-28T03:26:52Z",
+          "state": "closed",
+          "title": "fix(reports): publish missing Chart / Axes / Tests submenu and keep Goal Profile"
+        },
+        {
+          "number": 2319,
+          "created_at": "2026-10-27T21:20:19Z",
+          "closed_at": "2026-10-27T21:25:14Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(holistic): personal mandala support studio with private photo and video meditation"
+        },
+        {
+          "number": 2320,
+          "created_at": "2026-10-27T21:39:26Z",
+          "closed_at": "2026-10-27T21:53:20Z",
+          "merged_at": "2026-10-27T21:53:20Z",
+          "state": "closed",
+          "title": "feat(holistic): separate mobile-first Support experience using existing media and bookings"
+        },
+        {
+          "number": 2321,
+          "created_at": "2026-10-27T21:48:29Z",
+          "closed_at": "2026-10-30T13:28:03Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research only: FLS-12, Parenting PS-4, FLQ-Spain cultural felt love (3 primary refs)"
+        },
+        {
+          "number": 2322,
+          "created_at": "2026-10-27T22:23:12Z",
+          "closed_at": "2026-10-27T22:28:25Z",
+          "merged_at": "2026-10-27T22:28:25Z",
+          "state": "closed",
+          "title": "fix(support): match approved compact mobile mock on iPhone"
+        },
+        {
+          "number": 2323,
+          "created_at": "2026-10-27T22:38:02Z",
+          "closed_at": "2026-10-27T22:51:49Z",
+          "merged_at": "2026-10-27T22:51:49Z",
+          "state": "closed",
+          "title": "feat(support): personalized verified-video and talisman recommendations + detailed profile"
+        },
+        {
+          "number": 2324,
+          "created_at": "2026-10-27T22:54:26Z",
+          "closed_at": "2026-10-30T13:28:00Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Psychometric research: couples' sleep conflict and communication (TR validation)"
+        },
+        {
+          "number": 2325,
+          "created_at": "2026-10-27T23:15:35Z",
+          "closed_at": "2026-10-28T03:20:08Z",
+          "merged_at": "2026-10-28T03:20:08Z",
+          "state": "closed",
+          "title": "feat(mandala): private PNG save and Chromium/WebKit mobile journey checks"
+        },
+        {
+          "number": 2326,
+          "created_at": "2026-10-27T23:49:32Z",
+          "closed_at": "2026-10-30T13:27:57Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Psychometric research: ECI-S Spanish/Arabic, FIS-25, French QWL-40"
+        },
+        {
+          "number": 2327,
+          "created_at": "2026-10-28T00:27:49Z",
+          "closed_at": "2026-10-28T00:43:04Z",
+          "merged_at": "2026-10-28T00:43:04Z",
+          "state": "closed",
+          "title": "fix(dot-video): prevent squeezed photo previews and align late photos before prior audio"
+        },
+        {
+          "number": 2328,
+          "created_at": "2026-10-28T00:29:27Z",
+          "closed_at": "2026-10-28T00:40:20Z",
+          "merged_at": "2026-10-28T00:40:20Z",
+          "state": "closed",
+          "title": "fix(support): restore original three-zone mobile mock, four visible video cards and dominant hero"
+        },
+        {
+          "number": 2329,
+          "created_at": "2026-10-28T00:31:29Z",
+          "closed_at": "2026-10-28T00:48:18Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(dot-video): trim beginning of private preview before consented YouTube upload"
+        },
+        {
+          "number": 2330,
+          "created_at": "2026-10-28T00:43:52Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(support): richer personal recommendation experience on mobile"
+        },
+        {
+          "number": 2331,
+          "created_at": "2026-10-28T00:44:43Z",
+          "closed_at": "2026-10-28T03:23:20Z",
+          "merged_at": "2026-10-28T03:23:20Z",
+          "state": "closed",
+          "title": "fix(video): compact iPhone Kling money-flow preset and no-credit local clip"
+        },
+        {
+          "number": 2332,
+          "created_at": "2026-10-28T00:48:06Z",
+          "closed_at": "2026-10-28T01:20:16Z",
+          "merged_at": "2026-10-28T01:20:16Z",
+          "state": "closed",
+          "title": "feat(dot-video): private start-second trim before YouTube, preserving photo aspect and timeline"
+        },
+        {
+          "number": 2333,
+          "created_at": "2026-10-28T00:52:40Z",
+          "closed_at": "2026-10-28T00:54:36Z",
+          "merged_at": "2026-10-28T00:54:36Z",
+          "state": "closed",
+          "title": "test(free-review): distinguish Telegram readiness from an actual saved lead"
+        },
+        {
+          "number": 2334,
+          "created_at": "2026-10-28T00:56:23Z",
+          "closed_at": "2026-10-30T13:27:54Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "docs(psychometrics): RRILS-15, AWQ-13 and PSSQ-20 primary evidence"
+        },
+        {
+          "number": 2335,
+          "created_at": "2026-10-28T00:57:42Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(support): Goals / Meaning and verified Egyptian, Greek, Maya video programmes"
+        },
+        {
+          "number": 2336,
+          "created_at": "2026-10-28T00:58:29Z",
+          "closed_at": "2026-10-28T01:08:10Z",
+          "merged_at": "2026-10-28T01:08:10Z",
+          "state": "closed",
+          "title": "fix(support): match approved mock with original scene and readable iPhone controls"
+        },
+        {
+          "number": 2337,
+          "created_at": "2026-10-28T01:10:28Z",
+          "closed_at": "2026-10-28T03:25:33Z",
+          "merged_at": "2026-10-28T03:25:33Z",
+          "state": "closed",
+          "title": "feat(support): swipeable talismans in the same media viewer with inline quote"
+        },
+        {
+          "number": 2338,
+          "created_at": "2026-10-28T01:13:19Z",
+          "closed_at": "2026-10-28T01:43:46Z",
+          "merged_at": "2026-10-28T01:43:46Z",
+          "state": "closed",
+          "title": "fix(free-review): stabilize Safari focus-card taps and verify 24 mobile cases"
+        },
+        {
+          "number": 2339,
+          "created_at": "2026-10-28T01:13:46Z",
+          "closed_at": "2026-10-28T01:14:04Z",
+          "merged_at": "2026-10-28T01:14:04Z",
+          "state": "closed",
+          "title": "ci(support): stop unrelated PRs from canceling production mobile browser verification"
+        },
+        {
+          "number": 2340,
+          "created_at": "2026-10-28T01:19:24Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(support): inline personal mandala with before/after four-scale check-in"
+        },
+        {
+          "number": 2341,
+          "created_at": "2026-10-28T01:22:43Z",
+          "closed_at": "2026-10-28T01:26:38Z",
+          "merged_at": "2026-10-28T01:26:38Z",
+          "state": "closed",
+          "title": "fix(support): make 320px dashboard compact without clipping labels"
+        },
+        {
+          "number": 2342,
+          "created_at": "2026-10-28T01:23:12Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(support): select Focus directly beside scales or All"
+        },
+        {
+          "number": 2343,
+          "created_at": "2026-10-28T01:24:40Z",
+          "closed_at": "2026-10-28T01:49:28Z",
+          "merged_at": "2026-10-28T01:49:28Z",
+          "state": "closed",
+          "title": "feat(support): move recommendations to check-in and add Energy Healing"
+        },
+        {
+          "number": 2344,
+          "created_at": "2026-10-28T01:55:33Z",
+          "closed_at": "2026-10-30T13:27:52Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "docs(psychometrics): EFHAQ, menstrual literacy, EAGL and infertility distress source review"
+        },
+        {
+          "number": 2345,
+          "created_at": "2026-10-28T02:23:32Z",
+          "closed_at": "2026-10-28T16:54:32Z",
+          "merged_at": "2026-10-28T16:54:32Z",
+          "state": "closed",
+          "title": "ci: exercise owner video uncertain-write recovery test"
+        },
+        {
+          "number": 2346,
+          "created_at": "2026-10-28T02:49:17Z",
+          "closed_at": "2026-10-30T13:27:48Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "docs(psychometrics): Brazilian MOSR-21 and Portuguese RTT-20 evidence"
+        },
+        {
+          "number": 2347,
+          "created_at": "2026-10-28T03:04:43Z",
+          "closed_at": "2026-10-28T03:22:07Z",
+          "merged_at": "2026-10-28T03:22:07Z",
+          "state": "closed",
+          "title": "fix(support): readable two-row mobile dashboard, no clipped labels or broken avatar"
+        },
+        {
+          "number": 2348,
+          "created_at": "2026-10-28T03:18:20Z",
+          "closed_at": "2026-10-28T03:34:59Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "fix(support): reproduce original iPhone mock with three balanced zones and four meditation options"
+        },
+        {
+          "number": 2349,
+          "created_at": "2026-10-28T03:26:10Z",
+          "closed_at": "2026-10-28T03:38:44Z",
+          "merged_at": "2026-10-28T03:38:44Z",
+          "state": "closed",
+          "title": "feat(mandala): free private photo-to-video studio (browser-only)"
+        },
+        {
+          "number": 2350,
+          "created_at": "2026-10-28T03:32:02Z",
+          "closed_at": "2026-10-28T03:41:33Z",
+          "merged_at": "2026-10-28T03:41:33Z",
+          "state": "closed",
+          "title": "fix(support): original iPhone mock fidelity with latest talisman viewer preserved"
+        },
+        {
+          "number": 2351,
+          "created_at": "2026-10-28T03:38:07Z",
+          "closed_at": "2026-10-28T03:45:17Z",
+          "merged_at": "2026-10-28T03:45:17Z",
+          "state": "closed",
+          "title": "build(ios): unsigned arm64 Holistic House IPA for free owner-side iPhone signing"
+        },
+        {
+          "number": 2352,
+          "created_at": "2026-10-28T03:41:17Z",
+          "closed_at": "2026-10-28T03:43:06Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "fix(support): iPhone 430px hero within first 350px"
+        },
+        {
+          "number": 2353,
+          "created_at": "2026-10-28T03:43:16Z",
+          "closed_at": "2026-10-28T03:52:43Z",
+          "merged_at": "2026-10-28T03:52:43Z",
+          "state": "closed",
+          "title": "feat(mandala): 12 free money-flow videos with private client photo"
+        },
+        {
+          "number": 2354,
+          "created_at": "2026-10-28T03:50:10Z",
+          "closed_at": "2026-10-30T13:27:46Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "docs(psychometrics): source audit for SOVES German and French home-care surveys"
+        },
+        {
+          "number": 2355,
+          "created_at": "2026-10-28T03:50:33Z",
+          "closed_at": "2026-10-28T05:03:12Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(mandala): client-selected free video scenarios and real export"
+        },
+        {
+          "number": 2356,
+          "created_at": "2026-10-28T04:01:24Z",
+          "closed_at": "2026-10-28T04:04:40Z",
+          "merged_at": "2026-10-28T04:04:40Z",
+          "state": "closed",
+          "title": "fix(youtube): recover verified-owner session before Telegram YouTube OAuth"
+        },
+        {
+          "number": 2358,
+          "created_at": "2026-10-28T04:09:08Z",
+          "closed_at": "2026-10-28T04:13:28Z",
+          "merged_at": "2026-10-28T04:13:28Z",
+          "state": "closed",
+          "title": "feat(youtube): download the exact private trimmed MP4 without Google OAuth"
+        },
+        {
+          "number": 2359,
+          "created_at": "2026-10-28T04:10:52Z",
+          "closed_at": "2026-10-28T04:54:00Z",
+          "merged_at": "2026-10-28T04:54:00Z",
+          "state": "closed",
+          "title": "feat(video): cinematic real motion, 12 money scenes and large client portraits"
+        },
+        {
+          "number": 2360,
+          "created_at": "2026-10-28T04:13:39Z",
+          "closed_at": "2026-10-28T12:06:15Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(video): public self-service photo + own voice video for Telegram"
+        },
+        {
+          "number": 2361,
+          "created_at": "2026-10-28T04:20:20Z",
+          "closed_at": "2026-10-28T04:55:34Z",
+          "merged_at": "2026-10-28T04:55:34Z",
+          "state": "closed",
+          "title": "fix(youtube): persist owner RU Google consent against deployed composite OAuth key"
+        },
+        {
+          "number": 2362,
+          "created_at": "2026-10-28T04:20:46Z",
+          "closed_at": "2026-10-28T04:34:05Z",
+          "merged_at": "2026-10-28T04:34:05Z",
+          "state": "closed",
+          "title": "feat(support): choose meditations by lowest ratings, raise gallery above player"
+        },
+        {
+          "number": 2363,
+          "created_at": "2026-10-28T04:24:52Z",
+          "closed_at": "2026-10-28T05:07:23Z",
+          "merged_at": "2026-10-28T05:07:23Z",
+          "state": "closed",
+          "title": "fix(academy): restore visible RU Maya, Egyptian and Greek mysteries courses"
+        },
+        {
+          "number": 2364,
+          "created_at": "2026-10-28T04:27:42Z",
+          "closed_at": "2026-10-28T13:03:00Z",
+          "merged_at": "2026-10-28T13:03:00Z",
+          "state": "closed",
+          "title": "feat(youtube): send reviewed Telegram cut through existing phone YouTube uploader"
+        },
+        {
+          "number": 2365,
+          "created_at": "2026-10-28T04:45:57Z",
+          "closed_at": "2026-10-30T13:27:43Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Holistic House: four research-only psychometric instruments, source and rights review (Oct 28)"
+        },
+        {
+          "number": 2366,
+          "created_at": "2026-10-28T04:56:56Z",
+          "closed_at": "2026-10-28T05:12:39Z",
+          "merged_at": "2026-10-28T05:12:39Z",
+          "state": "closed",
+          "title": "feat(support): unified hero-first video, talisman, master and service galleries"
+        },
+        {
+          "number": 2367,
+          "created_at": "2026-10-28T04:58:11Z",
+          "closed_at": "2026-10-28T11:57:42Z",
+          "merged_at": "2026-10-28T11:57:42Z",
+          "state": "closed",
+          "title": "feat(video): playable cinematic template cards instead of static icons"
+        },
+        {
+          "number": 2368,
+          "created_at": "2026-10-28T05:01:11Z",
+          "closed_at": "2026-10-28T12:55:47Z",
+          "merged_at": "2026-10-28T12:55:46Z",
+          "state": "closed",
+          "title": "feat(video): implement approved mobile editor with four themes and real local export"
+        },
+        {
+          "number": 2369,
+          "created_at": "2026-10-28T05:20:18Z",
+          "closed_at": "2026-10-28T11:48:15Z",
+          "merged_at": "2026-10-28T11:48:15Z",
+          "state": "closed",
+          "title": "feat(support): mobile goal filter with five sectors, concerns, tasks and current→desired scales"
+        },
+        {
+          "number": 2370,
+          "created_at": "2026-10-28T05:49:59Z",
+          "closed_at": "2026-10-30T13:26:03Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research-only: COMPASS-28, CMIYA-42 and SAMNS-26 evidence and rights gates"
+        },
+        {
+          "number": 2371,
+          "created_at": "2026-10-28T06:52:44Z",
+          "closed_at": "2026-10-30T13:26:00Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research-only: DWBQ English validation, PDNS-15, RSII-43 psychometric evidence"
+        },
+        {
+          "number": 2372,
+          "created_at": "2026-10-28T07:52:04Z",
+          "closed_at": "2026-10-30T13:25:57Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "research(assessments): DMS English/Arabic and Spanish palliative caregiver needs"
+        },
+        {
+          "number": 2373,
+          "created_at": "2026-10-28T08:56:08Z",
+          "closed_at": "2026-10-30T13:25:55Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research: seven verified positive/benevolent childhood experience editions (metadata only)"
+        },
+        {
+          "number": 2374,
+          "created_at": "2026-10-28T09:47:30Z",
+          "closed_at": "2026-10-30T13:25:53Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research: K6 Russian and digital wellbeing editions (five source-only records)"
+        },
+        {
+          "number": 2375,
+          "created_at": "2026-10-28T10:47:46Z",
+          "closed_at": "2026-10-30T13:25:50Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research: Ghana GNAS-11 and modified GEM-16 (source-only)"
+        },
+        {
+          "number": 2376,
+          "created_at": "2026-10-28T11:47:21Z",
+          "closed_at": "2026-10-30T13:25:47Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Research: MDI-14, PSJCM-12 and Food Literacy BITE-18 (metadata only)"
+        },
+        {
+          "number": 2377,
+          "created_at": "2026-10-28T11:56:23Z",
+          "closed_at": "2026-10-28T12:01:33Z",
+          "merged_at": "2026-10-28T12:01:33Z",
+          "state": "closed",
+          "title": "fix(support): show PsiMaster Maya, Egyptian and Greek courses on mobile Courses screen"
+        },
+        {
+          "number": 2378,
+          "created_at": "2026-10-28T11:57:59Z",
+          "closed_at": "2026-10-28T12:09:56Z",
+          "merged_at": "2026-10-28T12:09:56Z",
+          "state": "closed",
+          "title": "feat(support): compact talisman/master heroes, video mandala shortcut & four Reiki filters"
+        },
+        {
+          "number": 2379,
+          "created_at": "2026-10-28T12:04:41Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(video): production-integrated Telegram photo + original voice self-service"
+        }
+      ]
+    },
+    {
+      "id": "two_weeks_ago",
+      "label": "Две недели назад",
+      "from": "2026-10-20T12:05:00Z",
+      "to": "2026-10-21T12:05:00Z",
+      "complete": true,
+      "source": "GitHub Search issues PR, complete pages 1-2",
+      "expected_count": 151,
+      "rows": [
+        {
+          "number": 1292,
+          "created_at": "2026-10-20T12:22:33Z",
+          "closed_at": "2026-10-20T12:27:21Z",
+          "merged_at": "2026-10-20T12:27:21Z",
+          "state": "closed",
+          "title": "fix(pdf): improve client report readability and prevent progress chart collisions"
+        },
+        {
+          "number": 1293,
+          "created_at": "2026-10-20T12:36:00Z",
+          "closed_at": "2026-10-20T12:41:49Z",
+          "merged_at": "2026-10-20T12:41:49Z",
+          "state": "closed",
+          "title": "Master Materials: Reiki Practitioner audio folders by lesson and RU/EN"
+        },
+        {
+          "number": 1294,
+          "created_at": "2026-10-20T12:39:03Z",
+          "closed_at": "2026-10-20T12:40:14Z",
+          "merged_at": "2026-10-20T12:40:14Z",
+          "state": "closed",
+          "title": "CRM: no-API-fee manual SMS queue for opted-in contacts plus free Push option"
+        },
+        {
+          "number": 1295,
+          "created_at": "2026-10-20T12:42:36Z",
+          "closed_at": "2026-10-20T12:47:36Z",
+          "merged_at": "2026-10-20T12:47:36Z",
+          "state": "closed",
+          "title": "Ads: paused Meta/Google pilot readiness and privacy-safe paid referral handoff"
+        },
+        {
+          "number": 1296,
+          "created_at": "2026-10-20T12:44:09Z",
+          "closed_at": "2026-10-20T12:53:00Z",
+          "merged_at": "2026-10-20T12:53:00Z",
+          "state": "closed",
+          "title": "design(pdf): premium editorial A4 redesign for Holistic House client reports"
+        },
+        {
+          "number": 1297,
+          "created_at": "2026-10-20T12:46:32Z",
+          "closed_at": "2026-10-20T13:23:09Z",
+          "merged_at": "2026-10-20T13:23:09Z",
+          "state": "closed",
+          "title": "Holistic House: evidence tiers for 150 tests and safer check-in interpretation"
+        },
+        {
+          "number": 1300,
+          "created_at": "2026-10-20T12:50:06Z",
+          "closed_at": "2026-10-20T12:52:10Z",
+          "merged_at": "2026-10-20T12:52:10Z",
+          "state": "closed",
+          "title": "Holistic House: one BotFather secret store for My Practice, AI Council and daily audits"
+        },
+        {
+          "number": 1301,
+          "created_at": "2026-10-20T12:52:28Z",
+          "closed_at": "2026-10-20T13:34:45Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "feat(practice): CRM v5 assigned-master followup tasks and consent-based message alerts"
+        },
+        {
+          "number": 1303,
+          "created_at": "2026-10-20T13:01:22Z",
+          "closed_at": "2026-10-20T13:05:01Z",
+          "merged_at": "2026-10-20T13:05:01Z",
+          "state": "closed",
+          "title": "feat(practice): master CRM tasks, overdue queue and consent-based private push — live-ready"
+        },
+        {
+          "number": 1304,
+          "created_at": "2026-10-20T13:03:08Z",
+          "closed_at": "2026-10-20T13:20:05Z",
+          "merged_at": "2026-10-20T13:20:05Z",
+          "state": "closed",
+          "title": "feat(native): separate installable Holistic House Android APK and iOS build"
+        },
+        {
+          "number": 1305,
+          "created_at": "2026-10-20T13:09:30Z",
+          "closed_at": "2026-10-20T13:10:08Z",
+          "merged_at": "2026-10-20T13:10:08Z",
+          "state": "closed",
+          "title": "test(practice): align R2 free-service contract with verified fixed pricing"
+        },
+        {
+          "number": 1306,
+          "created_at": "2026-10-20T13:18:47Z",
+          "closed_at": "2026-10-20T13:20:08Z",
+          "merged_at": "2026-10-20T13:20:08Z",
+          "state": "closed",
+          "title": "CRM: free native email handoff alongside manual SMS and opt-in Web Push"
+        },
+        {
+          "number": 1307,
+          "created_at": "2026-10-20T13:18:56Z",
+          "closed_at": "2026-10-20T14:40:49Z",
+          "merged_at": "2026-10-20T14:40:49Z",
+          "state": "closed",
+          "title": "feat(Holistic House): encrypted Telegram/WhatsApp notification preferences (P1)"
+        },
+        {
+          "number": 1308,
+          "created_at": "2026-10-20T13:21:21Z",
+          "closed_at": "2026-10-20T13:29:16Z",
+          "merged_at": "2026-10-20T13:29:15Z",
+          "state": "closed",
+          "title": "design(pdf): quieter remedy cards and readable source appendices"
+        },
+        {
+          "number": 1311,
+          "created_at": "2026-10-20T13:26:00Z",
+          "closed_at": "2026-10-20T13:27:41Z",
+          "merged_at": "2026-10-20T13:27:41Z",
+          "state": "closed",
+          "title": "SEO: connect free IndexNow notifications for confirmed public Holistic House pages"
+        },
+        {
+          "number": 1312,
+          "created_at": "2026-10-20T13:28:34Z",
+          "closed_at": "2026-10-20T13:29:07Z",
+          "merged_at": "2026-10-20T13:29:07Z",
+          "state": "closed",
+          "title": "fix(practice): enforce follow-up task caps across concurrent master actions"
+        },
+        {
+          "number": 1313,
+          "created_at": "2026-10-20T13:30:21Z",
+          "closed_at": "2026-10-20T13:37:15Z",
+          "merged_at": "2026-10-20T13:37:15Z",
+          "state": "closed",
+          "title": "Reiki landings: one-screen premium design with expandable detail"
+        },
+        {
+          "number": 1314,
+          "created_at": "2026-10-20T13:30:52Z",
+          "closed_at": "2026-10-20T13:42:14Z",
+          "merged_at": "2026-10-20T13:42:14Z",
+          "state": "closed",
+          "title": "HH assessment quality: full technical specification and 73-family item review QA"
+        },
+        {
+          "number": 1315,
+          "created_at": "2026-10-20T13:32:22Z",
+          "closed_at": "2026-10-20T13:39:31Z",
+          "merged_at": "2026-10-20T13:39:31Z",
+          "state": "closed",
+          "title": "Reiki audio library v2: private draft recordings and verified publication"
+        },
+        {
+          "number": 1316,
+          "created_at": "2026-10-20T13:32:44Z",
+          "closed_at": "2026-10-20T13:42:06Z",
+          "merged_at": "2026-10-20T13:42:06Z",
+          "state": "closed",
+          "title": "Andrey Voice: free Mac narration specification, privacy queue and paid TTS guard"
+        },
+        {
+          "number": 1317,
+          "created_at": "2026-10-20T13:33:08Z",
+          "closed_at": "2026-10-20T13:33:31Z",
+          "merged_at": "2026-10-20T13:33:31Z",
+          "state": "closed",
+          "title": "test(practice): align owner task lock contract with transactional implementation"
+        },
+        {
+          "number": 1318,
+          "created_at": "2026-10-20T13:36:35Z",
+          "closed_at": "2026-10-20T15:05:33Z",
+          "merged_at": "2026-10-20T15:05:33Z",
+          "state": "closed",
+          "title": "feat(client): private 90-day Business & Career coaching in Holistic House"
+        },
+        {
+          "number": 1319,
+          "created_at": "2026-10-20T13:44:01Z",
+          "closed_at": "2026-10-20T13:51:08Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Diagnose and repair corrupt pinned static artwork blocking production"
+        },
+        {
+          "number": 1320,
+          "created_at": "2026-10-20T13:45:45Z",
+          "closed_at": "2026-10-20T13:47:00Z",
+          "merged_at": "2026-10-20T13:47:00Z",
+          "state": "closed",
+          "title": "fix(build): quarantine truncated WebP and restore public artwork prebuild"
+        },
+        {
+          "number": 1321,
+          "created_at": "2026-10-20T13:47:24Z",
+          "closed_at": "2026-10-20T13:50:17Z",
+          "merged_at": "2026-10-20T13:50:17Z",
+          "state": "closed",
+          "title": "Holistic House: sync 3,092 research source editions with focused safety CI"
+        },
+        {
+          "number": 1322,
+          "created_at": "2026-10-20T13:51:56Z",
+          "closed_at": "2026-10-20T14:03:42Z",
+          "merged_at": "2026-10-20T14:03:42Z",
+          "state": "closed",
+          "title": "fix(build): pinpoint corrupt pinned artwork images in Vercel prebuild"
+        },
+        {
+          "number": 1323,
+          "created_at": "2026-10-20T13:53:36Z",
+          "closed_at": "2026-10-20T13:53:57Z",
+          "merged_at": "2026-10-20T13:53:57Z",
+          "state": "closed",
+          "title": "test(images): repair static-artwork CI JavaScript parse error"
+        },
+        {
+          "number": 1324,
+          "created_at": "2026-10-20T14:35:00Z",
+          "closed_at": "2026-10-20T14:37:04Z",
+          "merged_at": "2026-10-20T14:37:04Z",
+          "state": "closed",
+          "title": "Show verified EN/RU check-in insights in compact client reports"
+        },
+        {
+          "number": 1325,
+          "created_at": "2026-10-20T14:38:24Z",
+          "closed_at": "2026-10-20T14:45:17Z",
+          "merged_at": "2026-10-20T14:45:17Z",
+          "state": "closed",
+          "title": "Growth Studio: safely rebase owner editorial MVP, CSV and channel readiness"
+        },
+        {
+          "number": 1326,
+          "created_at": "2026-10-20T14:38:32Z",
+          "closed_at": "2026-10-20T14:54:18Z",
+          "merged_at": "2026-10-20T14:54:18Z",
+          "state": "closed",
+          "title": "fix(pdf): restore authored mobile recommendations and prevent orphaned report paragraphs"
+        },
+        {
+          "number": 1327,
+          "created_at": "2026-10-20T14:39:04Z",
+          "closed_at": "2026-10-20T14:40:47Z",
+          "merged_at": "2026-10-20T14:40:47Z",
+          "state": "closed",
+          "title": "Finish free SMS/email CRM: searchable opt-ins, safe mailto and copy-ready drafts"
+        },
+        {
+          "number": 1328,
+          "created_at": "2026-10-20T14:40:09Z",
+          "closed_at": "2026-10-20T15:16:27Z",
+          "merged_at": "2026-10-20T15:16:26Z",
+          "state": "closed",
+          "title": "fix(sitemap): package RU/EN remedy sources and Spanish JSON in Vercel"
+        },
+        {
+          "number": 1329,
+          "created_at": "2026-10-20T14:41:28Z",
+          "closed_at": "2026-10-20T15:21:03Z",
+          "merged_at": "2026-10-20T15:21:03Z",
+          "state": "closed",
+          "title": "Holistic House: one-token Telegram owner chat discovery and complete secure onboarding TZ"
+        },
+        {
+          "number": 1330,
+          "created_at": "2026-10-20T14:44:22Z",
+          "closed_at": "2026-10-20T15:15:41Z",
+          "merged_at": "2026-10-20T15:15:41Z",
+          "state": "closed",
+          "title": "test: preserve confirmed course launch navigation contract"
+        },
+        {
+          "number": 1331,
+          "created_at": "2026-10-20T14:44:44Z",
+          "closed_at": "2026-10-20T14:53:52Z",
+          "merged_at": "2026-10-20T14:53:52Z",
+          "state": "closed",
+          "title": "Reiki audio library v3: names, notes, archive, guarded delete and bulk uploads"
+        },
+        {
+          "number": 1332,
+          "created_at": "2026-10-20T14:55:45Z",
+          "closed_at": "2026-10-20T14:56:10Z",
+          "merged_at": "2026-10-20T14:56:10Z",
+          "state": "closed",
+          "title": "test(reiki): fix seven stale 69-screen assertions after save-only milestone"
+        },
+        {
+          "number": 1333,
+          "created_at": "2026-10-20T15:03:21Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat: prepare disabled exact-version PC-PTSD-5 runtime support"
+        },
+        {
+          "number": 1334,
+          "created_at": "2026-10-20T15:09:09Z",
+          "closed_at": "2026-10-20T15:10:39Z",
+          "merged_at": "2026-10-20T15:10:39Z",
+          "state": "closed",
+          "title": "fix(client): make Business Coaching production CSS Modules compatible"
+        },
+        {
+          "number": 1335,
+          "created_at": "2026-10-20T15:13:00Z",
+          "closed_at": "2026-10-20T15:18:10Z",
+          "merged_at": "2026-10-20T15:18:10Z",
+          "state": "closed",
+          "title": "Business: compact benefit-led consultation funnel with authentic client videos"
+        },
+        {
+          "number": 1336,
+          "created_at": "2026-10-20T15:14:47Z",
+          "closed_at": "2026-10-20T15:25:30Z",
+          "merged_at": "2026-10-20T15:25:30Z",
+          "state": "closed",
+          "title": "feat(payments): individual card-link checkout and Interac without corporation"
+        },
+        {
+          "number": 1337,
+          "created_at": "2026-10-20T15:15:44Z",
+          "closed_at": "2026-10-20T15:16:07Z",
+          "merged_at": "2026-10-20T15:16:07Z",
+          "state": "closed",
+          "title": "ci(business): repair scoped 90-day coaching validation workflow"
+        },
+        {
+          "number": 1338,
+          "created_at": "2026-10-20T15:18:05Z",
+          "closed_at": "2026-10-20T15:47:36Z",
+          "merged_at": "2026-10-20T15:47:36Z",
+          "state": "closed",
+          "title": "feat(native): opt-in APNs/FCM alerts for Holistic House client conversations"
+        },
+        {
+          "number": 1339,
+          "created_at": "2026-10-20T15:30:05Z",
+          "closed_at": "2026-10-20T15:32:18Z",
+          "merged_at": "2026-10-20T15:32:18Z",
+          "state": "closed",
+          "title": "Growth Studio: prevent private route promotion and verify Redis REST safety"
+        },
+        {
+          "number": 1340,
+          "created_at": "2026-10-20T15:33:55Z",
+          "closed_at": "2026-10-20T15:41:59Z",
+          "merged_at": "2026-10-20T15:41:59Z",
+          "state": "closed",
+          "title": "Growth Studio P2: safe public website → reviewed social drafts"
+        },
+        {
+          "number": 1341,
+          "created_at": "2026-10-20T15:39:31Z",
+          "closed_at": "2026-10-20T15:54:35Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Andrey Voice: finish free Mac narrator backend (activation disabled)"
+        },
+        {
+          "number": 1342,
+          "created_at": "2026-10-20T15:41:10Z",
+          "closed_at": "2026-10-20T15:44:15Z",
+          "merged_at": "2026-10-20T15:44:15Z",
+          "state": "closed",
+          "title": "feat(payments): PayPal-first checkout without company; optional Square Individual CAD"
+        },
+        {
+          "number": 1343,
+          "created_at": "2026-10-20T15:43:19Z",
+          "closed_at": "2026-10-20T15:43:30Z",
+          "merged_at": "2026-10-20T15:43:30Z",
+          "state": "closed",
+          "title": "fix(native): release hardening for #1338"
+        },
+        {
+          "number": 1344,
+          "created_at": "2026-10-20T15:43:55Z",
+          "closed_at": "2026-10-20T15:56:33Z",
+          "merged_at": "2026-10-20T15:56:33Z",
+          "state": "closed",
+          "title": "feat(Business Coaching): 12 weekly modules with 90 measurable daily results"
+        },
+        {
+          "number": 1345,
+          "created_at": "2026-10-20T15:45:30Z",
+          "closed_at": "2026-10-20T15:46:16Z",
+          "merged_at": "2026-10-20T15:46:16Z",
+          "state": "closed",
+          "title": "CRM: phone intake and real SMS delivery architecture, cost gates and privacy map"
+        },
+        {
+          "number": 1346,
+          "created_at": "2026-10-20T15:54:16Z",
+          "closed_at": "2026-10-20T15:59:26Z",
+          "merged_at": "2026-10-20T15:59:26Z",
+          "state": "closed",
+          "title": "Growth Studio P2: reviewed evergreen repeat drafts and atomic source checks"
+        },
+        {
+          "number": 1347,
+          "created_at": "2026-10-20T15:54:26Z",
+          "closed_at": "2026-10-20T16:09:31Z",
+          "merged_at": "2026-10-20T16:09:31Z",
+          "state": "closed",
+          "title": "Andrey Voice: secure free Mac narration staging (feature disabled)"
+        },
+        {
+          "number": 1348,
+          "created_at": "2026-10-20T16:00:30Z",
+          "closed_at": "2026-10-20T16:01:30Z",
+          "merged_at": "2026-10-20T16:01:30Z",
+          "state": "closed",
+          "title": "fix(business): unblock weekly course Next.js production build"
+        },
+        {
+          "number": 1349,
+          "created_at": "2026-10-20T16:13:52Z",
+          "closed_at": "2026-10-20T16:15:16Z",
+          "merged_at": "2026-10-20T16:15:16Z",
+          "state": "closed",
+          "title": "Telegram: auto-pair verified private owner chat using existing token; one-place setup"
+        },
+        {
+          "number": 1350,
+          "created_at": "2026-10-20T16:14:04Z",
+          "closed_at": "2026-10-20T16:23:56Z",
+          "merged_at": "2026-10-20T16:23:56Z",
+          "state": "closed",
+          "title": "CRM v5.1: actionable client queues and reliable message state"
+        },
+        {
+          "number": 1351,
+          "created_at": "2026-10-20T16:20:12Z",
+          "closed_at": "2026-10-20T16:23:22Z",
+          "merged_at": "2026-10-20T16:23:22Z",
+          "state": "closed",
+          "title": "Growth Studio: owner-only Redis write/read/delete smoke test"
+        },
+        {
+          "number": 1352,
+          "created_at": "2026-10-20T16:26:06Z",
+          "closed_at": "2026-10-20T16:28:59Z",
+          "merged_at": "2026-10-20T16:28:59Z",
+          "state": "closed",
+          "title": "Harden Reiki audio library: archived release guard and verifiable deletion"
+        },
+        {
+          "number": 1353,
+          "created_at": "2026-10-20T16:26:16Z",
+          "closed_at": "2026-10-20T16:32:01Z",
+          "merged_at": "2026-10-20T16:32:01Z",
+          "state": "closed",
+          "title": "Holistic House: private client phone self-service and consent-safe enquiry → CRM import"
+        },
+        {
+          "number": 1354,
+          "created_at": "2026-10-20T16:26:44Z",
+          "closed_at": "2026-10-20T16:33:10Z",
+          "merged_at": "2026-10-20T16:33:10Z",
+          "state": "closed",
+          "title": "Growth Studio P2: manual due inbox and honest unverified completion"
+        },
+        {
+          "number": 1355,
+          "created_at": "2026-10-20T16:31:32Z",
+          "closed_at": "2026-10-20T16:33:50Z",
+          "merged_at": "2026-10-20T16:33:50Z",
+          "state": "closed",
+          "title": "fix(payments): clarify PayPal.Me account requirement for personal checkout"
+        },
+        {
+          "number": 1356,
+          "created_at": "2026-10-20T16:34:43Z",
+          "closed_at": "2026-10-20T16:36:54Z",
+          "merged_at": "2026-10-20T16:36:54Z",
+          "state": "closed",
+          "title": "Add accessible EN/RU/ES Holistic House contact page for public sender support"
+        },
+        {
+          "number": 1357,
+          "created_at": "2026-10-20T16:36:16Z",
+          "closed_at": "2026-10-20T16:44:43Z",
+          "merged_at": "2026-10-20T16:44:43Z",
+          "state": "closed",
+          "title": "feat(Holistic House): verified Telegram client linking and private-message alerts (R2)"
+        },
+        {
+          "number": 1358,
+          "created_at": "2026-10-20T16:38:26Z",
+          "closed_at": "2026-10-20T16:41:42Z",
+          "merged_at": "2026-10-20T16:41:42Z",
+          "state": "closed",
+          "title": "fix(pwa): make Holistic House one installable client app, with message shortcuts and EN/RU guide"
+        },
+        {
+          "number": 1359,
+          "created_at": "2026-10-20T16:39:49Z",
+          "closed_at": "2026-10-20T16:42:05Z",
+          "merged_at": "2026-10-20T16:42:05Z",
+          "state": "closed",
+          "title": "feat(client): align Business & Career 90-day course with Holistic House scenic player"
+        },
+        {
+          "number": 1360,
+          "created_at": "2026-10-20T16:42:25Z",
+          "closed_at": "2026-10-20T16:43:35Z",
+          "merged_at": "2026-10-20T16:43:35Z",
+          "state": "closed",
+          "title": "Fix Spanish public contact page and language switching (EN/RU/ES)"
+        },
+        {
+          "number": 1361,
+          "created_at": "2026-10-20T16:43:32Z",
+          "closed_at": "2026-10-20T16:56:58Z",
+          "merged_at": "2026-10-20T16:56:58Z",
+          "state": "closed",
+          "title": "Andrey Voice: harden revoked-session privacy, free Mac agent and private MP3 cleanup"
+        },
+        {
+          "number": 1362,
+          "created_at": "2026-10-20T16:44:18Z",
+          "closed_at": "2026-10-20T16:46:17Z",
+          "merged_at": "2026-10-20T16:46:16Z",
+          "state": "closed",
+          "title": "fix(client): make saved business lessons continue without duplicate writes"
+        },
+        {
+          "number": 1363,
+          "created_at": "2026-10-20T16:44:54Z",
+          "closed_at": "2026-10-20T16:44:58Z",
+          "merged_at": "2026-10-20T16:44:58Z",
+          "state": "closed",
+          "title": "fix(pwa): remove incompatible Edge static mode on Home Screen PNG icons"
+        },
+        {
+          "number": 1364,
+          "created_at": "2026-10-20T16:46:29Z",
+          "closed_at": "2026-10-20T16:52:53Z",
+          "merged_at": "2026-10-20T16:52:52Z",
+          "state": "closed",
+          "title": "Growth Studio: automatic owner Redis editorial CAS verification and mobile layout"
+        },
+        {
+          "number": 1365,
+          "created_at": "2026-10-20T16:47:01Z",
+          "closed_at": "2026-10-20T16:47:33Z",
+          "merged_at": "2026-10-20T16:47:33Z",
+          "state": "closed",
+          "title": "fix(notifications): save Telegram contact even before BotFather setup"
+        },
+        {
+          "number": 1366,
+          "created_at": "2026-10-20T16:47:32Z",
+          "closed_at": "2026-10-20T16:50:18Z",
+          "merged_at": "2026-10-20T16:50:18Z",
+          "state": "closed",
+          "title": "CRM: collect preferred reply channel and prepare manual SMS only for requested enquiries"
+        },
+        {
+          "number": 1367,
+          "created_at": "2026-10-20T16:54:33Z",
+          "closed_at": "2026-10-20T17:09:25Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Superseded by merged PR #1371 — course/service CRM registration"
+        },
+        {
+          "number": 1368,
+          "created_at": "2026-10-20T16:54:49Z",
+          "closed_at": "2026-10-20T17:02:42Z",
+          "merged_at": "2026-10-20T17:02:42Z",
+          "state": "closed",
+          "title": "CRM v6: daily task center and owner-scoped contact navigation"
+        },
+        {
+          "number": 1369,
+          "created_at": "2026-10-20T17:06:57Z",
+          "closed_at": "2026-10-20T17:27:33Z",
+          "merged_at": "2026-10-20T17:27:33Z",
+          "state": "closed",
+          "title": "Growth Studio: clear owner activation with exact Telegram/Vercel/YouTube links"
+        },
+        {
+          "number": 1370,
+          "created_at": "2026-10-20T17:07:07Z",
+          "closed_at": "2026-10-20T17:13:05Z",
+          "merged_at": "2026-10-20T17:13:05Z",
+          "state": "closed",
+          "title": "feat(notifications): owner Telegram setup diagnostics and BotFather links"
+        },
+        {
+          "number": 1372,
+          "created_at": "2026-10-20T17:07:43Z",
+          "closed_at": "2026-10-20T17:17:51Z",
+          "merged_at": "2026-10-20T17:17:51Z",
+          "state": "closed",
+          "title": "feat(holistichouse): private laboratory results, range review and seven-day health plan"
+        },
+        {
+          "number": 1371,
+          "created_at": "2026-10-20T17:07:43Z",
+          "closed_at": "2026-10-20T17:09:16Z",
+          "merged_at": "2026-10-20T17:09:16Z",
+          "state": "closed",
+          "title": "feat(leads): instant course/service registration → CRM Contacts [rebase]"
+        },
+        {
+          "number": 1373,
+          "created_at": "2026-10-20T17:08:04Z",
+          "closed_at": "2026-10-20T17:13:51Z",
+          "merged_at": "2026-10-20T17:13:51Z",
+          "state": "closed",
+          "title": "Finish CRM customer reply handoffs and guided real SMS setup"
+        },
+        {
+          "number": 1374,
+          "created_at": "2026-10-20T17:09:31Z",
+          "closed_at": "2026-10-20T17:13:12Z",
+          "merged_at": "2026-10-20T17:13:12Z",
+          "state": "closed",
+          "title": "feat(business): light walnut executive theme for 90-day coaching"
+        },
+        {
+          "number": 1375,
+          "created_at": "2026-10-20T17:09:52Z",
+          "closed_at": "2026-10-20T17:12:07Z",
+          "merged_at": "2026-10-20T17:12:07Z",
+          "state": "closed",
+          "title": "feat(payments): make personal PayPal and Interac one-click, expose verified Square, €150 combo"
+        },
+        {
+          "number": 1376,
+          "created_at": "2026-10-20T17:10:44Z",
+          "closed_at": "2026-10-20T17:11:20Z",
+          "merged_at": "2026-10-20T17:11:20Z",
+          "state": "closed",
+          "title": "Business: owner CRM direct link and honest form-failure contact fallback"
+        },
+        {
+          "number": 1377,
+          "created_at": "2026-10-20T17:12:08Z",
+          "closed_at": "2026-10-20T17:17:25Z",
+          "merged_at": "2026-10-20T17:17:25Z",
+          "state": "closed",
+          "title": "Holistic House: one-click private Telegram owner pairing and verified single test"
+        },
+        {
+          "number": 1378,
+          "created_at": "2026-10-20T17:17:05Z",
+          "closed_at": "2026-10-20T17:25:18Z",
+          "merged_at": "2026-10-20T17:25:18Z",
+          "state": "closed",
+          "title": "feat(business): premium wooden coaching design, light/dark walnut modes"
+        },
+        {
+          "number": 1379,
+          "created_at": "2026-10-20T17:19:04Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "fix(ci): reconcile core acceptance contracts and Reiki save order"
+        },
+        {
+          "number": 1381,
+          "created_at": "2026-10-20T17:23:12Z",
+          "closed_at": "2026-10-20T17:23:24Z",
+          "merged_at": "2026-10-20T17:23:24Z",
+          "state": "closed",
+          "title": "fix(holistichouse): correct encrypted lab report AAD scope"
+        },
+        {
+          "number": 1382,
+          "created_at": "2026-10-20T17:26:05Z",
+          "closed_at": "2026-10-20T17:29:20Z",
+          "merged_at": "2026-10-20T17:29:20Z",
+          "state": "closed",
+          "title": "perf(Holistic House): public CTA clarity, static service portraits, RSC size diagnostics"
+        },
+        {
+          "number": 1383,
+          "created_at": "2026-10-20T17:27:40Z",
+          "closed_at": "2026-10-20T17:33:20Z",
+          "merged_at": "2026-10-20T17:33:20Z",
+          "state": "closed",
+          "title": "perf(public videos): fast direct YouTube links from posters across Holistic House"
+        },
+        {
+          "number": 1384,
+          "created_at": "2026-10-20T17:51:10Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "fix(crm): reliable intake retries, per-device push enrollment and explicit SMS consent"
+        },
+        {
+          "number": 1386,
+          "created_at": "2026-10-20T18:55:49Z",
+          "closed_at": "2026-10-20T19:22:49Z",
+          "merged_at": "2026-10-20T19:22:49Z",
+          "state": "closed",
+          "title": "feat(dao): 64 photo cards + inline Library divination by question or number"
+        },
+        {
+          "number": 1387,
+          "created_at": "2026-10-20T18:56:30Z",
+          "closed_at": "2026-10-20T19:09:41Z",
+          "merged_at": "2026-10-20T19:09:41Z",
+          "state": "closed",
+          "title": "fix(video): click Play loads YouTube inside Holistic House, not a new page"
+        },
+        {
+          "number": 1388,
+          "created_at": "2026-10-20T19:11:02Z",
+          "closed_at": "2026-10-20T19:19:26Z",
+          "merged_at": "2026-10-20T19:19:26Z",
+          "state": "closed",
+          "title": "feat(Holistic House): safe owner-only Telegram delivery test without customer rollout"
+        },
+        {
+          "number": 1389,
+          "created_at": "2026-10-20T19:12:57Z",
+          "closed_at": "2026-10-20T19:21:45Z",
+          "merged_at": "2026-10-20T19:21:45Z",
+          "state": "closed",
+          "title": "Growth Studio: complete owner connection handoffs for SEO/Ads and Eventbrite"
+        },
+        {
+          "number": 1390,
+          "created_at": "2026-10-20T19:20:30Z",
+          "closed_at": "2026-10-20T19:28:02Z",
+          "merged_at": "2026-10-20T19:28:02Z",
+          "state": "closed",
+          "title": "feat: opt-in post-report journey analytics for private sessions (#1380)"
+        },
+        {
+          "number": 1391,
+          "created_at": "2026-10-20T19:22:03Z",
+          "closed_at": "2026-10-20T19:45:27Z",
+          "merged_at": "2026-10-20T19:45:27Z",
+          "state": "closed",
+          "title": "Holistic House: free-first real Gemini + Mistral website TZ delivered to owner Telegram"
+        },
+        {
+          "number": 1392,
+          "created_at": "2026-10-20T19:24:08Z",
+          "closed_at": "2026-10-20T19:29:38Z",
+          "merged_at": "2026-10-20T19:29:38Z",
+          "state": "closed",
+          "title": "feat(payments): exact-EUR PayPal auto checkout, signed webhook and secure capture"
+        },
+        {
+          "number": 1393,
+          "created_at": "2026-10-20T19:46:26Z",
+          "closed_at": "2026-10-20T20:00:02Z",
+          "merged_at": "2026-10-20T20:00:02Z",
+          "state": "closed",
+          "title": "fix(perf): restore video/CTA acceptance and remove redundant Services image transforms"
+        },
+        {
+          "number": 1394,
+          "created_at": "2026-10-20T19:47:44Z",
+          "closed_at": "2026-10-20T20:10:35Z",
+          "merged_at": "2026-10-20T20:10:35Z",
+          "state": "closed",
+          "title": "fix(video): verified inline YouTube player acceptance and iPhone referrer hardening"
+        },
+        {
+          "number": 1395,
+          "created_at": "2026-10-20T19:47:58Z",
+          "closed_at": "2026-10-20T20:08:23Z",
+          "merged_at": "2026-10-20T20:08:23Z",
+          "state": "closed",
+          "title": "feat(telegram): reuse existing verified practice bot for client opt-ins without second token"
+        },
+        {
+          "number": 1396,
+          "created_at": "2026-10-20T19:48:14Z",
+          "closed_at": "2026-10-20T20:23:23Z",
+          "merged_at": "2026-10-20T20:23:23Z",
+          "state": "closed",
+          "title": "Growth Studio P3: owner-only Telegram/YouTube provider readiness (no fake OAuth)"
+        },
+        {
+          "number": 1397,
+          "created_at": "2026-10-20T19:51:13Z",
+          "closed_at": "2026-10-20T20:03:14Z",
+          "merged_at": "2026-10-20T20:03:14Z",
+          "state": "closed",
+          "title": "CRM v6.1: signed full follow-up pagination and Toronto day rollover"
+        },
+        {
+          "number": 1398,
+          "created_at": "2026-10-20T19:51:27Z",
+          "closed_at": "2026-10-20T20:04:45Z",
+          "merged_at": "2026-10-20T20:04:45Z",
+          "state": "closed",
+          "title": "feat(payments): verified PayPal EUR checkout with automatic capture and merchant gates"
+        },
+        {
+          "number": 1399,
+          "created_at": "2026-10-20T19:56:44Z",
+          "closed_at": "2026-10-26T15:03:12Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Growth Studio: one direct link, quick drafts and return after Google login"
+        },
+        {
+          "number": 1400,
+          "created_at": "2026-10-20T20:12:38Z",
+          "closed_at": "2026-10-20T20:16:33Z",
+          "merged_at": "2026-10-20T20:16:33Z",
+          "state": "closed",
+          "title": "test(services): current Cabinet menu labels and Spanish DAO contact E2E"
+        },
+        {
+          "number": 1401,
+          "created_at": "2026-10-20T20:25:18Z",
+          "closed_at": "2026-10-20T20:30:32Z",
+          "merged_at": "2026-10-20T20:30:32Z",
+          "state": "closed",
+          "title": "Compact business enquiry on mobile: one contact field, optional note (EN/RU/ES)"
+        },
+        {
+          "number": 1402,
+          "created_at": "2026-10-20T20:29:19Z",
+          "closed_at": "2026-10-20T20:30:57Z",
+          "merged_at": "2026-10-20T20:30:57Z",
+          "state": "closed",
+          "title": "Reiki: replace 'skip' answer with 'I need more practice' across lessons"
+        },
+        {
+          "number": 1403,
+          "created_at": "2026-10-20T20:29:59Z",
+          "closed_at": "2026-10-20T20:36:14Z",
+          "merged_at": "2026-10-20T20:36:14Z",
+          "state": "closed",
+          "title": "fix(reiki): keep Continue accessible above iPhone keyboard"
+        },
+        {
+          "number": 1404,
+          "created_at": "2026-10-20T20:30:12Z",
+          "closed_at": "2026-10-20T20:45:42Z",
+          "merged_at": "2026-10-20T20:45:42Z",
+          "state": "closed",
+          "title": "Business: two-question consultation quiz directly in the first mobile screen"
+        },
+        {
+          "number": 1405,
+          "created_at": "2026-10-20T20:31:30Z",
+          "closed_at": "2026-10-20T20:39:01Z",
+          "merged_at": "2026-10-20T20:39:01Z",
+          "state": "closed",
+          "title": "feat(payments): Ezohata-style PayPal EUR hosted checkout links, no extra company"
+        },
+        {
+          "number": 1406,
+          "created_at": "2026-10-20T20:32:37Z",
+          "closed_at": "2026-10-20T20:32:49Z",
+          "merged_at": "2026-10-20T20:32:49Z",
+          "state": "closed",
+          "title": "Hotfix: repair JSX parsing in compact business enquiry"
+        },
+        {
+          "number": 1407,
+          "created_at": "2026-10-20T20:38:33Z",
+          "closed_at": "2026-10-20T20:40:44Z",
+          "merged_at": "2026-10-20T20:40:43Z",
+          "state": "closed",
+          "title": "style(courses): show Business & Career as a photo-left navy course card"
+        },
+        {
+          "number": 1408,
+          "created_at": "2026-10-20T20:41:53Z",
+          "closed_at": "2026-10-20T20:42:34Z",
+          "merged_at": "2026-10-20T20:42:34Z",
+          "state": "closed",
+          "title": "test(reiki): align mobile question regression with seven Yggdrasil prompts"
+        },
+        {
+          "number": 1409,
+          "created_at": "2026-10-20T20:43:57Z",
+          "closed_at": "2026-10-20T20:50:21Z",
+          "merged_at": "2026-10-20T20:50:21Z",
+          "state": "closed",
+          "title": "fix(reiki): remove seven unnecessary lesson-five screens"
+        },
+        {
+          "number": 1410,
+          "created_at": "2026-10-20T20:44:04Z",
+          "closed_at": "2026-10-20T20:46:50Z",
+          "merged_at": "2026-10-20T20:46:50Z",
+          "state": "closed",
+          "title": "feat(dao): full author-style descriptions for 52 remaining I Ching hexagrams"
+        },
+        {
+          "number": 1411,
+          "created_at": "2026-10-20T20:46:15Z",
+          "closed_at": "2026-10-20T20:47:33Z",
+          "merged_at": "2026-10-20T20:47:33Z",
+          "state": "closed",
+          "title": "test(payments): update legacy cart assertions for PayPal Payment Links"
+        },
+        {
+          "number": 1412,
+          "created_at": "2026-10-20T20:48:17Z",
+          "closed_at": "2026-10-20T20:56:22Z",
+          "merged_at": "2026-10-20T20:56:22Z",
+          "state": "closed",
+          "title": "OPORA: show all 14 course days as a scrollable path after each lesson"
+        },
+        {
+          "number": 1413,
+          "created_at": "2026-10-20T20:48:29Z",
+          "closed_at": "2026-10-20T20:51:30Z",
+          "merged_at": "2026-10-20T20:51:30Z",
+          "state": "closed",
+          "title": "OPORA: supportive second slide on every day (EN/RU/ES)"
+        },
+        {
+          "number": 1414,
+          "created_at": "2026-10-20T20:50:08Z",
+          "closed_at": "2026-10-20T20:59:34Z",
+          "merged_at": "2026-10-20T20:59:34Z",
+          "state": "closed",
+          "title": "Reiki Practitioner: graduation receipt, direct follow-up and back navigation"
+        },
+        {
+          "number": 1415,
+          "created_at": "2026-10-20T20:51:12Z",
+          "closed_at": "2026-10-20T21:06:24Z",
+          "merged_at": "2026-10-20T21:06:24Z",
+          "state": "closed",
+          "title": "Course music: original 96s soundtrack + optional mid-lesson rest slide"
+        },
+        {
+          "number": 1416,
+          "created_at": "2026-10-20T20:56:42Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(OPORA): deepen 14 daily lessons and redesign saved celebration"
+        },
+        {
+          "number": 1417,
+          "created_at": "2026-10-20T20:57:06Z",
+          "closed_at": "2026-10-20T21:04:06Z",
+          "merged_at": "2026-10-20T21:04:06Z",
+          "state": "closed",
+          "title": "fix(opora): replace blurred low-resolution images across 14-day course"
+        },
+        {
+          "number": 1418,
+          "created_at": "2026-10-20T21:14:20Z",
+          "closed_at": "2026-10-20T21:15:30Z",
+          "merged_at": "2026-10-20T21:15:30Z",
+          "state": "closed",
+          "title": "QA: find the musical pause CTA even with its decorative ♫ icon"
+        },
+        {
+          "number": 1420,
+          "created_at": "2026-10-20T21:56:00Z",
+          "closed_at": "2026-10-20T21:59:42Z",
+          "merged_at": "2026-10-20T21:59:42Z",
+          "state": "closed",
+          "title": "CRM v6.2: actionable owner lead triage with safe follow-up planning"
+        },
+        {
+          "number": 1421,
+          "created_at": "2026-10-20T22:01:36Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "feat(Holistic House): public opt-in Telegram news subscriptions without a client account"
+        },
+        {
+          "number": 1422,
+          "created_at": "2026-10-20T22:02:47Z",
+          "closed_at": "2026-10-20T22:20:57Z",
+          "merged_at": "2026-10-20T22:20:57Z",
+          "state": "closed",
+          "title": "fix(crm): truthful messaging provider readiness and unified phone-first inbox navigation"
+        },
+        {
+          "number": 1423,
+          "created_at": "2026-10-20T22:03:25Z",
+          "closed_at": "2026-10-20T22:09:49Z",
+          "merged_at": "2026-10-20T22:09:49Z",
+          "state": "closed",
+          "title": "fix(leads): one-step course registration and privacy-safe messenger handoff"
+        },
+        {
+          "number": 1424,
+          "created_at": "2026-10-20T22:06:15Z",
+          "closed_at": "2026-10-20T22:18:29Z",
+          "merged_at": "2026-10-20T22:18:29Z",
+          "state": "closed",
+          "title": "feat(shop): Ezohata-style Holistic House storefront EN/RU/ES with shared cart"
+        },
+        {
+          "number": 1425,
+          "created_at": "2026-10-20T22:11:18Z",
+          "closed_at": "2026-10-20T22:16:49Z",
+          "merged_at": "2026-10-20T22:16:49Z",
+          "state": "closed",
+          "title": "Growth Studio: automate public sitemap discovery into safe review-only drafts"
+        },
+        {
+          "number": 1426,
+          "created_at": "2026-10-20T22:11:50Z",
+          "closed_at": "2026-10-20T22:20:48Z",
+          "merged_at": "2026-10-20T22:20:48Z",
+          "state": "closed",
+          "title": "Add visible country-code selector before phone fields (Business, Services, Cabinet, CRM)"
+        },
+        {
+          "number": 1427,
+          "created_at": "2026-10-20T22:15:54Z",
+          "closed_at": "2026-10-20T22:18:21Z",
+          "merged_at": "2026-10-20T22:18:21Z",
+          "state": "closed",
+          "title": "fix(leads): iPhone tap targets and honest two-stage enrolment browser acceptance"
+        },
+        {
+          "number": 1428,
+          "created_at": "2026-10-20T22:25:28Z",
+          "closed_at": "2026-10-20T22:30:35Z",
+          "merged_at": "2026-10-20T22:30:35Z",
+          "state": "closed",
+          "title": "Telegram ↔ AI Console: owner-only two-way Gemini/Mistral chat via existing verified bot"
+        },
+        {
+          "number": 1429,
+          "created_at": "2026-10-20T22:52:59Z",
+          "closed_at": "2026-10-20T23:05:20Z",
+          "merged_at": "2026-10-20T23:05:20Z",
+          "state": "closed",
+          "title": "Business: premium compact first-screen quiz and simplified mobile structure"
+        },
+        {
+          "number": 1430,
+          "created_at": "2026-10-20T23:05:58Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "Services: Online / In person switch with format-aware offers and CRM enquiries"
+        },
+        {
+          "number": 1431,
+          "created_at": "2026-10-20T23:28:03Z",
+          "closed_at": "2026-10-20T23:36:56Z",
+          "merged_at": "2026-10-20T23:36:56Z",
+          "state": "closed",
+          "title": "Business: Andrey photo hero, one-question finder and filtered 3+3 real services"
+        },
+        {
+          "number": 1432,
+          "created_at": "2026-10-20T23:30:45Z",
+          "closed_at": "2026-10-20T23:33:24Z",
+          "merged_at": "2026-10-20T23:33:24Z",
+          "state": "closed",
+          "title": "Telegram AI Console: auto-bootstrap owner menu with no CRM clicks; explicit question privacy"
+        },
+        {
+          "number": 1433,
+          "created_at": "2026-10-20T23:41:00Z",
+          "closed_at": "2026-10-20T23:41:43Z",
+          "merged_at": "2026-10-20T23:41:43Z",
+          "state": "closed",
+          "title": "test(business): repair stale public browser assertion for separate free written review"
+        },
+        {
+          "number": 1434,
+          "created_at": "2026-10-20T23:41:28Z",
+          "closed_at": "2026-10-20T23:45:52Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "test(business): correct public Services free-review browser assertion"
+        },
+        {
+          "number": 1435,
+          "created_at": "2026-10-20T23:42:39Z",
+          "closed_at": "2026-10-20T23:43:58Z",
+          "merged_at": "2026-10-20T23:43:58Z",
+          "state": "closed",
+          "title": "Telegram AI Council: do not send empty Gemini/Mistral digests or lock days without models"
+        },
+        {
+          "number": 1436,
+          "created_at": "2026-10-20T23:58:19Z",
+          "closed_at": "2026-10-21T00:04:24Z",
+          "merged_at": "2026-10-21T00:04:23Z",
+          "state": "closed",
+          "title": "polish(business): remove repeated hero copy and restore private-test CI isolation"
+        },
+        {
+          "number": 1437,
+          "created_at": "2026-10-21T00:11:30Z",
+          "closed_at": "2026-10-21T00:15:16Z",
+          "merged_at": "2026-10-21T00:15:16Z",
+          "state": "closed",
+          "title": "fix(ci): select one valid Business offers link in browser acceptance"
+        },
+        {
+          "number": 1438,
+          "created_at": "2026-10-21T00:20:56Z",
+          "closed_at": "2026-10-21T00:33:24Z",
+          "merged_at": "2026-10-21T00:33:24Z",
+          "state": "closed",
+          "title": "fix(ci): validate consent-gated contact registration throughout public service browser QA"
+        },
+        {
+          "number": 1439,
+          "created_at": "2026-10-21T00:56:46Z",
+          "closed_at": "2026-10-21T01:09:04Z",
+          "merged_at": "2026-10-21T01:09:04Z",
+          "state": "closed",
+          "title": "feat(services): category photo slider with Online/Toronto finder"
+        },
+        {
+          "number": 1440,
+          "created_at": "2026-10-21T01:13:42Z",
+          "closed_at": "2026-10-21T01:15:17Z",
+          "merged_at": "2026-10-21T01:15:17Z",
+          "state": "closed",
+          "title": "AI Council: safely verify newly installed Gemini/OpenRouter keys in Production"
+        },
+        {
+          "number": 1441,
+          "created_at": "2026-10-21T04:53:34Z",
+          "closed_at": "2026-10-30T13:40:35Z",
+          "merged_at": null,
+          "state": "closed",
+          "title": "Add psychometric source references (research only)"
+        },
+        {
+          "number": 1442,
+          "created_at": "2026-10-21T06:56:40Z",
+          "closed_at": "2026-10-21T07:11:58Z",
+          "merged_at": "2026-10-21T07:11:58Z",
+          "state": "closed",
+          "title": "Compact service/course enquiry + optional Google sign-in"
+        },
+        {
+          "number": 1443,
+          "created_at": "2026-10-21T07:13:09Z",
+          "closed_at": "2026-10-21T07:17:37Z",
+          "merged_at": "2026-10-21T07:17:37Z",
+          "state": "closed",
+          "title": "Fix Playwright selectors for optional lead form details"
+        },
+        {
+          "number": 1444,
+          "created_at": "2026-10-21T08:16:19Z",
+          "closed_at": "2026-10-21T08:22:05Z",
+          "merged_at": "2026-10-21T08:22:05Z",
+          "state": "closed",
+          "title": "feat(pwa): optional Square-style install offer immediately after completed signup"
+        },
+        {
+          "number": 1445,
+          "created_at": "2026-10-21T08:23:46Z",
+          "closed_at": "2026-10-21T08:27:43Z",
+          "merged_at": "2026-10-21T08:27:43Z",
+          "state": "closed",
+          "title": "feat(report): bottom Google sign-in prompt for guest report readers"
+        },
+        {
+          "number": 1446,
+          "created_at": "2026-10-21T08:26:09Z",
+          "closed_at": "2026-10-21T08:36:15Z",
+          "merged_at": "2026-10-21T08:36:15Z",
+          "state": "closed",
+          "title": "Holistic House: thank-you page, editable video slot, server-confirmed enquiry stats"
+        },
+        {
+          "number": 1447,
+          "created_at": "2026-10-21T08:43:08Z",
+          "closed_at": null,
+          "merged_at": null,
+          "state": "open",
+          "title": "Services: «Акция» slider with free services and inline one-screen CRM registration"
+        },
+        {
+          "number": 1448,
+          "created_at": "2026-10-21T09:04:57Z",
+          "closed_at": "2026-10-21T09:14:12Z",
+          "merged_at": "2026-10-21T09:14:12Z",
+          "state": "closed",
+          "title": "Reiki: two-choice lesson celebrations + next-day phone reminder handoff"
+        },
+        {
+          "number": 1450,
+          "created_at": "2026-10-21T09:26:01Z",
+          "closed_at": "2026-10-21T09:33:24Z",
+          "merged_at": "2026-10-21T09:33:24Z",
+          "state": "closed",
+          "title": "Navigation: Cabinet in header, Books in mobile toolbar (EN/RU/ES)"
+        },
+        {
+          "number": 1452,
+          "created_at": "2026-10-21T09:28:02Z",
+          "closed_at": "2026-10-21T09:41:25Z",
+          "merged_at": "2026-10-21T09:41:25Z",
+          "state": "closed",
+          "title": "feat(ideas): ask a question, draw I Ching, discover aphorisms or free guidance"
+        }
+      ]
+    }
+  ]
+}
