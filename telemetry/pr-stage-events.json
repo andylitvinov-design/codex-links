@@ -1,16 +1,16 @@
 {
   "schema": "HH_PR_TRANSITION_LEDGER_V1",
   "repo": "andylitvinov-design/books",
-  "generated_at": "2026-11-04T01:24:34.096Z",
+  "generated_at": "2026-11-04T02:20:01.097Z",
   "source": "GitHub PR-created cohort via existing HH PR Monitor; exact stage events from GitHub API",
   "window": {
     "hours": 48,
-    "from": "2026-11-02T01:24:34.096Z",
-    "to": "2026-11-04T01:24:34.096Z",
+    "from": "2026-11-02T02:20:01.097Z",
+    "to": "2026-11-04T02:20:01.097Z",
     "complete": false,
-    "total": 331,
-    "start": "2026-11-02T01:24:34.096Z",
-    "end": "2026-11-04T01:24:34.096Z"
+    "total": 309,
+    "start": "2026-11-02T02:20:01.097Z",
+    "end": "2026-11-04T02:20:01.097Z"
   },
   "coverage": {
     "timeline_checked": 4,
@@ -19,11 +19,11 @@
     "cohort": {
       "schema": "HH_PR_CREATED_COHORT_V1",
       "pages_read": 1,
-      "method": "Prior 354-row snapshot preserved; exact GitHub created-after-last-snapshot search returned 0; refreshed 7 known PRs",
+      "method": "Preserved all existing 354 history rows; GitHub created-after-2026-11-04 search found only #3364/#3365, both already in snapshot",
       "stage_events_complete": false
     },
     "recent_head_readback": {
-      "at": "2026-11-04T01:24:34.096Z",
+      "at": "2026-11-04T02:20:01.097Z",
       "prs": [
         3257,
         3301,
@@ -31,47 +31,43 @@
         3288,
         3323,
         3242,
-        3279
+        2169,
+        3329,
+        3331
       ],
-      "read_success": 7
+      "read_success": 9
     },
     "legacy_unverified_ready_removed": 5,
     "incremental": {
-      "at": "2026-11-04T01:24:34.096Z",
-      "previous_generated_at": "2026-11-04T00:13:24.902Z",
+      "at": "2026-11-04T02:20:01.097Z",
+      "previous_generated_at": "2026-11-04T01:24:34.096Z",
       "new_prs_added": [],
       "updated_prs": [
         3257,
         3301,
         3303,
         3288,
-        3323,
-        3242,
-        3279
+        3323
       ],
       "verified_native_merges_production": [
-        3279
+        3257
       ],
-      "verified_exact_head_failed_runs": [
-        41752830512,
-        41752830385,
-        41752830472,
-        41752830345,
-        41705200017,
-        41705199846,
-        41744047703,
-        41744165090
+      "verified_instrumented_live_events": [
+        3257
+      ],
+      "verified_exact_head_success_runs": [
+        41755858248,
+        41755858097,
+        41755858352
+      ],
+      "verified_new_head_active_runs": [
+        41758469714,
+        41758469687
       ],
       "stage_events_complete": false,
-      "unknown_runner_timestamps": true,
-      "window_aligned": true,
-      "old_head_failures_stale": true,
+      "unknown_first_ci_for_cohort": true,
       "concurrent_ci_not_replayed": true,
-      "verified_instrumented_live_events": [
-        3242,
-        3279
-      ],
-      "unknown_first_ci_for_cohort": true
+      "whole_pr_e2e_not_inferred_from_scoped_live": true
     }
   },
   "stages": [
@@ -1854,16 +1850,28 @@
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)",
             "source": "github:actions/runs/41744165090;jobs"
+          },
+          {
+            "head_sha": "86622b9422d85e39eae33fa9a75e80d6fbc11a27",
+            "workflow_run_id": 41744165172,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T00:05:23Z",
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41744165172;browser-job/126292868138"
           }
         ]
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T21:53:04Z",
+      "updated_at": "2026-11-04T02:06:12Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T01:24:34.096Z",
-      "mergeable_state": "blocked"
+      "observed_at_utc": "2026-11-04T02:20:01.097Z",
+      "mergeable_state": "blocked",
+      "observation_note": "Tantra WebKit EN390 browser job126292868138 actual playback threshold failure; Core specialist and merge-check consequential RED. Existing Product/WebKit owner, no CI waiver, no rerun."
     },
     {
       "number": 3322,
@@ -2507,16 +2515,39 @@
         "check_count": null,
         "duplicate_checks": null,
         "failed_wall_minutes": null,
-        "cycles": []
+        "cycles": [
+          {
+            "head_sha": "39e69c1463fc66c4f0cbccd1516658e9090d4ece",
+            "workflow_run_id": 41659780177,
+            "run_attempt": 1,
+            "queued_at": "2026-11-03T15:02:56Z",
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41659780177;job/125999621489"
+          },
+          {
+            "head_sha": "39e69c1463fc66c4f0cbccd1516658e9090d4ece",
+            "workflow_run_id": 41659780122,
+            "run_attempt": 1,
+            "queued_at": "2026-11-03T15:02:56Z",
+            "started_at": null,
+            "completed_at": null,
+            "conclusion": "failure",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41659780122;job/126005363527"
+          }
+        ]
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T18:41:24Z",
+      "updated_at": "2026-11-04T00:54:45Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "observed_at_utc": "2026-11-04T02:20:01.097Z",
       "mergeable_state": "dirty",
-      "observation_note": "Parent #3301 not merged; child PARENT_BLOCKED, cannot merge first."
+      "observation_note": "Unchanged source SHA, current DIRTY; #3301 not merged, parent-first. Old exact-head Core and Mandala true failed, no broad rerun or source takeover."
     },
     {
       "number": 3302,
@@ -2554,7 +2585,7 @@
       "state": "open",
       "created_at": "2026-11-03T13:24:21Z",
       "merged_at": null,
-      "head_sha": "1b669d9afd71d761c6d47eaab29454bd12354f87",
+      "head_sha": "38073cb861df9134c881a84a51d7375a47f8124d",
       "stamps": {
         "created": {
           "at": "2026-11-03T13:24:21Z",
@@ -2591,17 +2622,39 @@
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)",
             "source": "github:actions/runs/41705199846;jobs"
+          },
+          {
+            "head_sha": "38073cb861df9134c881a84a51d7375a47f8124d",
+            "workflow_run_id": 41758469714,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T02:05:49Z",
+            "started_at": "2026-11-04T02:05:53Z",
+            "completed_at": null,
+            "conclusion": null,
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41758469714;jobs/126340144294,126340146281"
+          },
+          {
+            "head_sha": "38073cb861df9134c881a84a51d7375a47f8124d",
+            "workflow_run_id": 41758469687,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T02:05:49Z",
+            "started_at": "2026-11-04T02:05:52Z",
+            "completed_at": null,
+            "conclusion": null,
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41758469687;jobs/126340143636,126340566908"
           }
         ]
       },
       "closed_at": null,
-      "updated_at": "2026-11-03T23:10:03Z",
+      "updated_at": "2026-11-04T02:05:50Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T01:24:34.096Z",
-      "mergeable_state": "dirty",
-      "observation_note": "Independent GitHub readback confirms DIRTY; Conflict owner source-preserving route, not mandatory Triage gate; current-head WebKit RU320 RED."
+      "observed_at_utc": "2026-11-04T02:20:01.097Z",
+      "mergeable_state": "clean",
+      "observation_note": "NEW HEAD CLEAN; Core lint SUCCESS, Specialist RUNNING, Mandala WebKit RUNNING, Guard/actionlint SUCCESS. Prior 1b669d DIRTY and WebKit failure STALE. Native fast lane, no Triage approval/CI rerun. #3303 parent-first."
     },
     {
       "number": 3300,
@@ -3024,12 +3077,13 @@
         ]
       },
       "closed_at": null,
-      "updated_at": "2026-11-04T00:10:21Z",
+      "updated_at": "2026-11-04T01:10:47Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T01:24:34.096Z",
-      "mergeable_state": "blocked"
+      "observed_at_utc": "2026-11-04T02:20:01.097Z",
+      "mergeable_state": "blocked",
+      "observation_note": "Current Core specialist failed at job126292718350: writer-practical-focused SKIPPED despite unit job success in profile-axis workflow; Shared existing owner, source NOT published. Not queue-only and no rerun. Native blocked."
     },
     {
       "number": 3287,
@@ -4009,15 +4063,35 @@
       "number": 3257,
       "url": "https://github.com/andylitvinov-design/books/pull/3257",
       "title": "feat(mobile): unified MyTube six-button dock on current production",
-      "state": "open",
+      "state": "closed",
       "created_at": "2026-11-03T05:21:20Z",
-      "merged_at": null,
-      "head_sha": "c5af50dc008ec992e72e9d256502d4e9530db5f4",
+      "merged_at": "2026-11-04T01:55:40Z",
+      "head_sha": "d39d3dca192c96f5242cf66e55828ecf1f60dba3",
       "stamps": {
         "created": {
           "at": "2026-11-03T05:21:20Z",
           "source": "github:created_at",
           "verified": true
+        },
+        "merged": {
+          "at": "2026-11-04T01:55:40Z",
+          "source": "github:pulls/3257#merged_at;merge_sha=7307f0ba9b4565b554a2b7458d733c0debe09c90",
+          "actor": "GitHub protected native merge (actor unverified)",
+          "verified": true
+        },
+        "CI_green": {
+          "at": "2026-11-04T01:55:33Z",
+          "source": "github:actions/runs/41755858248/jobs/126336360357;exact-head-d39d3dca192c96f5242cf66e55828ecf1f60dba3;core+specialist+mergecheck-success",
+          "actor": "GitHub Actions (process; owner not established)",
+          "verified": true
+        },
+        "LIVE_verified": {
+          "at": "2026-11-04T02:07:38.735Z",
+          "source": "instrumented:github:issuecomment/6620659700;vercel:dpl_DHxaQUGgpdE5KHWqD5WyPRiuD9Vx;canonical_alias:holistichouse.vercel.app;serving_sha:7307f0ba9b4565b554a2b7458d733c0debe09c90",
+          "actor": "LIVE Acceptance :00 (process; owner not established)",
+          "verified": true,
+          "scope": "SCOPED_MYTUBE_BROWSE_FILTER_NAV",
+          "whole_pr_e2e_verified": false
         }
       },
       "timeline_checked": false,
@@ -4122,17 +4196,29 @@
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)",
             "source": "github:actions/runs/41752830345;jobs"
+          },
+          {
+            "head_sha": "d39d3dca192c96f5242cf66e55828ecf1f60dba3",
+            "workflow_run_id": 41755858248,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T01:42:15Z",
+            "started_at": "2026-11-04T01:42:50Z",
+            "completed_at": "2026-11-04T01:55:33Z",
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41755858248;core-lint 126331678709;specialist 126331679076;mergecheck 126336360357"
           }
         ]
       },
-      "closed_at": null,
-      "updated_at": "2026-11-04T01:15:48Z",
+      "closed_at": "2026-11-04T01:55:40Z",
+      "updated_at": "2026-11-04T02:02:16Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T01:24:34.096Z",
+      "observed_at_utc": "2026-11-04T02:20:01.097Z",
       "mergeable_state": "blocked",
-      "observation_note": "Exact current HEAD changed; previous 5ea browser/consent RED is STALE. Guard/CRM/IA failures recorded separately; Core and Mandala relevant attempts tracked in ci.cycles, no exact-HEAD green."
+      "observation_note": "Protected production MERGED #3257 and exact-deployment READY+canonical alias. Real mobile RU/EN/ES MyTube category click + video-dock navigation PASS; LIVE_VERIFIED is SCOPED browse/filter/navigation only. ES /es/app/portrait 5/6 expected href candidate, not confirmed source defect. Other media/auth/WebKit subfeatures unverified. Prior c5af failures STALE.",
+      "merge_commit_sha": "7307f0ba9b4565b554a2b7458d733c0debe09c90"
     },
     {
       "number": 3256,
