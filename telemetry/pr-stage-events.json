@@ -1,7 +1,7 @@
 {
   "schema": "HH_PR_TRANSITION_LEDGER_V1",
   "repo": "andylitvinov-design/books",
-  "generated_at": "2026-11-04T02:20:01.097Z",
+  "generated_at": "2026-11-04T03:18:05.346Z",
   "source": "GitHub PR-created cohort via existing HH PR Monitor; exact stage events from GitHub API",
   "window": {
     "hours": 48,
@@ -13,8 +13,8 @@
     "end": "2026-11-04T02:20:01.097Z"
   },
   "coverage": {
-    "timeline_checked": 4,
-    "ci_checked": 4,
+    "timeline_checked": 2,
+    "ci_checked": 2,
     "failed_reads": 0,
     "cohort": {
       "schema": "HH_PR_CREATED_COHORT_V1",
@@ -23,46 +23,33 @@
       "stage_events_complete": false
     },
     "recent_head_readback": {
-      "at": "2026-11-04T02:20:01.097Z",
+      "at": "2026-11-04T03:18:05.346Z",
       "prs": [
-        3257,
         3301,
-        3303,
-        3288,
-        3323,
-        3242,
-        2169,
-        3329,
-        3331
+        3303
       ],
-      "read_success": 9
+      "read_success": 2
     },
     "legacy_unverified_ready_removed": 5,
     "incremental": {
-      "at": "2026-11-04T02:20:01.097Z",
-      "previous_generated_at": "2026-11-04T01:24:34.096Z",
+      "at": "2026-11-04T03:18:05.346Z",
+      "previous_generated_at": "2026-11-04T02:20:01.097Z",
       "new_prs_added": [],
       "updated_prs": [
-        3257,
         3301,
-        3303,
-        3288,
-        3323
+        3303
       ],
       "verified_native_merges_production": [
-        3257
+        3301
       ],
       "verified_instrumented_live_events": [
-        3257
+        3301
       ],
       "verified_exact_head_success_runs": [
-        41755858248,
-        41755858097,
-        41755858352
-      ],
-      "verified_new_head_active_runs": [
-        41758469714,
-        41758469687
+        41761156886,
+        41761156730,
+        41761156743,
+        41761156735
       ],
       "stage_events_complete": false,
       "unknown_first_ci_for_cohort": true,
@@ -2521,7 +2508,7 @@
             "workflow_run_id": 41659780177,
             "run_attempt": 1,
             "queued_at": "2026-11-03T15:02:56Z",
-            "started_at": null,
+            "started_at": "2026-11-03T15:20:48Z",
             "completed_at": null,
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)",
@@ -2532,7 +2519,7 @@
             "workflow_run_id": 41659780122,
             "run_attempt": 1,
             "queued_at": "2026-11-03T15:02:56Z",
-            "started_at": null,
+            "started_at": "2026-11-03T15:10:39Z",
             "completed_at": null,
             "conclusion": "failure",
             "actor": "GitHub Actions (process; owner not established)",
@@ -2545,9 +2532,9 @@
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T02:20:01.097Z",
+      "observed_at_utc": "2026-11-04T03:18:05.346Z",
       "mergeable_state": "dirty",
-      "observation_note": "Unchanged source SHA, current DIRTY; #3301 not merged, parent-first. Old exact-head Core and Mandala true failed, no broad rerun or source takeover."
+      "observation_note": "GitHub mergeable=false on unchanged source HEAD after parent #3301 merged at 2026-11-04T02:42:44Z (merge 689f2a16). Triage canonical routing issue #1419 comment 6621565254 -> Conflict :45 single source-preserving reconcile due 03:45Z. Old exact-head source CI failures from 2026-11-03 remain historical and cannot authorize merge after production advance."
     },
     {
       "number": 3302,
@@ -2582,14 +2569,32 @@
       "number": 3301,
       "url": "https://github.com/andylitvinov-design/books/pull/3301",
       "title": "fix(video): free narration of the exact selected phrase in any of six voices",
-      "state": "open",
+      "state": "closed",
       "created_at": "2026-11-03T13:24:21Z",
-      "merged_at": null,
-      "head_sha": "38073cb861df9134c881a84a51d7375a47f8124d",
+      "merged_at": "2026-11-04T02:42:44Z",
+      "head_sha": "c7f789943c09aa1829179f4e29d453cad8cd4c61",
       "stamps": {
         "created": {
           "at": "2026-11-03T13:24:21Z",
           "source": "github:created_at",
+          "verified": true
+        },
+        "CI_green": {
+          "at": "2026-11-04T02:41:58Z",
+          "source": "github:actions/runs/41761156886/job/126352891912",
+          "actor": "GitHub Actions (Core+Specialist/Mandala)",
+          "verified": true
+        },
+        "merged": {
+          "at": "2026-11-04T02:42:44Z",
+          "source": "github:pulls/3301/merged_at",
+          "actor": "GitHub native auto-merge",
+          "verified": true
+        },
+        "LIVE_verified": {
+          "at": "2026-11-04T02:50:30.273Z",
+          "source": "instrumented:github:pulls/3301/issues/comments/6621212885;vercel:dpl_7u7Z7eGGhEh8R1v61YwjNPT2dDj1",
+          "actor": "HH LIVE monitor (instrumented)",
           "verified": true
         }
       },
@@ -2644,17 +2649,62 @@
             "conclusion": null,
             "actor": "GitHub Actions (process; owner not established)",
             "source": "github:actions/runs/41758469687;jobs/126340143636,126340566908"
+          },
+          {
+            "head_sha": "c7f789943c09aa1829179f4e29d453cad8cd4c61",
+            "workflow_run_id": 41761156886,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T02:30:11Z",
+            "started_at": "2026-11-04T02:30:15Z",
+            "completed_at": "2026-11-04T02:41:58Z",
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41761156886;jobs/126348926914,126348927236,126352891912"
+          },
+          {
+            "head_sha": "c7f789943c09aa1829179f4e29d453cad8cd4c61",
+            "workflow_run_id": 41761156730,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T02:30:11Z",
+            "started_at": "2026-11-04T02:30:15Z",
+            "completed_at": "2026-11-04T02:41:38Z",
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41761156730;jobs/126348926794,126349149609"
+          },
+          {
+            "head_sha": "c7f789943c09aa1829179f4e29d453cad8cd4c61",
+            "workflow_run_id": 41761156743,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T02:30:11Z",
+            "started_at": "2026-11-04T02:30:15Z",
+            "completed_at": "2026-11-04T02:30:42Z",
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41761156743;job/126348926473"
+          },
+          {
+            "head_sha": "c7f789943c09aa1829179f4e29d453cad8cd4c61",
+            "workflow_run_id": 41761156735,
+            "run_attempt": 1,
+            "queued_at": "2026-11-04T02:30:11Z",
+            "started_at": "2026-11-04T02:30:15Z",
+            "completed_at": "2026-11-04T02:30:48Z",
+            "conclusion": "success",
+            "actor": "GitHub Actions (process; owner not established)",
+            "source": "github:actions/runs/41761156735;job/126348926504"
           }
         ]
       },
-      "closed_at": null,
-      "updated_at": "2026-11-04T02:05:50Z",
+      "closed_at": "2026-11-04T02:42:44Z",
+      "updated_at": "2026-11-04T02:50:55Z",
       "base": "codex/public-book-library",
       "draft": false,
       "current_draft": false,
-      "observed_at_utc": "2026-11-04T02:20:01.097Z",
-      "mergeable_state": "clean",
-      "observation_note": "NEW HEAD CLEAN; Core lint SUCCESS, Specialist RUNNING, Mandala WebKit RUNNING, Guard/actionlint SUCCESS. Prior 1b669d DIRTY and WebKit failure STALE. Native fast lane, no Triage approval/CI rerun. #3303 parent-first."
+      "observed_at_utc": "2026-11-04T03:18:05.346Z",
+      "mergeable_state": "merged",
+      "observation_note": "GitHub protected merge after exact-head Core 41761156886, Specialist and hh-merge-check success, Mandala/WebKit 41761156730 success, Guard/actionlint success. Vercel historical served 689f2a16 at 02:50:30.273Z, not necessarily current production tip. #3303 remains DIRTY and requires single-owner reconcile.",
+      "merge_commit_sha": "689f2a16ac3a2f4c682e0ae47c84978a8885a84f"
     },
     {
       "number": 3300,
