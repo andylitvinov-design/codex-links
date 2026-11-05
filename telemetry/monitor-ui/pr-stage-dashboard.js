@@ -36,7 +36,33 @@
  const link=p=>'<a href="https://github.com/andylitvinov-design/books/pull/'+Number(p.number)+'" target="_blank" rel="noopener noreferrer">#'+Number(p.number)+'</a>';
  const number=v=>Number.isFinite(v)?v:0;
  const PRODUCTION='codex/public-book-library';
- let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(),error=null,headAudit=null,auditError=null;
+ const RECENT_LIMIT=75*60000,REPO_ID='andylitvinov-design/books';
+ const fresh=(raw,now)=>{const at=ts(raw);return at!==null&&at<=now+60000&&at>=now-RECENT_LIMIT};
+ const validCohort=(v,now)=>v?.schema==='HH_PR_CREATED_COHORT_V1'&&v.repo===REPO_ID&&
+  Array.isArray(v.rows)&&v.rows.length<=1000&&fresh(v.generated_at,now);
+ const validLedger=(v,now)=>{const from=ts(v?.window?.from),to=ts(v?.window?.to);
+  return v?.schema==='HH_PR_TRANSITION_LEDGER_V1'&&v.repo===REPO_ID&&
+   Array.isArray(v.prs)&&v.prs.length<=1000&&from!==null&&to!==null&&from<=to&&
+   fresh(v.generated_at,now)&&fresh(v.window.to,now)&&to<=ts(v.generated_at)+60000;
+ };
+ const validAudit=(v,now)=>{const from=ts(v?.scope?.window_from),to=ts(v?.scope?.window_to);
+  return v?.schema==='HH_PR_HEAD_LIFECYCLE_AUDIT_V1'&&v.repo===REPO_ID&&
+   Array.isArray(v.records)&&v.records.length<=500&&from!==null&&to!==null&&from<=to&&
+   fresh(v.recorded_at,now)&&fresh(v.scope.window_to,now);
+ };
+ function chooseEvidence(c,l,a,now=Date.now()){
+  const messages=[],cohort=validCohort(c,now)?c:null,clock=ts(cohort?.generated_at)??now;
+  const ledger=cohort&&validLedger(l,clock)?l:null;
+  const audit=cohort&&validAudit(a,clock)?a:null;
+  if(c&&!cohort)messages.push('Когорта созданных PR устарела или не подтверждена.');
+  if(l&&!ledger)messages.push('Архив переходов '+human(l.generated_at)+
+   ' устарел или не соответствует текущему окну; его события не участвуют в расчёте.');
+  if(ledger&&ledger.coverage?.cohort?.stage_events_complete!==true)
+   messages.push('Подтверждена только часть этапов, недостающие интервалы неизвестны.');
+  if(a&&!audit)messages.push('Архив HEAD '+human(a.recorded_at)+' устарел или не относится к окну.');
+  return {cohort,ledger,audit,messages};
+ }
+ let host=null,ledger=null,cohortData=null,hours=24,scope='all',openGroups=new Set(),error=null,headAudit=null,auditError=null,sourceNotices=[];
  function aggregate(nums){
   const v=nums.filter(x=>typeof x==='number'&&Number.isFinite(x)&&x>=0).sort((a,b)=>a-b),n=v.length;
   return {n,mean:n?v.reduce((a,b)=>a+b,0)/n:null,
@@ -211,7 +237,7 @@
    ['После коммита → старт Runner','Изменение финального SHA → первый подтверждённый успешный job на этом SHA.'],
    ['Финальные проверки до Merge Gate','Первый job → успешный hh-merge-check. Включает ожидания между проверками, не равно расходу runner-минут.'],
    ['Merge Gate → Merged','Успешный защитный GitHub check → фактическое слияние.'],
-   ['После коммита: недостаточно меток CI','Остаток известного PR после последнего коммита без подтверждённого полного маршрута Runner → Gate → Merge.'],
+   ['После коммита: нет подтверждённого CI-маршрута','Остаток известного PR после последнего коммита без подтверждённого полного маршрута Runner → Gate → Merge.'],
    ['Нет проверенной даты финального коммита','Длительность PR, для которых последняя коммитная метка отсутствует или недостоверна.']
   ];
   const table=data.map(([name,note],i)=>'<tr'+(i>=4?' class="ph-unallocated"':'')+'><td><strong>'+(i+1)+'. '+e(name)+'</strong>'+
@@ -244,7 +270,7 @@
    '<p class="ph-decomp-guide">Восстановлено по проверяемым датам последнего коммита и GitHub Actions. Это <b>временные границы, а не догадки о причинах задержки</b>. Все строки используют один знаменатель — '+a.total.n+' PR.</p>'+
    '<table class="ph-breakdown-table"><thead><tr><th>Период</th><th>Вклад</th></tr></thead>'+
    '<tbody>'+table+'<tr class="ph-breakdown-total"><td><strong>Итого Created → Merged</strong><small>Среднее по '+a.total.n+' смерженным PR</small></td><td class="ph-stage-value">'+moneyMin(a.total.mean)+'<small>мин/PR</small></td></tr></tbody></table>'+
-   '<p class="ph-decomp-note"><b>Охват истории: '+b.audited.length+' / '+a.total.n+' PR</b>. GitHub-коммит датирован в GitHub, но время фактического push может отличаться. Значения «нет меток» нельзя считать простоями. Время LIVE после merge здесь не участвует.</p>'+
+   '<p class="ph-decomp-note"><b>Охват истории: '+b.audited.length+' / '+a.total.n+' PR</b>. GitHub-коммит датирован в GitHub, но время фактического push может отличаться. Неизмеренные интервалы нельзя считать доказанным простоем. Время LIVE после merge здесь не участвует.</p>'+
    '<div class="ph-proof-preview"><h4>Когда: самые долгие проверенные PR</h4>'+preview+'</div>'+
    (missing?'<details class="ph-proof-list"><summary>Где пока нет достоверной истории: '+b.notAudited.length+' PR <span>⌄</span></summary><div class="ph-proof-rows">'+missing+'</div></details>':'')+
    '<details class="ph-proof-list"><summary>Когда именно: '+Math.min(12,b.audited.length)+' самых долгих PR с датами и ссылками <span>⌄</span></summary>'+
@@ -273,7 +299,7 @@
    '<div class="ph-bars" role="img" aria-label="Подтверждённые участки и нераспределённое время">'+bar+'</div>'+
    '<table class="ph-breakdown-table"><thead><tr><th scope="col">Составляющая</th><th scope="col">Вклад</th></tr></thead>'+
    '<tbody>'+rows+
-   '<tr class="ph-unallocated"><td><div class="ph-stage-label"><span class="ph-key ph-key-unknown"></span><strong>Не распределено — нет меток</strong></div>'+
+   '<tr class="ph-unallocated"><td><div class="ph-stage-label"><span class="ph-key ph-key-unknown"></span><strong>Нет подтверждённых событий перехода</strong></div>'+
    '<small>Реальное время внутри Created → Merged, для которого пока нет достоверных границ этапов</small></td>'+
    '<td class="ph-stage-value">'+moneyMin(unallocated)+'<small>мин/PR</small></td></tr>'+
    '<tr class="ph-breakdown-total"><td><strong>Итого Created → Merged</strong><small>Среднее по '+a.total.n+' завершённым PR</small></td>'+
@@ -310,8 +336,9 @@
    '<div class="ph-total-live"><small>От создания до LIVE (отдельно)</small><strong>'+fmt(a.live.mean)+' <em>мин</em></strong><span>'+a.live.n+' PR с проверенным LIVE</span></div></div>'+
    '<p class="ph-summary"><b>Создано '+s.all.length+' PR</b> · <b>Смержено '+s.merged.length+'</b> · <b>Ещё открыто '+s.pending.length+'</b> · закрыто без merge '+s.closed.length+
    '. Среднее рассчитано по <b>'+m.n+' завершённым PR</b> из когорты созданных за '+hours+' ч.</p></section>'+
+   (sourceNotices.length?'<p class="ph-warning" data-source-coverage="partial">'+sourceNotices.map(e).join(' ')+'</p>':'')+
    compositionCard(a)+
-   '<div class="ph-category-head"><h3>Технические этапы CI</h3><span>Отдельная статистика по PR с метками</span></div>'+
+   '<div class="ph-category-head"><h3>Технические этапы CI</h3><span>Только подтверждённые события этапов</span></div>'+
    '<div class="ph-categories">'+a.groups.map((g,i)=>phaseHTML(g,i,m.n,g.contribution)).join('')+'</div>'+
    '<section class="ph-post"><h3>Повторы CI и потери</h3>'+
    '<div class="ph-postrow"><span>PR с собранной CI-телеметрией</span><b>'+ci.length+' / '+s.merged.length+'</b></div>'+
@@ -320,10 +347,13 @@
    '<p class="ph-note">Недостающие HEAD и неохваченные PR не считаются нулевыми повторами. Triage и Repair — условные маршруты. Отсутствие их меток не означает задержку или ноль минут.</p></section>'+
    holdersCard(a)+
    '<div class="ph-foot"><p>Период по <b>created_at</b>: '+human(new Date(s.begin).toISOString())+' — '+human(new Date(s.asOf).toISOString())+'. Ветка: '+(scope==='all'?'все':'только '+PRODUCTION)+'.</p>'+
-   '<p>Источник среднего: '+e(s.source)+'. Журнал подэтапов: '+human(ledger&&ledger.generated_at)+
-   ' · timeline '+(ledger&&ledger.coverage&&ledger.coverage.timeline_checked||0)+'/'+(ledger&&ledger.prs&&ledger.prs.length||0)+
-   ' · CI '+(ledger&&ledger.coverage&&ledger.coverage.ci_checked||0)+'/'+(ledger&&ledger.prs&&ledger.prs.length||0)+'.</p>'+
-   '<p>Детализация неполная: подтверждено чтение timeline '+(ledger&&ledger.coverage&&ledger.coverage.timeline_checked||0)+' PR за последнее обновление, но полный охват не доказан. Незаписанный интервал никогда не считается нулём. <button type="button" data-reload="1">Обновить данные</button></p></div>';
+   '<p>Источник среднего: '+e(s.source)+'. '+
+    (ledger?'Архив этапов: '+human(ledger.generated_at)+
+     ' · timeline '+(ledger.coverage?.timeline_checked??'—')+'/'+ledger.prs.length+
+     ' · CI '+(ledger.coverage?.ci_checked??'—')+'/'+ledger.prs.length:
+     'Свежий архив этапов отсутствует: неподтверждённые интервалы UNKNOWN.')+'</p>'+
+   '<p>Средние этапов рассчитаны только по подтверждённым парам событий (n/N). '+
+    'Отсутствие подтверждения не равно нулю. <button type="button" data-reload="1">Обновить данные</button></p></div>';
   window.HHRecentPR?.mount(host);
   window.HHCohortCompare?.mount(host);
  }
@@ -345,11 +375,14 @@
        return audit;
       })
     ]);
-    cohortData=results[0].status==='fulfilled'&&Array.isArray(results[0].value.rows)?results[0].value:null;
-    ledger=results[1].status==='fulfilled'&&Array.isArray(results[1].value.prs)?results[1].value:null;
-    headAudit=results[2].status==='fulfilled'?results[2].value:null;
+    const rawC=results[0].status==='fulfilled'?results[0].value:null;
+    const rawL=results[1].status==='fulfilled'?results[1].value:null;
+    const rawA=results[2].status==='fulfilled'?results[2].value:null;
+    const chosen=chooseEvidence(rawC,rawL,rawA);
+    cohortData=chosen.cohort;ledger=chosen.ledger;headAudit=chosen.audit;
+    sourceNotices=chosen.messages;
     auditError=results[2].status==='rejected'?String(results[2].reason?.message||results[2].reason):null;
-    if(!cohortData&&!ledger)throw Error('Недоступны GitHub cohort и журнал этапов');
+    if(!cohortData)throw Error('Нет подтверждённой свежей когорты GitHub PR');
     render();
   }catch(ex){error=String(ex.message||ex);render()}
  }
