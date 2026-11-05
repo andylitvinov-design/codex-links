@@ -9,7 +9,8 @@ const marker=" if(document.readyState==='loading')";
 assert.ok(source.includes(marker),'browser entrypoint must exist');
 const injected=source.replace(marker,
  ` window.__probe={set:(data,h)=>{ledger=data;cohortData=null;hours=h;scope='all';error=null},
-  analysis,compositionCard,phaseHTML,render,mount,setHost:v=>{host=v}};
+  analysis,compositionCard,phaseHTML,render,mount,setHost:v=>{host=v},
+  chooseEvidence,validCohort,validLedger,validAudit};
  ${marker}`);
 
 const pr=(number,mergedAt,stamps={})=>({
@@ -72,7 +73,7 @@ test('table is near the top, before expanded diagnostics; direct first-stage ave
  assert.ok(html.indexOf('Среднее время одного PR от создания до merge')>=0);
  assert.ok(html.indexOf('Разложение среднего до merge')>html.indexOf('Среднее время одного PR от создания до merge'));
  assert.ok(html.indexOf('Технические этапы CI')>html.indexOf('Разложение среднего до merge'));
- assert.match(html,/Не распределено — нет меток/);
+ assert.match(html,/Нет подтверждённых событий перехода/);
  assert.match(html,/30,00/);
  assert.match(html,/45,00/);
  assert.match(html,/Создан → Очередь CI/);
@@ -89,4 +90,42 @@ test('empty created cohort never invents zero-minute phase durations',()=>{
  assert.equal(a.total.mean,null);
  assert.match(html,/пока нет PR/);
  assert.doesNotMatch(html,/0,00 мин\/PR/);
+});
+
+test('old 05:17 archive and 05:43 audit are excluded from current 23:45 cohort',()=>{
+ const {probe}=harness(),now=Date.parse('2026-11-04T23:45:00Z');
+ const cohort={schema:'HH_PR_CREATED_COHORT_V1',repo:'andylitvinov-design/books',generated_at:'2026-11-04T23:44:00Z',rows:ledger.prs};
+ const old={schema:'HH_PR_TRANSITION_LEDGER_V1',repo:'andylitvinov-design/books',
+  generated_at:'2026-11-04T05:17:28.125Z',
+  window:{from:'2026-11-02T04:13:51.633Z',to:'2026-11-04T04:13:51.633Z',complete:false},
+  coverage:{cohort:{stage_events_complete:false}},prs:ledger.prs};
+ const audit={schema:'HH_PR_HEAD_LIFECYCLE_AUDIT_V1',repo:'andylitvinov-design/books',
+  recorded_at:'2026-11-04T05:43:06.935Z',
+  scope:{window_from:'2026-11-03T04:13:51.633Z',window_to:'2026-11-04T04:13:51.633Z'},records:[]};
+ const selected=probe.chooseEvidence(cohort,old,audit,now);
+ assert.equal(selected.cohort,cohort);
+ assert.equal(selected.ledger,null);
+ assert.equal(selected.audit,null);
+ assert.equal(selected.messages.length,2);
+});
+test('recent partial evidence is retained only as an explicitly partial sample',()=>{
+ const {probe}=harness(),now=Date.parse('2026-11-04T23:45:00Z');
+ const cohort={schema:'HH_PR_CREATED_COHORT_V1',repo:'andylitvinov-design/books',generated_at:'2026-11-04T23:44:00Z',rows:ledger.prs};
+ const recent={schema:'HH_PR_TRANSITION_LEDGER_V1',repo:'andylitvinov-design/books',
+  generated_at:'2026-11-04T23:44:00Z',
+  window:{from:'2026-11-02T23:40:00Z',to:'2026-11-04T23:40:00Z',complete:false},
+  coverage:{cohort:{stage_events_complete:false}},prs:ledger.prs};
+ const selected=probe.chooseEvidence(cohort,recent,null,now);
+ assert.equal(selected.ledger,recent);
+ assert.match(selected.messages.join(' '),/часть этапов/);
+ assert.equal(probe.validLedger({...recent,window:{...recent.window,to:'2026-11-05T04:00:00Z'}},now),false);
+});
+test('stale created cohort never substitutes stale ledger as current statistics',()=>{
+ const {probe}=harness(),now=Date.parse('2026-11-04T23:45:00Z');
+ const old={schema:'HH_PR_CREATED_COHORT_V1',repo:'andylitvinov-design/books',
+  generated_at:'2026-11-04T05:17:00Z',rows:ledger.prs};
+ const selected=probe.chooseEvidence(old,ledger,null,now);
+ assert.equal(selected.cohort,null);
+ assert.equal(selected.ledger,null);
+ assert.equal(probe.validCohort(old,now),false);
 });
