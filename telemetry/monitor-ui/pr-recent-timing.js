@@ -4,7 +4,7 @@
  if(window.HHRecentPR)return;
  const GH='https://api.github.com/repos/andylitvinov-design/books';
  const PROD='codex/public-book-library';
- const state={status:'idle',rows:[],at:null,error:null,selected:null,details:new Map(),loading:new Set()};
+ const state={status:'idle',rows:[],at:null,error:null,selected:null,details:new Map(),loading:new Set(),expanded:false,version:0};
  let target=null;
  const t=x=>{const z=Date.parse(x||'');return Number.isFinite(z)?z:null};
  const diff=(a,b)=>a!==null&&b!==null&&b>=a?(b-a)/60000:null;
@@ -14,6 +14,20 @@
  const esc=x=>String(x==null?'':x).replace(/[&<>"']/g,z=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[z]));
  const dur=x=>{if(x===null||!Number.isFinite(x)||x<0)return '—';const k=Math.round(x*60);return k>=3600?Math.floor(k/3600)+' ч '+Math.floor(k%3600/60)+' мин':k>=60?Math.floor(k/60)+' мин '+String(k%60).padStart(2,'0')+' с':k+' с'};
  const local=x=>x===null?'—':new Date(x).toLocaleString('ru-RU',{timeZone:'America/Toronto',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+ const fullLocal=x=>x===null?'—':new Date(x).toLocaleString('ru-RU',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+ const latestFirst=rows=>rows.slice().sort((a,b)=>t(b.merged_at)-t(a.merged_at));
+ function summary(title){
+  const raw=String(title||'').replace(/\s+/g,' ').trim();
+  const hit=/^(?:feat|fix|refactor|perf|style|test|docs|ci|chore|build)(?:\(([\w-]+)\))?!?:\s*(.*)$/i.exec(raw);
+  const topic=(hit?.[1]||'').toLowerCase();
+  const topics={video:'Видео',mytube:'Видеомонтаж',ci:'CI и PR',messenger:'Мессенджер',telegram:'Telegram',
+   audio:'Аудио',voice:'Голос',cabinet:'Кабинет',library:'Библиотека',reiki:'Reiki',
+   app:'Приложение',frontend:'Интерфейс',monitor:'Мониторинг',performance:'Скорость',
+   perf:'Скорость',tests:'Тесты',payment:'Оплата',billing:'Оплата',xp:'Кредиты'};
+  const body=(hit?hit[2]:raw)||'Обновление проекта';
+  const concise=body.length>94?body.slice(0,91).replace(/\s+\S*$/,'')+'…':body;
+  return (topics[topic]?topics[topic]+': ':'')+concise;
+ }
  const jobUrl=x=>typeof x==='string'&&/^https:\/\/github\.com\/andylitvinov-design\/books\/actions\/runs\/\d+\/job\/\d+$/.test(x);
  async function read(url){
   if(typeof url!=='string'||!url.startsWith(GH+'/'))throw Error('INVALID_GITHUB_API_PATH');
@@ -94,17 +108,15 @@
   if(state.status==='loading')return;
   state.status='loading';state.error=null;draw();
   try{
-   const payload=await read(GH+'/pulls?state=closed&sort=updated&direction=desc&per_page=40');
+   // A single bounded GitHub read: the latest merged PR is available before
+   // any expensive per-HEAD CI detail. Historical duration is not the sort key.
+   const payload=await read(GH+'/pulls?state=closed&sort=updated&direction=desc&per_page=100');
    if(!Array.isArray(payload))throw Error('Некорректный список GitHub PR');
-   const recent=payload.map(normalize).filter(Boolean).sort((a,b)=>t(b.merged_at)-t(a.merged_at)).slice(0,8);
-   const rows=[];
-   for(let i=0;i<recent.length;i+=2){
-    const pair=await Promise.all(recent.slice(i,i+2).map(async p=>{
-     try{return analyzeChecks(p,await read(GH+'/commits/'+p.head_sha+'/check-runs?per_page=100'))}
-     catch(ex){return {...p,ci:'unavailable',readError:String(ex?.message||ex)}}}));
-    rows.push(...pair);
-   }
-   state.rows=rows;state.at=new Date().toISOString();state.status='ready';
+   state.rows=latestFirst(payload.map(normalize).filter(Boolean)).slice(0,8);
+   state.at=new Date().toISOString();
+   state.version++;
+   if(!state.rows.some(x=>x.number===state.selected))state.selected=null;
+   state.status='ready';
   }catch(ex){state.status='error';state.error=String(ex?.message||ex)}
   draw();
  }
@@ -112,19 +124,28 @@
   const row=state.rows.find(x=>x.number===num);
   if(!row)return;
   if(state.selected===num){state.selected=null;draw();return}
-  state.selected=num;draw();
-  if(state.details.has(num)||state.loading.has(num)||row.ci!=='verified')return;
-  const rid=/\/actions\/runs\/(\d+)\/job\/\d+$/.exec(row.gate?.url||'')?.[1];
-  if(!rid||!/^\d{8,16}$/.test(rid)){state.details.set(num,{error:'Нет точного workflow run ID'});draw();return}
+  state.selected=num;
+  if(state.details.has(num)||state.loading.has(num)){draw();return}
   state.loading.add(num);draw();
+  const version=state.version;
   try{
+   const checked=analyzeChecks(row,await read(GH+'/commits/'+row.head_sha+'/check-runs?per_page=100'));
+   if(version!==state.version)return;
+   state.rows=state.rows.map(x=>x.number===num?checked:x);
+   if(checked.ci!=='verified'){
+    state.details.set(num,{error:'Нет полного подтверждённого финального CI для этого HEAD'});
+    return;
+   }
+   const rid=/\/actions\/runs\/(\d+)\/job\/\d+$/.exec(checked.gate?.url||'')?.[1];
+   if(!rid||!/^\d{8,16}$/.test(rid))throw Error('Нет точного workflow run ID');
    const [run,jobs,commits,runHistory]=await Promise.all([
     read(GH+'/actions/runs/'+rid),read(GH+'/actions/runs/'+rid+'/jobs?per_page=100'),
     read(GH+'/pulls/'+num+'/commits?per_page=100'),
-    read(GH+'/actions/runs?branch='+encodeURIComponent(row.head_branch)+'&per_page=100').catch(()=>null)]);
-   state.details.set(num,fromJobs(row,run,jobs,commits,runHistory));
-  }catch(ex){state.details.set(num,{error:String(ex?.message||ex)})}
-  state.loading.delete(num);draw();
+    read(GH+'/actions/runs?branch='+encodeURIComponent(checked.head_branch)+'&per_page=100').catch(()=>null)
+   ]);
+   if(version===state.version)state.details.set(num,fromJobs(checked,run,jobs,commits,runHistory));
+  }catch(ex){if(version===state.version)state.details.set(num,{error:String(ex?.message||ex)})}
+  finally{state.loading.delete(num);draw()}
  }
  function details(pr){
   if(pr.number!==state.selected)return '';
@@ -158,41 +179,52 @@
  }
  function draw(){
   if(!target)return;
-  let content='<div class="phr-head"><div><h3>Последние PR: где проходит время</h3>'+
-   '<small>Актуальные GitHub PR и точные проверки · '+(state.at?esc(local(t(state.at))):'данные загружаются')+' Торонто</small></div>'+
+  let content='<div class="phr-head"><div><h3>Последний смерженный PR</h3><small>GitHub · production · время Торонто</small></div>'+
    '<button type="button" data-refresh'+(state.status==='loading'?' disabled':'')+'>Обновить</button></div>';
-  if(state.status==='loading'||state.status==='idle')content+='<p class="phr-note">Собираю последние PR и GitHub checks…</p>';
+  if(state.status==='loading'||state.status==='idle')content+='<p class="phr-note">Обновляю историю GitHub…</p>';
   else if(state.status==='error')content+='<p class="phr-error">'+esc(state.error)+'</p>';
+  else if(!state.rows.length)content+='<p class="phr-note">Подтверждённых merge в полученной выборке нет. Можно обновить данные позже.</p>';
   else{
-   const rows=state.rows,values=rows.map(x=>x.total),avg=values.length?values.reduce((a,b)=>a+b,0)/values.length:null;
-   content+='<p class="phr-note">Последние <b>'+rows.length+' смерженных production PR</b> (отдельная выборка, не все PR за выбранные часы). Среднее: <b>'+dur(avg)+'</b>. Отсортировано по самым долгим.</p>';
-   for(const pr of rows.slice().sort((a,b)=>b.total-a.total)){
-    const pre=pr.first?m(pr.created_at,pr.first):null,ci=pr.first&&pr.gateAt?m(pr.first,pr.gateAt):null,post=pr.gateAt?m(pr.gateAt,pr.merged_at):null;
-    const complete=pr.ci==='verified'&&pre!==null&&ci!==null&&post!==null&&Math.abs(pre+ci+post-pr.total)<.02;
-    content+='<div class="phr-pr"><div class="phr-pr-title"><a href="https://github.com/andylitvinov-design/books/pull/'+pr.number+'" target="_blank" rel="noopener noreferrer">#'+pr.number+'</a>'+
-     '<strong>'+dur(pr.total)+'</strong></div><p>'+esc(pr.title)+'</p>'+
-     (complete?'<div class="phr-splits"><span>До Runner: <b>'+dur(pre)+'</b></span><span>Проверки: <b>'+dur(ci)+'</b></span><span>До merge: <b>'+dur(post)+'</b></span></div>'+
-      '<p class="phr-critical">Самая длительная требуемая проверка: <b>'+esc(pr.critical?.name||'—')+'</b> '+dur(pr.critical?.min??null)+'</p>':
-      '<p class="phr-note">Нет полных меток финального HEAD. Отсутствие данных не равно нулю.</p>')+
-     '<button type="button" data-pr="'+pr.number+'">'+(state.selected===pr.number?'Свернуть':'Где и когда — детали')+'</button>'+details(pr)+'</div>';
+   const newest=state.rows[0],rest=state.rows.slice(1);
+   content+='<article class="phr-latest"><div class="phr-latest-line">'+
+    '<a href="https://github.com/andylitvinov-design/books/pull/'+newest.number+'" target="_blank" rel="noopener noreferrer">PR #'+newest.number+'</a>'+
+    '<time datetime="'+esc(newest.merged_at)+'" title="GitHub merged_at">'+esc(fullLocal(t(newest.merged_at)))+' <span>Торонто</span></time></div>'+
+    '<p class="phr-essence" title="'+esc(newest.title)+'">'+esc(summary(newest.title))+'</p>'+
+    '<button type="button" class="phr-detail-link" data-pr="'+newest.number+'" aria-expanded="'+(state.selected===newest.number)+'">'+
+    (state.selected===newest.number?'Скрыть детали CI':'Детали времени CI')+'</button>'+
+    details(newest)+'</article>';
+   if(rest.length){
+    content+='<button type="button" class="phr-history-toggle" data-history aria-expanded="'+state.expanded+'">'+
+     (state.expanded?'Скрыть':'Показать')+' остальные '+rest.length+' PR <span aria-hidden="true">'+(state.expanded?'⌃':'⌄')+'</span></button>';
+    if(state.expanded){
+     content+='<div class="phr-history">'+rest.map(pr=>
+      '<div class="phr-mini"><div class="phr-mini-line"><a href="https://github.com/andylitvinov-design/books/pull/'+pr.number+'" target="_blank" rel="noopener noreferrer">#'+pr.number+'</a>'+
+       '<time datetime="'+esc(pr.merged_at)+'">'+esc(local(t(pr.merged_at)))+'</time></div>'+
+       '<p title="'+esc(pr.title)+'">'+esc(summary(pr.title))+'</p>'+
+       '<button type="button" class="phr-detail-link" data-pr="'+pr.number+'" aria-expanded="'+(state.selected===pr.number)+'">'+
+       (state.selected===pr.number?'Скрыть детали CI':'Детали CI')+'</button>'+details(pr)+'</div>'
+     ).join('')+'</div>';
+    }
    }
+   content+='<p class="phr-source">Последние '+state.rows.length+' подтверждённых merge из выборки до 100 закрытых PR GitHub, упорядоченные по фактическому merged_at. Детальная CI загружается только по запросу.</p>';
   }
-  content+='<p class="phr-note">Проверка при открытии и по нажатию, без cron и платных API. Предварительные интервалы могут включать доработки и ожидания; детальный разбор их не смешивает с очередью Runner.</p>';
   target.innerHTML=content;
  }
  function mount(host){
   if(!host)return;
-  const anchor=host.querySelector('.ph-composition');
+  const anchor=host.querySelector('.ph-header')||host.querySelector('.ph-composition');
   if(!anchor)return;
   target=document.createElement('section');target.className='ph-recent-live';
   target.addEventListener('click',ev=>{
-   const btn=ev.target?.closest?.('button[data-pr],button[data-refresh]');if(!btn)return;
+   const btn=ev.target?.closest?.('button[data-pr],button[data-refresh],button[data-history]');if(!btn)return;
    if(btn.hasAttribute('data-refresh')){void refresh();return}
+   if(btn.hasAttribute('data-history')){state.expanded=!state.expanded;draw();return}
    const num=Number(btn.getAttribute('data-pr'));if(n(num))void select(num);
   });
+  // Place the compact latest-merge summary directly under the monitor heading.
   anchor.insertAdjacentElement('afterend',target);
   draw();
   if(state.status==='idle')void refresh();
  }
- window.HHRecentPR={mount,normalize,analyzeChecks,fromJobs};
+ window.HHRecentPR={mount,normalize,analyzeChecks,fromJobs,summary,fullLocal,latestFirst};
 })();
